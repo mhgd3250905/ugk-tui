@@ -20,6 +20,29 @@
   ```
   想永久生效用 `setx DEEPSEEK_API_KEY sk-...`(新开窗口才生效)。
 
+## Windows 用户:修复 bash 工具(重要)
+
+pi 在 Windows 上默认找 bash,优先级是:Git Bash → PATH 上的 `bash.exe`。
+若没装 Git for Windows,会落到 PATH 上的 WSL `bash.exe`,而 WSL 默认发行版
+(如 docker-desktop)通常没有 `/bin/bash`,导致 pi 的 `bash` 工具报错:
+
+```
+WSL ERROR: execvpe /bin/bash failed 2
+```
+
+**解法**:让 pi 用 PowerShell。在 `~/.pi/agent/settings.json` 加一行:
+
+```json
+{
+  "shellPath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+}
+```
+
+pi 用 `powershell.exe -c "<命令>"` 执行(`-c` 即 `-Command`),兼容良好。
+验证:`ugk --print "用 bash 工具执行 git --version 并告诉我"` 应能正常返回。
+
+> 注:settings.json 在用户主目录,不进本仓库。装 Git for Windows 也可解决(无需改配置)。
+
 ## 试跑(不改任何配置)
 
 ```cmd

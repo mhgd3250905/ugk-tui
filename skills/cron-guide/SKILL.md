@@ -18,41 +18,20 @@ ugk 实例(任意)  ──HTTP──→  cron 服务(常驻)  ──到点──
 
 ---
 
-## 第一步:启动 cron 服务(必做)
+## 第一步:检查 cron 服务状态
 
-服务不启动,`cron` 工具的所有操作都会报"未启动"。
+**重要**:任何 cron 操作前,或用户提到定时任务时,agent 应**先用 `cron` 工具 `action=status` 检查服务是否在线**。
 
-```bash
-# 方式一:npm script(推荐)
-npm run cron:start
+- **在线**:返回 `✅ cron 服务在线`,任务数、端口等信息 → 可正常 add/list/remove/history
+- **离线**:返回 `❌ cron 服务未启动` → **告诉用户服务没起,让用户自行启动**(`npm run cron:start`)。**不要在 skill 里自动启动服务**——服务是用户的常驻进程,启动方式应由用户决定(手动 / 后台 / 开机自启),agent 不越界。
 
-# 方式二:直接 node
-node cron/service.ts
+服务在线时 status 返回示例:
 ```
-
-启动后看到:
+✅ cron 服务在线
+任务: N 个(已调度 N)
+端口: 17741
+地址: http://127.0.0.1:17741
 ```
-ugk cron 服务已启动:
-  HTTP  → http://127.0.0.1:17741
-  任务  → N 个已加载
-(Ctrl+C 退出)
-```
-
-这个终端窗口要保持开着(或后台跑)。验证:
-```bash
-curl http://127.0.0.1:17741/health
-# {"ok":true,"service":"ugk-cron",...}
-```
-
-### 开机自启(可选)
-
-用 Windows 任务计划程序设开机自动起服务:
-
-```cmd
-schtasks /create /tn "ugk-cron" /tr "node E:\AII\ugk-core\cron\service.ts" /sc onlogon /rl limited /f
-```
-
-删除:`schtasks /delete /tn "ugk-cron" /f`
 
 ---
 

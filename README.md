@@ -2,7 +2,9 @@
 
 基于 [pi-coding-agent](https://github.com/earendil-works/pi) 的本地定制化 agent(Pi Package 形式)。
 
-> 照搬官方示例模式(`hello.ts` / `permission-gate.ts` / `registerCommand`),不造轮子。
+> 照搬官方示例模式,不造轮子。扩展能力见 `extensions/`,知识见 `skills/`。
+
+---
 
 ## 前置
 
@@ -45,65 +47,126 @@ WSL ERROR: execvpe /bin/bash failed 2
 
 > 注:settings.json 在用户主目录,不进本仓库。
 
-## 试跑(不改任何配置)
-
-```cmd
-cd E:\AII\ugk-core
-set DEEPSEEK_API_KEY=sk-...
-pi -e extensions/index.ts --skill skills/ugk-guide --prompt-template prompts/welcome.md --provider deepseek --model deepseek-chat
-```
-
-非交互一次性跑(处理完退出):
-
-```cmd
-pi -e extensions/index.ts --provider deepseek --model deepseek-chat --print "用 greet 工具跟我打招呼,我叫 Sam"
-```
-
 ## 永久安装(写入 `~/.pi/agent/settings.json`)
 
 ```cmd
 pi install .
 ```
 
-装好后任意目录敲 `pi` 即自带本包的 greet 工具、`/ugk` 命令、skill、权限门。
+装好后任意目录敲 `pi` 即自带本包的全部能力(见下表)。
+
+## 安装 subagent 预设 agent(可选,推荐)
+
+subagent 工具本身随包加载,但 4 个预设 agent(`scout`/`planner`/`reviewer`/`worker`)
+需要复制到用户目录才生效:
+
+```bash
+# Git Bash
+mkdir -p ~/.pi/agent/agents
+cp /e/AII/ugk-core/agents/*.md ~/.pi/agent/agents/
+```
+
+详见 `skills/subagent-guide/SKILL.md`。
+
+---
+
+## 包含的能力(v0.4.0)
+
+### 自定义工具
+
+| 工具 | 作用 |
+| --- | --- |
+| `greet` | 演示用打招呼 |
+| `scrcpy` | 安卓投屏控制(start/stop/status/version) |
+| `subagent` | 子代理委派(single/parallel/chain 三模式) |
+
+### slash 命令
+
+| 命令 | 作用 |
+| --- | --- |
+| `/ugk` | 看 agent 状态 |
+| `/welcome` | 欢迎模板 |
+| `/check-env` | 一键自检 adb/scrcpy/设备连接 |
+| `/implement` | scout→planner→worker 全链路实现 |
+| `/scout-and-plan` | scout→planner(只到方案) |
+| `/implement-and-review` | worker→reviewer→worker |
+
+### @mention 手动触发
+
+输入 `@<agent名> <任务>` 自动改写为 subagent 委派:
+
+```
+@scout 找一下认证逻辑在哪
+@reviewer 审一下这次改动
+@worker 重构 utils.ts
+```
+
+### skills
+
+| skill | 作用 |
+| --- | --- |
+| `ugk-guide` | 占位示例 |
+| `adb-guide` | Android adb 操作大全(8 文件) |
+| `scrcpy-guide` | scrcpy 投屏安装与使用 |
+| `subagent-guide` | 子代理委派指南 |
+
+### 权限门
+
+危险 bash(`rm -rf` / `sudo` / `chmod 777`)弹确认;非交互模式直接拦截。
+
+---
 
 ## 验证(进入 pi 后输入)
 
 | 输入 | 期望 |
 | --- | --- |
-| `/ugk` | 弹出状态提示 |
-| `跟我打个招呼,我叫 Sam` | 模型调用 `greet` 工具 |
-| `/skill:ugk-guide` | 加载 skill |
-| `/welcome Sam` | 用 prompt 模板打印欢迎 |
+| `/ugk` | 弹出状态提示(列全部能力) |
+| `/check-env` | 自检 adb/scrcpy/设备 |
+| `跟我打个招呼,我叫 Sam` | 调 `greet` 工具 |
+| `@scout 列出项目目录` | 调 `subagent` 工具委派 scout |
 | `rm -rf /tmp/test` | 触发权限门(弹确认) |
 
-## 包含的能力
-
-| 类型 | 内容 | 来源(官方示例) |
-| --- | --- | --- |
-| 自定义工具 | `greet` | `examples/extensions/hello.ts` |
-| slash 命令 | `/ugk`、`/welcome` | `registerCommand` / prompt 模板 |
-| skill | `/skill:ugk-guide` | `SKILL.md` |
-| 权限门 | 危险 bash 确认 | `examples/extensions/permission-gate.ts` |
-| 人设 | `AGENTS.md` | 项目上下文 |
+---
 
 ## 目录结构
 
 ```
 ugk-core/
 ├── package.json              # Pi Package manifest(pi 字段)
-├── AGENTS.md                 # 人设(项目上下文注入)
+├── AGENTS.md                 # 人设 + 项目上下文(给 agent 看)
 ├── extensions/
-│   └── index.ts              # greet 工具 + /ugk 命令 + 权限门
+│   ├── index.ts              # 主入口:工具/命令注册 + @mention + 权限门 + check-env
+│   ├── subagent.ts           # subagent 工具(官方搬运 + Windows spawn 适配)
+│   └── subagent-agents.ts    # agent 配置发现
+├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)
+│   ├── scout.md              # 侦察(flash,只读)
+│   ├── planner.md            # 规划(pro,只读)
+│   ├── reviewer.md           # 审查(pro)
+│   └── worker.md             # 执行(pro,全工具)
 ├── skills/
-│   └── ugk-guide/
-│       └── SKILL.md          # 示例 skill
+│   ├── ugk-guide/            # 示例 skill
+│   ├── adb-guide/            # adb 操作大全
+│   ├── scrcpy-guide/         # scrcpy 投屏指南
+│   └── subagent-guide/       # 子代理委派指南
 └── prompts/
-    └── welcome.md            # /welcome 模板
+    ├── welcome.md            # /welcome 模板
+    ├── implement.md          # /implement 流水线
+    ├── scout-and-plan.md     # /scout-and-plan
+    └── implement-and-review.md
 ```
 
-## 可选二期(直接照搬官方示例,不造轮子)
+---
 
-- **plan-mode**:复制 `packages/coding-agent/examples/extensions/plan-mode/{index.ts,utils.ts}`
-- **subagent**:复制 `packages/coding-agent/examples/extensions/subagent/`(子 agent,spawn 独立 pi 进程)
-- **MCP**:pi 不内置 MCP;需要时安装第三方包 `pi-mcp-adapter`
+## 试跑(不改任何配置)
+
+```cmd
+cd E:\AII\ugk-core
+set DEEPSEEK_API_KEY=sk-...
+pi -e extensions/index.ts --provider deepseek --model deepseek-chat
+```
+
+非交互一次性跑:
+
+```cmd
+pi -e extensions/index.ts --provider deepseek --model deepseek-chat --print "用 greet 工具跟我打招呼,我叫 Sam"
+```

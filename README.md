@@ -70,7 +70,7 @@ cp /e/AII/ugk-core/agents/*.md ~/.pi/agent/agents/
 
 ---
 
-## 包含的能力(v0.4.0)
+## 包含的能力(v0.5.0)
 
 ### 自定义工具
 
@@ -79,6 +79,7 @@ cp /e/AII/ugk-core/agents/*.md ~/.pi/agent/agents/
 | `greet` | 演示用打招呼 |
 | `scrcpy` | 安卓投屏控制(start/stop/status/version) |
 | `subagent` | 子代理委派(single/parallel/chain 三模式) |
+| `cron` | 定时任务管理(status/list/add/remove/history) |
 
 ### slash 命令
 
@@ -90,6 +91,14 @@ cp /e/AII/ugk-core/agents/*.md ~/.pi/agent/agents/
 | `/implement` | scout→planner→worker 全链路实现 |
 | `/scout-and-plan` | scout→planner(只到方案) |
 | `/implement-and-review` | worker→reviewer→worker |
+
+### cron 定时服务(独立常驻进程)
+
+```bash
+npm run cron:start   # 启动常驻服务(127.0.0.1:17741)
+```
+
+到点自动起 `ugk --print` 子进程跑 agent 任务,结果存 `~/.pi/agent/cron-output/`。在 ugk 对话里用 `cron` 工具增删改查任务。详见 `skills/cron-guide/SKILL.md`。
 
 ### @mention 手动触发
 
@@ -109,6 +118,7 @@ cp /e/AII/ugk-core/agents/*.md ~/.pi/agent/agents/
 | `adb-guide` | Android adb 操作大全(8 文件) |
 | `scrcpy-guide` | scrcpy 投屏安装与使用 |
 | `subagent-guide` | 子代理委派指南 |
+| `cron-guide` | 定时任务指南 |
 
 ### 权限门
 
@@ -137,7 +147,11 @@ ugk-core/
 ├── extensions/
 │   ├── index.ts              # 主入口:工具/命令注册 + @mention + 权限门 + check-env
 │   ├── subagent.ts           # subagent 工具(官方搬运 + Windows spawn 适配)
-│   └── subagent-agents.ts    # agent 配置发现
+│   ├── subagent-agents.ts    # agent 配置发现
+│   ├── cron.ts               # cron 工具(代理常驻服务 HTTP API)
+│   └── ui-*.ts               # UI 美化(footer/状态条/标题栏spinner)
+├── cron/
+│   └── service.ts            # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)
 │   ├── scout.md              # 侦察(flash,只读)
 │   ├── planner.md            # 规划(pro,只读)
@@ -147,7 +161,8 @@ ugk-core/
 │   ├── ugk-guide/            # 示例 skill
 │   ├── adb-guide/            # adb 操作大全
 │   ├── scrcpy-guide/         # scrcpy 投屏指南
-│   └── subagent-guide/       # 子代理委派指南
+│   ├── subagent-guide/       # 子代理委派指南
+│   └── cron-guide/           # 定时任务指南
 └── prompts/
     ├── welcome.md            # /welcome 模板
     ├── implement.md          # /implement 流水线

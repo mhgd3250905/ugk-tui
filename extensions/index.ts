@@ -42,10 +42,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Show ugk-pi-agent status",
 		handler: async (_args, ctx) => {
 			const deepseekStatus = DEEPSEEK_CONFIGURED
-				? "deepseek: 已配置(用 --model deepseek-chat 或进 TUI 用 /login)"
+				? "deepseek: 已配置(deepseek-chat,默认)"
 				: "deepseek: 未配置(设 DEEPSEEK_API_KEY 启用)";
 			ctx.ui.notify(
-				`ugk-pi-agent active\n工具: greet · 命令: /ugk · skill: /skill:ugk-guide\n${deepseekStatus}\n危险 bash 有权限门`,
+				`ugk-pi-agent active\n工具: greet · 命令: /ugk /welcome · skill: /skill:ugk-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
 				"info",
 			);
 		},

@@ -70,7 +70,7 @@ cp /e/AII/ugk-core/agents/*.md ~/.pi/agent/agents/
 
 ---
 
-## 包含的能力(v0.5.0)
+## 包含的能力(v0.6.0)
 
 ### 自定义工具
 
@@ -88,9 +88,15 @@ cp /e/AII/ugk-core/agents/*.md ~/.pi/agent/agents/
 | `/ugk` | 看 agent 状态 |
 | `/welcome` | 欢迎模板 |
 | `/check-env` | 一键自检 adb/scrcpy/设备连接 |
+| `/plan` | 切换 plan-mode 只读探索模式(或 Ctrl+Alt+P) |
+| `/todos` | 查看 plan-mode 计划进度 |
 | `/implement` | scout→planner→worker 全链路实现 |
 | `/scout-and-plan` | scout→planner(只到方案) |
 | `/implement-and-review` | worker→reviewer→worker |
+
+### plan-mode 只读探索模式
+
+`/plan` 进入只读模式:工具限制为 read/bash/grep/find/ls,bash 命令过白名单(只放行只读命令,拦 rm/git commit/npm install)。agent 产出 `Plan:` 编号计划后,可选择执行(恢复全部工具)/继续规划/精炼。执行阶段用 `[DONE:n]` 跟踪进度,状态栏显示 `📋 N/M`。
 
 ### cron 定时服务(独立常驻进程)
 
@@ -149,6 +155,8 @@ ugk-core/
 │   ├── subagent.ts           # subagent 工具(官方搬运 + Windows spawn 适配)
 │   ├── subagent-agents.ts    # agent 配置发现
 │   ├── cron.ts               # cron 工具(代理常驻服务 HTTP API)
+│   ├── plan-mode.ts          # plan-mode 只读探索模式(/plan 切换)
+│   ├── plan-mode-utils.ts    # plan-mode 工具(bash 白名单 + 计划提取)
 │   └── ui-*.ts               # UI 美化(footer/状态条/标题栏spinner)
 ├── cron/
 │   └── service.ts            # 常驻定时服务(node-cron + HTTP,npm run cron:start)

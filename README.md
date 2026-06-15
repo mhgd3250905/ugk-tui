@@ -22,26 +22,28 @@
 
 ## Windows 用户:修复 bash 工具(重要)
 
-pi 在 Windows 上默认找 bash,优先级是:Git Bash → PATH 上的 `bash.exe`。
-若没装 Git for Windows,会落到 PATH 上的 WSL `bash.exe`,而 WSL 默认发行版
-(如 docker-desktop)通常没有 `/bin/bash`,导致 pi 的 `bash` 工具报错:
+pi 在 Windows 上默认找 bash,但**只查 `C:\Program Files\Git`** 两个标准路径。
+若你的 Git for Windows 装在别处(如 `D:\Git`),pi 找不到就会退到 PATH 上的
+WSL `bash.exe`,而 WSL 默认发行版(如 docker-desktop)没有 `/bin/bash`,
+导致 pi 的 `bash` 工具报错:
 
 ```
 WSL ERROR: execvpe /bin/bash failed 2
 ```
 
-**解法**:让 pi 用 PowerShell。在 `~/.pi/agent/settings.json` 加一行:
+**解法**:找到你的 Git Bash 路径(通常 `<Git安装目录>\bin\bash.exe`),
+写进 `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "shellPath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+  "shellPath": "D:\\Git\\bin\\bash.exe"
 }
 ```
 
-pi 用 `powershell.exe -c "<命令>"` 执行(`-c` 即 `-Command`),兼容良好。
-验证:`ugk --print "用 bash 工具执行 git --version 并告诉我"` 应能正常返回。
+用 Git Bash 优于 PowerShell:agent(DeepSeek 等)更熟悉 Linux 命令语法,
+出错率更低。验证:`ugk --print "用 bash 工具执行 ls -la 并告诉我"`。
 
-> 注:settings.json 在用户主目录,不进本仓库。装 Git for Windows 也可解决(无需改配置)。
+> 注:settings.json 在用户主目录,不进本仓库。
 
 ## 试跑(不改任何配置)
 

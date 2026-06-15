@@ -18,6 +18,7 @@ import { discoverAgents } from "./subagent-agents.ts";
 import registerUiFooter from "./ui-footer.ts";
 import registerUiStatusline from "./ui-statusline.ts";
 import registerUiTitlebar from "./ui-titlebar.ts";
+import registerCron from "./cron.ts";
 
 // DeepSeek 原生支持检测(仅供 /ugk 状态显示用)
 const DEEPSEEK_CONFIGURED = !!process.env.DEEPSEEK_API_KEY;
@@ -341,7 +342,10 @@ export default function (pi: ExtensionAPI) {
 	registerUiStatusline(pi);
 	registerUiTitlebar(pi);
 
-	// 1.3) @mention 手动触发:输入 @<agent名> <任务> → 改写为指示主 agent 委派的消息
+	// 1.3) cron 定时任务(代理常驻 cron 服务的 HTTP API)
+	registerCron(pi);
+
+	// 1.4) @mention 手动触发:输入 @<agent名> <任务> → 改写为指示主 agent 委派的消息
 	//      agent 名从 discoverAgents 动态读(不写死),保持可配置。
 	//      模式借自 inline-bash.ts:pi.on("input") 返回 { action: "transform", text }
 	pi.on("input", async (event, _ctx) => {
@@ -372,7 +376,7 @@ export default function (pi: ExtensionAPI) {
 				? "deepseek: 已配置(deepseek-chat,默认)"
 				: "deepseek: 未配置(设 DEEPSEEK_API_KEY 启用)";
 			ctx.ui.notify(
-				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · subagent(子代理) · 命令: /ugk /welcome /check-env /footer · @agent名 手动委派 · UI: footer+状态条+标题栏spinner · skill: ugk-guide · adb-guide · scrcpy-guide · subagent-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
+				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · subagent(子代理) · cron(定时) · 命令: /ugk /welcome /check-env /footer · @agent名 手动委派 · UI: footer+状态条+标题栏spinner · skill: ugk-guide · adb-guide · scrcpy-guide · subagent-guide · cron-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
 				"info",
 			);
 		},

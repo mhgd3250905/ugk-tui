@@ -13,6 +13,8 @@
 import { spawn, execSync } from "node:child_process";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import registerSubagent from "./subagent.ts";
+import { discoverAgents } from "./subagent-agents.ts";
 
 // DeepSeek 原生支持检测(仅供 /ugk 状态显示用)
 const DEEPSEEK_CONFIGURED = !!process.env.DEEPSEEK_API_KEY;
@@ -325,6 +327,32 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool(greetTool);
 	pi.registerTool(scrcpyTool);
 
+	// 1.1) subagent 工具(从官方 subagent 示例搬运 + Windows spawn 适配)
+	registerSubagent(pi);
+
+	// 1.2) @mention 手动触发:输入 @<agent名> <任务> → 改写为指示主 agent 委派的消息
+	//      agent 名从 discoverAgents 动态读(不写死),保持可配置。
+	//      模式借自 inline-bash.ts:pi.on("input") 返回 { action: "transform", text }
+	pi.on("input", async (event, _ctx) => {
+		const text = event.text;
+		// 匹配行首或空格后的 @agentname,后接任务文本
+		const match = text.match(/^\s*@([\w-]+)\s+([\s\S]+)/);
+		if (!match) return { action: "continue" };
+
+		const agentName = match[1];
+		const task = match[2].trim();
+
+		// 确认是已注册的 agent(避免误吞 @github 用户名等)
+		const { agents } = discoverAgents(process.cwd(), "user");
+		if (!agents.some((a) => a.name === agentName)) {
+			return { action: "continue" };
+		}
+
+		// 改写为明确的委派指令,让主 agent 调 subagent 工具
+		const transformed = `用 subagent 工具完成以下任务(强制指定 agent="${agentName}",task 内容如下):\n\n${task}`;
+		return { action: "transform", text: transformed, images: event.images };
+	});
+
 	// 2) slash 命令
 	pi.registerCommand("ugk", {
 		description: "Show ugk-pi-agent status",
@@ -333,7 +361,7 @@ export default function (pi: ExtensionAPI) {
 				? "deepseek: 已配置(deepseek-chat,默认)"
 				: "deepseek: 未配置(设 DEEPSEEK_API_KEY 启用)";
 			ctx.ui.notify(
-				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · 命令: /ugk /welcome /check-env · skill: ugk-guide · adb-guide · scrcpy-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
+				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · subagent(子代理) · 命令: /ugk /welcome /check-env · @agent名 手动委派 · skill: ugk-guide · adb-guide · scrcpy-guide · subagent-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
 				"info",
 			);
 		},

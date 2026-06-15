@@ -1,0 +1,16 @@
+# Dependencies (local resolution for extension TS imports)
+node_modules/
+
+# Lockfile (peer-dep resolution, not a real app)
+package-lock.json
+
+# pi runtime artifacts
+.pi/
+*.log
+
+# Temp / editor
+.tmp_*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

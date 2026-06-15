@@ -39,8 +39,8 @@ function findScrcpy(): string | null {
 		// 落到兜底
 	}
 	// 2) 查已知目录
+	const fs = require("node:fs");
 	for (const dir of SCRCPY_DIRS) {
-		const fs = require("node:fs");
 		const candidate = `${dir}\\scrcpy.exe`;
 		try {
 			if (fs.existsSync(candidate)) return candidate;
@@ -49,6 +49,105 @@ function findScrcpy(): string | null {
 		}
 	}
 	return null;
+}
+
+// 本机 adb 的候选位置(按优先级)。findAdb 用于环境自检和 scrcpy 工具启动。
+const ADB_PATHS = [
+	ADB_PATH, // 项目默认位置(E:\platform-tools)
+	"E:\\platform-tools\\adb.exe",
+	process.env.LOCALAPPDATA &&
+		`${process.env.LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe\\platform-tools\\adb.exe`,
+	process.env.ANDROID_HOME && `${process.env.ANDROID_HOME}\\platform-tools\\adb.exe`,
+	process.env.ANDROID_SDK_ROOT && `${process.env.ANDROID_SDK_ROOT}\\platform-tools\\adb.exe`,
+].filter(Boolean) as string[];
+
+// 解析 adb 可执行文件路径。PATH 优先,否则查候选目录。
+function findAdb(): string | null {
+	// 1) PATH 能否直接解析
+	try {
+		execSync("adb version", { encoding: "utf8", stdio: "ignore", timeout: 8000 });
+		return "adb";
+	} catch {
+		// 落到候选
+	}
+	// 2) 查候选路径
+	const fs = require("node:fs");
+	for (const candidate of ADB_PATHS) {
+		try {
+			if (fs.existsSync(candidate)) return candidate;
+		} catch {
+			// 忽略
+		}
+	}
+	return null;
+}
+
+// 环境自检:检测 adb / scrcpy / 设备连接三件套,返回诊断文本(供 /check-env 命令用)
+function checkEnv(): string {
+	const lines: string[] = ["🔍 ugk 环境自检", ""];
+
+	// adb
+	const adbBin = findAdb();
+	if (adbBin) {
+		let ver = "?";
+		try {
+			ver = execSync(`"${adbBin}" version`, { encoding: "utf8", timeout: 8000 }).split(/\r?\n/)[0];
+		} catch {
+			/* 忽略 */
+		}
+		lines.push(`✅ adb      ${ver}  [${adbBin}]`);
+	} else {
+		lines.push("❌ adb      未找到");
+	}
+
+	// 设备(只在 adb 可用时查)
+	if (adbBin) {
+		try {
+			const dev = execSync(`"${adbBin}" devices -l`, { encoding: "utf8", timeout: 8000 });
+			const devices = dev
+				.trim()
+				.split(/\r?\n/)
+				.slice(1)
+				.filter((l) => l.trim());
+			if (devices.length === 0) {
+				lines.push("⚠️  设备     无设备连接(插线/开 USB 调试/点允许)");
+			} else {
+				const ok = devices.filter((l) => /\bdevice\b/.test(l));
+				const bad = devices.filter((l) => !/\bdevice\b/.test(l));
+				lines.push(`✅ 设备     ${ok.length} 台在线` + (bad.length ? `  ·  ${bad.length} 台异常(offline/unauthorized)` : ""));
+				for (const d of devices) lines.push(`           ${d.trim()}`);
+			}
+		} catch {
+			lines.push("❌ 设备     查询失败");
+		}
+	} else {
+		lines.push("⏭️  设备     跳过(adb 不可用)");
+	}
+
+	// scrcpy
+	const scrcpyBin = findScrcpy();
+	if (scrcpyBin) {
+		let ver = "?";
+		try {
+			ver = execSync(`"${scrcpyBin}" --version`, { encoding: "utf8", timeout: 8000 }).split(/\r?\n/)[0];
+		} catch {
+			/* 忽略 */
+		}
+		lines.push(`✅ scrcpy   ${ver}  [${scrcpyBin === "scrcpy" ? "PATH" : scrcpyBin}]`);
+	} else {
+		lines.push("❌ scrcpy   未找到");
+	}
+
+	// 安装指引(只列缺失项)
+	const missing: string[] = [];
+	if (!adbBin) missing.push("  winget install Google.PlatformTools  # adb");
+	if (!scrcpyBin) missing.push("  winget install Genymobile.scrcpy      # scrcpy");
+	if (missing.length) {
+		lines.push("", "缺失项安装命令(winget):", ...missing);
+	} else {
+		lines.push("", "✅ 全部就绪,可直接投屏。");
+	}
+	return lines.join("\n");
 }
 
 // ---- 自定义工具(照搬 hello.ts 模式)----
@@ -162,9 +261,21 @@ const scrcpyTool = defineTool({
 		}
 
 		// action === "start"
-		// 先确认设备在线(快速 fail,避免 scrcpy 卡在等待设备)
+		// 先解析 adb(支持装在别处),再确认设备在线(快速 fail,避免 scrcpy 卡在等待设备)
+		const adbBin = findAdb();
+		if (!adbBin) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: "❌ 找不到 adb。先安装:\n  winget install Google.PlatformTools\n再跑 /check-env 验证,或用 action=version 重新检测 scrcpy。",
+					},
+				],
+				details: { started: false },
+			};
+		}
 		try {
-			const dev = execSync(`"${ADB_PATH}" devices`, { encoding: "utf8", timeout: 10000 });
+			const dev = execSync(`"${adbBin}" devices`, { encoding: "utf8", timeout: 10000 });
 			if (!/\bdevice\b/.test(dev) || /List of devices attached/.test(dev) && dev.trim().split(/\r?\n/).length < 3) {
 				return {
 					content: [
@@ -185,7 +296,7 @@ const scrcpyTool = defineTool({
 		try {
 			// detached + unref:让 scrcpy 独立于 agent 进程运行,工具立即返回
 			const child = spawn(scrcpyBin!, args, {
-				env: { ...process.env, ADB: ADB_PATH },
+				env: { ...process.env, ADB: adbBin },
 				detached: true,
 				stdio: "ignore",
 				windowsHide: false,
@@ -195,7 +306,7 @@ const scrcpyTool = defineTool({
 				content: [
 					{
 						type: "text",
-						text: `🚀 scrcpy 投屏已启动(后台)\nADB: ${ADB_PATH}${args.length ? `\n参数: ${args.join(" ")}` : ""}\n关闭窗口或用 action=stop 停止。`,
+						text: `🚀 scrcpy 投屏已启动(后台)\nADB: ${adbBin}${args.length ? `\n参数: ${args.join(" ")}` : ""}\n关闭窗口或用 action=stop 停止。`,
 					},
 				],
 				details: { started: true, pid: child.pid, args },
@@ -222,9 +333,17 @@ export default function (pi: ExtensionAPI) {
 				? "deepseek: 已配置(deepseek-chat,默认)"
 				: "deepseek: 未配置(设 DEEPSEEK_API_KEY 启用)";
 			ctx.ui.notify(
-				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · 命令: /ugk /welcome · skill: ugk-guide · adb-guide · scrcpy-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
+				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · 命令: /ugk /welcome /check-env · skill: ugk-guide · adb-guide · scrcpy-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
 				"info",
 			);
+		},
+	});
+
+	// 2.1) /check-env:一键自检 adb / scrcpy / 设备连接,新环境首次用投屏前跑这个
+	pi.registerCommand("check-env", {
+		description: "自检 adb/scrcpy/设备连接,缺失项给安装命令",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(checkEnv(), "info");
 		},
 	});
 

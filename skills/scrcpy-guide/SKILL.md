@@ -16,7 +16,24 @@ description: scrcpy 安卓投屏指南。涵盖检测/安装(winget)、启动投
 
 ## 第一步:检测与安装
 
-先确认 scrcpy 是否已装:
+> **新环境首选**:直接让用户跑 `/check-env` 命令,它会一键检测 adb / scrcpy / 设备连接,缺失项直接给 winget 安装命令。下面是手动流程,适用于 `/check-env` 不可用或需要细节排查时。
+
+投屏依赖两样东西:**adb** 和 **scrcpy**。两者都可能缺失(尤其全新环境)。按顺序检测:
+
+### 1.1 检测 adb(先决条件,scrcpy 要靠它连设备)
+
+```bash
+adb version 2>&1 | head -3            # 或全路径: E:/platform-tools/adb.exe version
+```
+
+- **出版本号** → adb OK,跳到 1.2。
+- **找不到** → 装它:
+  ```bash
+  winget install Google.PlatformTools --accept-package-agreements --accept-source-agreements
+  ```
+  装完**新开 cmd 窗口**验证 `adb version`(旧窗口 PATH 没刷新)。装在 `E:/platform-tools` 的情况用全路径调用。
+
+### 1.2 检测 scrcpy
 
 ```bash
 scrcpy --version 2>&1 | head -5
@@ -25,12 +42,9 @@ scrcpy --version 2>&1 | head -5
 - **能出版本号**(如 `scrcpy 4.0`)→ 已装,跳到「核心速查」开始投屏。
 - **报 `'scrcpy' 不是内部或外部命令`** → 未装,按下面装。
 
-### 用 winget 安装(推荐)
-
-本机有 winget。**安装前先确认 adb 设备在线**(scrcpy 启动时要用):
+### 1.3 用 winget 装 scrcpy(推荐)
 
 ```bash
-E:/platform-tools/adb.exe devices -l      # 确认设备 authorized
 winget install Genymobile.scrcpy --accept-package-agreements --accept-source-agreements
 ```
 
@@ -42,6 +56,8 @@ scrcpy --version
 
 - 出版本号 → 成功。新开的 cmd 窗口 PATH 才生效(旧窗口看不到新加的 PATH)。
 - 仍找不到 → 走手动下载兜底(见下)。
+
+> **注意**:本包的 `scrcpy` 工具内置了 `findScrcpy()` 兜底,即使当前 shell 的 PATH 没刷新(winget 刚装完常见),工具也能从 winget 标准安装目录找到 scrcpy。手动命令则必须新开窗口。
 
 ### 手动下载兜底(winget 不可用时)
 

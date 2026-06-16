@@ -50,6 +50,7 @@ UGK is an npm package that wraps pi rather than replacing pi internals.
 | 3 | `fix: tighten plan mode readonly command checks` | Boundary design and cleanup | `extensions/plan-mode-utils.ts`, `tests/plan-mode-utils.test.ts`, `package.json`, this file | Plan mode claimed read-only semantics but allowed `curl URL \| sh` and `curl -o file` because the whitelist only checked the command prefix. Progress tracking also counted unmatched `[DONE:n]` markers as updates. | `node --test tests/plan-mode-utils.test.ts` passed: 3 tests; `npm test` passed: 64 tests |
 | 4 | `docs: align stable capability documentation` | Documentation and operator status | `README.md`, `AGENTS.md`, this file | Stable-stage docs were stale: AGENTS still said v0.6.0, README omitted `chrome_cdp`, `/cdp`, `/ugk-ui`, `chrome-cdp-guide`, and used an obsolete fixed test count. | `rg "v0\\.6\\.0\|25 个" README.md AGENTS.md` returned no matches; `npm test` passed: 64 tests |
 | 5 | `fix: remove cron service inline require` | Module decoupling and runtime boundary | `cron/agent-bin.ts`, `cron/service.ts`, `tests/cron-agent-bin.test.ts`, `package.json`, this file | `cron/service.ts` runs in the package's ESM context but detected `ugk` with an inline `require("child_process")` inside job execution. That could fail only when a scheduled job fires, making the boundary hard to diagnose. | `node --test tests/cron-agent-bin.test.ts` passed: 2 tests; `npm test` passed: 66 tests |
+| 6 | `feat: show cron stderr snippets in history` | Logging and operator status | `extensions/cron-contract.ts`, `tests/cron-contract.test.ts`, this file | The cron service persisted `stderrSnippet` for failed runs, but `history` did not show it. Users had to open the full output file for even a short failure reason. | `node --test tests/cron-contract.test.ts` passed: 3 tests; `npm test` passed: 67 tests |
 
 ## Findings
 
@@ -138,6 +139,10 @@ Open review items:
 - Review user-facing notifications for consistency, useful next actions, and secret safety.
 - Prefer concise status text over noisy internals.
 
+Fixed in slice 6:
+
+- Cron history now shows the persisted stderr snippet for failed runs, keeping the full output file path while surfacing the immediate failure reason.
+
 ## Verification History
 
 | Time | Command | Result |
@@ -151,3 +156,5 @@ Open review items:
 | 2026-06-17 slice 4 full | `npm test` | Passed: 64 tests, 0 failures |
 | 2026-06-17 slice 5 focused | `node --test tests/cron-agent-bin.test.ts` | Passed: 2 tests, 0 failures |
 | 2026-06-17 slice 5 full | `npm test` | Passed: 66 tests, 0 failures |
+| 2026-06-17 slice 6 focused | `node --test tests/cron-contract.test.ts` | Passed: 3 tests, 0 failures |
+| 2026-06-17 slice 6 full | `npm test` | Passed: 67 tests, 0 failures |

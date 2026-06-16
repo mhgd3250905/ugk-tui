@@ -56,7 +56,8 @@ export function formatCronRunHistory(runs: CronRun[]): string {
 	const lines = runs.map((r) => {
 		const icon = r.exitCode === 0 ? "✅" : r.exitCode === null ? "⏳" : "❌";
 		const fin = r.finishedAt ? ` → exit=${r.exitCode}` : " (进行中)";
-		return `${icon} ${r.jobName}${fin}\n   ${r.startedAt}${r.outputFile ? `\n   输出:${r.outputFile}` : ""}`;
+		const stderr = r.stderrSnippet && r.exitCode !== 0 && r.exitCode !== null ? `\n   错误:${r.stderrSnippet}` : "";
+		return `${icon} ${r.jobName}${fin}\n   ${r.startedAt}${r.outputFile ? `\n   输出:${r.outputFile}` : ""}${stderr}`;
 	});
 	return `执行历史(最近 ${runs.length} 条):\n\n${lines.join("\n\n")}`;
 }

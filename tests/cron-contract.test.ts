@@ -53,3 +53,21 @@ test("formats cron health, job list, created job, and history text", () => {
 		/^执行历史\(最近 1 条\):/,
 	);
 });
+
+test("formatCronRunHistory includes stderr snippets for failed runs", () => {
+	const text = formatCronRunHistory([
+		{
+			id: "run_1",
+			jobId: "job_1",
+			jobName: "daily",
+			startedAt: "2026-06-16T00:00:00.000Z",
+			finishedAt: "2026-06-16T00:00:02.000Z",
+			exitCode: 1,
+			outputFile: "out.txt",
+			stderrSnippet: "missing API key",
+		},
+	]);
+
+	assert.match(text, /❌ daily → exit=1/);
+	assert.match(text, /错误:missing API key/);
+});

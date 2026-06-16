@@ -1,0 +1,13 @@
+node_modules/
+package-lock.json
+.pi/
+*.log
+.tmp_*
+.superpowers/
+.DS_Store
+**/.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*_副本.md
+ugk-agent-*.tgz

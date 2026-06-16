@@ -25,6 +25,7 @@ import registerUiTitlebar from "./ui-titlebar.ts";
 import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
+import registerChromeCdp from "./chrome-cdp/index.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 
 // ---- 自定义工具(照搬 hello.ts 模式)----
@@ -67,6 +68,9 @@ export default function (pi: ExtensionAPI) {
 	// 1.3b) plan-mode:只读探索模式(/plan 切换,bash 白名单,计划提取+进度跟踪)
 	registerPlanMode(pi);
 
+	// 1.3c) chrome-cdp:受保护的本地登录态 Chrome 控制器(/cdp + chrome_cdp tool)
+	registerChromeCdp(pi);
+
 	// 1.4) @mention 手动触发:输入 @<agent名> <任务> → 改写为指示主 agent 委派的消息
 	//      agent 名从 discoverAgents 动态读(不写死),保持可配置。
 	//      模式借自 inline-bash.ts:pi.on("input") 返回 { action: "transform", text }
@@ -96,7 +100,7 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			const deepseekStatus = getDeepSeekStatus();
 			ctx.ui.notify(
-				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · subagent(子代理) · cron(定时) · 命令: /ugk /welcome /check-env /ugk-ui /footer /plan /todos · @agent名 手动委派 · UI: ugk品牌层+footer+状态条+标题栏spinner · skill: ugk-guide · adb-guide · scrcpy-guide · subagent-guide · cron-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
+				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · subagent(子代理) · cron(定时) · chrome_cdp(本地登录态 Chrome,ask-gated) · 命令: /ugk /welcome /check-env /ugk-ui /footer /plan /todos /cdp · @agent名 手动委派 · UI: ugk品牌层+footer+状态条+标题栏spinner · skill: ugk-guide · adb-guide · scrcpy-guide · subagent-guide · cron-guide · chrome-cdp-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
 				"info",
 			);
 		},

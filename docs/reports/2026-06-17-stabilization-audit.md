@@ -28,6 +28,21 @@ UGK has reached its first stable stage. This audit reviews and improves the proj
 - Prefer existing pi extension APIs and UGK module patterns over new abstractions.
 - Do not rewrite adjacent code without evidence that it blocks the audit goal.
 
+## Final Audit Conclusion
+
+The stable-stage audit completed across all eight requested dimensions. The branch keeps the existing UGK architecture, fixes concrete boundary and observability defects, removes proven redundancy, and updates the project-facing documentation to match the current v1.0.0 behavior.
+
+| Requested dimension | Result | Evidence |
+| --- | --- | --- |
+| Architecture design rationality | Sound overall; keep the thin CLI + pi extension composition model. | Architecture map below; no pi internals were replaced. |
+| Module decoupling rationality | Improved where a real shallow seam existed. | Slice 5 extracts cron agent binary detection into `cron/agent-bin.ts`. |
+| Boundary design rationality | Improved high-risk user input and read-only boundaries. | Slices 2, 3, and 5 cover CDP port input, plan-mode bash filtering, and cron ESM execution. |
+| Code simplicity and readability | Improved by removing a runtime-only inline expression and keeping changes local. | Slice 5 replaces inline `require` probing with a named helper. |
+| Redundant code removal | Removed or de-duplicated only when proven by tests/search. | Slices 7 and 8 cover ADB candidate duplication and unused `formatAgentList()`. |
+| Messy code cleanup | Cleanup stayed behavior-preserving and narrowly scoped. | All changes are small commits with focused tests or scans. |
+| Documentation completeness | Updated stale stable-stage docs. | Slice 4 aligns README and AGENTS with Chrome CDP, UI, plan-mode hardening, and current test wording. |
+| Logging/status completeness | Improved operator-facing failure visibility. | Slice 6 shows persisted cron stderr snippets in history output. |
+
 ## Current Architecture Map
 
 UGK is an npm package that wraps pi rather than replacing pi internals.
@@ -60,31 +75,32 @@ UGK is an npm package that wraps pi rather than replacing pi internals.
 
 Initial read: the core architecture is sound. UGK uses `bin/ugk.js` as a thin package entry and keeps product behavior in pi extension modules. This is the correct direction because it preserves upstream pi behavior and concentrates customization in extension seams.
 
-Open review items:
+Review result:
 
-- Confirm whether `extensions/index.ts` is only a composition root or has accumulated policy logic that deserves moving behind deeper modules.
-- Confirm whether user-facing status text is duplicated across README, skills, and `/ugk` output.
-- Confirm whether Chrome CDP launch/status behavior is fully documented and tested on Windows, macOS, and Linux.
+- `extensions/index.ts` is still acceptable as the composition root. It contains registration glue plus small status/resource discovery handlers; no broad extraction was made because the deeper capability modules already own the risky behavior.
+- User-facing docs were stale and were aligned in slice 4. `/ugk` already includes the current Chrome CDP and UI command set.
+- Chrome CDP launch behavior already has platform-focused launcher tests; this branch added boundary handling for invalid `/cdp port` input.
 
 ### Module Decoupling
 
 Initial read: most complex capabilities have a registration file plus pure helpers and tests. This is good for locality.
 
-Open review items:
+Review result:
 
-- Check if `subagent.ts` mixes schema, child-process orchestration, result assembly, and project-agent approval more tightly than needed.
-- Check if plan-mode state and UI rendering stay decoupled enough to test without pi.
-- Check if cron contract formatting stays shared between tool and service without leaking HTTP details to callers.
+- `subagent.ts` is large, but its external interface is cohesive: one tool with single/parallel/chain execution. No extraction was made without a failing test or clearer seam.
+- Plan-mode state and utility behavior are testable without pi; slice 3 added utility coverage for command safety and progress counting.
+- Cron formatting remains shared in `extensions/cron-contract.ts`; slice 6 extended that contract instead of duplicating history formatting in the tool.
 
 ### Boundary Design
 
 Initial read: the risky boundaries are process spawning, bash permission gates, local HTTP cron calls, CDP browser control, and file writes.
 
-Open review items:
+Review result:
 
-- Validate path and command handling in subagent prompt temp files and Chrome screenshot output.
-- Validate failed launch/status flows.
-- Validate cron service payload validation and error text.
+- CDP command input boundary was tightened in slice 2.
+- Plan-mode bash command boundary was tightened in slice 3.
+- Cron scheduled execution boundary was tightened in slice 5.
+- Existing CDP client tests cover screenshot file writes and online/offline status formatting; no additional path restriction was added because screenshot output path is an explicit tool parameter.
 
 Fixed in slice 2:
 
@@ -103,17 +119,17 @@ Fixed in slice 5:
 
 ### Code Simplicity And Readability
 
-Open review items:
+Review result:
 
-- Search for duplicate formatting, overly broad functions, and mixed concerns in large files.
-- Prefer extracting behavior only when it gives callers a smaller interface or improves test locality.
+- The inline cron binary detection was extracted because it improved locality and testability.
+- Other large modules were left intact where extraction would create churn without reducing caller knowledge.
 
 ### Redundant Code
 
-Open review items:
+Review result:
 
-- Search for unused exports and stale docs after recent Chrome CDP and UI additions.
-- Remove only code proven unused by `rg`, imports, and tests.
+- Duplicate ADB candidates were removed by general de-duplication.
+- The unused `formatAgentList()` export was removed after repository-wide search showed no callers.
 
 Fixed in slice 7:
 
@@ -125,17 +141,17 @@ Fixed in slice 8:
 
 ### Cleanup
 
-Open review items:
+Review result:
 
-- Keep cleanup behavior-preserving and small.
-- Avoid broad formatting churn.
+- Cleanup was split into small commits and did not include broad formatting changes.
+- All changed behavior has focused tests or explicit search evidence.
 
 ### Documentation
 
-Open review items:
+Review result:
 
-- Align README, skills, extension README files, and status command output.
-- Add operational notes for stable-stage maintenance where missing.
+- README and AGENTS now describe the current v1.0.0 capability surface and stable-stage boundaries.
+- Existing `skills/chrome-cdp-guide/SKILL.md` and `extensions/chrome-cdp/README.md` already cover the Chrome CDP operational flow; no duplicate copy was added there.
 
 Fixed in slice 4:
 
@@ -144,10 +160,11 @@ Fixed in slice 4:
 
 ### Logging And Status
 
-Open review items:
+Review result:
 
-- Review user-facing notifications for consistency, useful next actions, and secret safety.
-- Prefer concise status text over noisy internals.
+- CDP invalid port handling now returns an actionable warning instead of an exception.
+- Cron history now surfaces short stderr snippets while preserving the full output file path.
+- No broad logging was added to avoid noisy internals or accidental secret exposure.
 
 Fixed in slice 6:
 
@@ -172,3 +189,5 @@ Fixed in slice 6:
 | 2026-06-17 slice 7 full | `npm test` | Passed: 68 tests, 0 failures |
 | 2026-06-17 slice 8 dead-code scan | `rg "formatAgentList"` | No matches |
 | 2026-06-17 slice 8 full | `npm test` | Passed: 68 tests, 0 failures |
+| 2026-06-17 final branch scan | `git diff --stat origin/main...HEAD`; `git log --oneline origin/main..HEAD`; `rg "TODO|FIXME|v0\\.6\\.0|25 个|formatAgentList|require\\(" . -n` | Expected diff/log collected; stale-code scan only matched this report's evidence text |
+| 2026-06-17 final full | `npm test` | Passed: 68 tests, 0 failures |

@@ -166,6 +166,17 @@ export default function (pi: ExtensionAPI) {
 			// prompts 目录不存在则跳过
 		}
 
-		return { skillPaths, promptPaths };
+		const themePaths: string[] = [];
+		const themesDir = path.join(packageRoot, "themes");
+		try {
+			for (const entry of fs.readdirSync(themesDir, { withFileTypes: true })) {
+				if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+				themePaths.push(path.join(themesDir, entry.name));
+			}
+		} catch {
+			// themes 目录不存在则跳过
+		}
+
+		return { skillPaths, promptPaths, themePaths };
 	});
 }

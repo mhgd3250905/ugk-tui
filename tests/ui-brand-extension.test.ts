@@ -32,6 +32,8 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	assert.ok(flags.has("ugk-ui-off"));
 
 	const calls: string[] = [];
+	let headerFactory: Function | undefined;
+	let footerFactory: Function | undefined;
 	const ctx = {
 		cwd: "/Users/shengkai/projects/ugk-tui",
 		model: { id: "deepseek-v4-pro" },
@@ -42,8 +44,14 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 		},
 		getContextUsage: () => ({ percent: 12.3, contextWindow: 1000000 }),
 		ui: {
-			setHeader: (factory: unknown) => calls.push(`header:${typeof factory}`),
-			setFooter: (factory: unknown) => calls.push(`footer:${typeof factory}`),
+			setHeader: (factory: unknown) => {
+				headerFactory = factory as Function;
+				calls.push(`header:${typeof factory}`);
+			},
+			setFooter: (factory: unknown) => {
+				footerFactory = factory as Function;
+				calls.push(`footer:${typeof factory}`);
+			},
 			setTitle: (title: string) => calls.push(`title:${title}`),
 			setEditorComponent: () => calls.push("editor"),
 			notify: (message: string) => calls.push(`notify:${message}`),
@@ -55,4 +63,21 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 
 	assert.deepEqual(calls.slice(0, 3), ["header:function", "footer:function", "title:ugk - demo - ugk-tui"]);
 	assert.equal(calls.includes("editor"), false);
+
+	const theme = {
+		fg: (_color: string, text: string) => text,
+		bold: (text: string) => text,
+	};
+	const tui = { requestRender() {} };
+	const footerData = {
+		getGitBranch: () => "feature/ui-optimization",
+		getExtensionStatuses: () => new Map([["turn-progress", "✓ 第 1 轮完成"]]),
+		onBranchChange: () => () => {},
+	};
+
+	const header = headerFactory!(tui, theme);
+	const footer = footerFactory!(tui, theme, footerData);
+	assert.match(header.render(80).join("\n"), /ugk v1\.0\.0/);
+	assert.match(footer.render(80).join("\n"), /feature\/ui-optimization/);
+	assert.match(footer.render(80).join("\n"), /第 1 轮完成/);
 });

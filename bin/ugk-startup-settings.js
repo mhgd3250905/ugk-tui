@@ -4,6 +4,7 @@ import path from "node:path";
 
 const DEFAULT_AGENT_DIR = path.join(os.homedir(), ".pi", "agent");
 const DEFAULT_SKILLS = ["!skills/**"];
+const DEFAULT_THEME = "ugk-geek";
 
 function expandHome(input) {
 	if (input === "~") return os.homedir();
@@ -32,6 +33,11 @@ export function ensureUgkQuietStartupDefault(agentDir = getUgkAgentDir()) {
 
 	if (!Object.prototype.hasOwnProperty.call(nextSettings, "quietStartup")) {
 		nextSettings.quietStartup = true;
+		changed = true;
+	}
+
+	if (!Object.prototype.hasOwnProperty.call(nextSettings, "theme")) {
+		nextSettings.theme = DEFAULT_THEME;
 		changed = true;
 	}
 

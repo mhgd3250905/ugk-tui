@@ -76,3 +76,22 @@ test("ensureUgkQuietStartupDefault preserves explicit clear startup screen prefe
 	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
 	assert.equal(settings.clearStartupScreen, false);
 });
+
+test("ensureUgkQuietStartupDefault selects ugk geek theme when unset", () => {
+	const agentDir = makeTempAgentDir();
+
+	ensureUgkQuietStartupDefault(agentDir);
+
+	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+	assert.equal(settings.theme, "ugk-geek");
+});
+
+test("ensureUgkQuietStartupDefault preserves explicit theme preference", () => {
+	const agentDir = makeTempAgentDir();
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ theme: "dark" }, null, 2));
+
+	ensureUgkQuietStartupDefault(agentDir);
+
+	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+	assert.equal(settings.theme, "dark");
+});

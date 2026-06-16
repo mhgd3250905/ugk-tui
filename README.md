@@ -124,6 +124,31 @@ ugk --model deepseek-reasoner
 | `subagent` | 子代理委派(single/parallel/chain 三模式) |
 | `cron` | 定时任务管理(status/list/add/remove/history) |
 
+### ugk 品牌 UI
+
+ugk 默认通过 `extensions/ui-brand.ts` 加载一层独立的品牌 UI,只使用 pi 官方 extension API:
+
+- `ctx.ui.setHeader()` 替换启动顶部说明为 `ugk` 品牌区
+- `ctx.ui.setFooter()` 替换底部状态栏,保留 cwd/branch/token/model/轮次信息
+- `ctx.ui.setTitle()` 把终端标题改成 `ugk - <session> - <cwd>`
+- 不替换消息渲染、不替换 editor、不改 pi 内部运行逻辑
+
+临时关闭:
+
+```bash
+UGK_UI=0 ugk
+```
+
+运行中切换:
+
+```text
+/ugk-ui off
+/ugk-ui on
+/ugk-ui status
+```
+
+随包还提供 `themes/ugk-geek.json`,主色是低刺激荧光绿。可在 pi `/settings` 里选择 `ugk-geek`,或作为独立主题资源接入。
+
 ### slash 命令
 
 | 命令 | 作用 |
@@ -191,15 +216,17 @@ ugk-core/
 │   ├── cron.ts + cron-contract.ts  # cron 工具 + 共享类型
 │   ├── subagent.ts + subagent-runtime/rendering/agents.ts  # 子代理委派
 │   ├── plan-mode.ts + plan-mode-utils/state.ts  # plan 模式
-│   └── ui-*.ts               # UI 美化(footer/状态条/标题栏spinner)
+│   └── ui-*.ts               # UI 美化(品牌层/footer/状态条/标题栏spinner)
 ├── cron/
 │   └── service.ts            # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)
 │   ├── scout.md planner.md reviewer.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
 │   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide
+├── themes/
+│   └── ugk-geek.json         # ugk 极客绿主题
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)
-└── tests/                    # 20 个测试(纯逻辑覆盖)
+└── tests/                    # 25 个测试(纯逻辑覆盖)
 ```
 
 ---

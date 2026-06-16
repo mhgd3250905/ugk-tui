@@ -22,6 +22,7 @@ import { discoverAgents } from "./subagent-agents.ts";
 import registerUiFooter from "./ui-footer.ts";
 import registerUiStatusline from "./ui-statusline.ts";
 import registerUiTitlebar from "./ui-titlebar.ts";
+import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
@@ -55,6 +56,7 @@ export default function (pi: ExtensionAPI) {
 	//   - footer:底栏 token 统计 + git 分支 + 模型名(/footer 开关)
 	//   - statusline:底部状态条显示回合进度(●第N轮... / ✓完成)
 	//   - titlebar:agent 工作时终端标题栏转盲文 spinner
+	registerUgkBrandUi(pi);
 	registerUiFooter(pi);
 	registerUiStatusline(pi);
 	registerUiTitlebar(pi);
@@ -94,7 +96,7 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			const deepseekStatus = getDeepSeekStatus();
 			ctx.ui.notify(
-				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · subagent(子代理) · cron(定时) · 命令: /ugk /welcome /check-env /footer /plan /todos · @agent名 手动委派 · UI: footer+状态条+标题栏spinner · skill: ugk-guide · adb-guide · scrcpy-guide · subagent-guide · cron-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
+				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · subagent(子代理) · cron(定时) · 命令: /ugk /welcome /check-env /ugk-ui /footer /plan /todos · @agent名 手动委派 · UI: ugk品牌层+footer+状态条+标题栏spinner · skill: ugk-guide · adb-guide · scrcpy-guide · subagent-guide · cron-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
 				"info",
 			);
 		},

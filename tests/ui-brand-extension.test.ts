@@ -1,0 +1,58 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import registerUgkBrandUi from "../extensions/ui-brand.ts";
+
+test("ugk brand extension installs through safe extension UI hooks", async () => {
+	const handlers = new Map<string, Function>();
+	const commands = new Map<string, { handler: Function }>();
+	const flags = new Map<string, unknown>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand(name: string, options: { handler: Function }) {
+			commands.set(name, options);
+		},
+		registerFlag(name: string, options: unknown) {
+			flags.set(name, options);
+		},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+
+	assert.ok(handlers.has("session_start"));
+	assert.ok(handlers.has("session_shutdown"));
+	assert.ok(commands.has("ugk-ui"));
+	assert.ok(flags.has("ugk-ui-off"));
+
+	const calls: string[] = [];
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "deepseek-v4-pro" },
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => [],
+			getBranch: () => [],
+		},
+		getContextUsage: () => ({ percent: 12.3, contextWindow: 1000000 }),
+		ui: {
+			setHeader: (factory: unknown) => calls.push(`header:${typeof factory}`),
+			setFooter: (factory: unknown) => calls.push(`footer:${typeof factory}`),
+			setTitle: (title: string) => calls.push(`title:${title}`),
+			setEditorComponent: () => calls.push("editor"),
+			notify: (message: string) => calls.push(`notify:${message}`),
+			theme: {},
+		},
+	};
+
+	await handlers.get("session_start")!({ reason: "startup" }, ctx);
+
+	assert.deepEqual(calls.slice(0, 3), ["header:function", "footer:function", "title:ugk - demo - ugk-tui"]);
+	assert.equal(calls.includes("editor"), false);
+});

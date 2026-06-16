@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "cron:start": "node cron/service.ts",
-    "test": "node --test tests/subagent-runtime.test.ts tests/subagent-rendering.test.ts tests/device-env.test.ts tests/scrcpy-tool.test.ts tests/cron-contract.test.ts tests/plan-mode-state.test.ts tests/deepseek-status.test.ts"
+    "test": "node --test tests/subagent-runtime.test.ts tests/subagent-rendering.test.ts tests/device-env.test.ts tests/scrcpy-tool.test.ts tests/cron-contract.test.ts tests/plan-mode-state.test.ts tests/deepseek-status.test.ts tests/ui-brand-utils.test.ts tests/ui-brand-extension.test.ts"
   },
   "pi": {
     "extensions": [

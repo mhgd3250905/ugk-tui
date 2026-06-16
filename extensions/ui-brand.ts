@@ -26,12 +26,15 @@ function formatTitle(pi: ExtensionAPI, cwd: string): string {
 }
 
 function colorHeaderLine(line: string, index: number, theme: any): string {
-	if (index === 0) {
+	if (line.includes("█")) {
+		return theme.bold(theme.fg("success", line));
+	}
+	if (line.startsWith("ugk v")) {
 		const [brand, ...rest] = line.split("  // ");
 		const tail = rest.length ? `  // ${rest.join("  // ")}` : "";
 		return `${theme.bold(theme.fg("success", brand))}${theme.fg("dim", tail)}`;
 	}
-	if (index === 1) return theme.fg("muted", line);
+	if (index === 0 || line.startsWith("terminal coding agent")) return theme.fg("muted", line);
 	return line
 		.replace("model", theme.fg("dim", "model"))
 		.replace("/plan", theme.fg("success", "/plan"))

@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildUgkFooterLines, buildUgkHeaderLines, UGK_BRAND_COLORS } from "../extensions/ui-brand-utils.ts";
+import {
+	buildUgkFooterLines,
+	buildUgkHeaderLines,
+	buildUgkLogoLines,
+	UGK_BRAND_COLORS,
+} from "../extensions/ui-brand-utils.ts";
 
 test("buildUgkHeaderLines brands startup without pi copy", () => {
 	const lines = buildUgkHeaderLines({
@@ -11,11 +16,22 @@ test("buildUgkHeaderLines brands startup without pi copy", () => {
 	});
 
 	const text = lines.join("\n");
+	assert.match(text, /█/);
 	assert.match(text, /ugk v1\.0\.0/);
 	assert.match(text, /terminal coding agent/i);
 	assert.match(text, /deepseek-v4-pro/);
 	assert.match(text, /\/plan/);
 	assert.doesNotMatch(text, /\bpi v/i);
+});
+
+test("buildUgkLogoLines renders a compact block-character logo", () => {
+	const lines = buildUgkLogoLines(96);
+
+	assert.equal(lines.length, 5);
+	for (const line of lines) {
+		assert.match(line, /█/);
+		assert.ok(line.length <= 96, `line exceeded width: ${line}`);
+	}
 });
 
 test("buildUgkFooterLines keeps useful session status and truncates to width", () => {

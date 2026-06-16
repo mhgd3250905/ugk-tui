@@ -39,6 +39,14 @@ export interface UgkFooterOptions {
 	width: number;
 }
 
+const UGK_BLOCK_LOGO = [
+	"██  ██  █████  ██  ██",
+	"██  ██ ██      ██ ██ ",
+	"██  ██ ██  ███ ████  ",
+	"██  ██ ██   ██ ██ ██ ",
+	" ████   █████  ██  ██",
+];
+
 function hardTruncate(text: string, width: number): string {
 	if (width <= 0) return "";
 	const truncated = truncateToWidth(text, width, "");
@@ -61,9 +69,14 @@ function formatCwd(cwd: string): string {
 	return cwd;
 }
 
+export function buildUgkLogoLines(width: number): string[] {
+	return UGK_BLOCK_LOGO.map((line) => hardTruncate(line, width));
+}
+
 export function buildUgkHeaderLines(options: UgkHeaderOptions): string[] {
 	const model = options.modelId || "model not selected";
 	return [
+		...buildUgkLogoLines(options.width),
 		hardTruncate(`ugk v${options.version}  // ${options.cwdName}`, options.width),
 		hardTruncate("terminal coding agent · plan mode · subagents · cron · android tools", options.width),
 		hardTruncate(`model ${model} · /plan · /implement · /check-env · @agent`, options.width),

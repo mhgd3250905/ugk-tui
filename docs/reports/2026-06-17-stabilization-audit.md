@@ -48,6 +48,7 @@ UGK is an npm package that wraps pi rather than replacing pi internals.
 | 1 | `docs: add stabilization audit ledger` | Planning and traceability | `docs/superpowers/plans/2026-06-17-stabilization-audit.md`, this file | Establish a durable audit ledger before making optimization changes. | `npm test` passed: 60 tests |
 | 2 | `fix: handle invalid cdp port commands` | Boundary design and operator status | `extensions/chrome-cdp/index.ts`, `tests/chrome-cdp-extension.test.ts`, this file | `/cdp port nope` escaped as an exception from the command handler. Stable command boundaries should report invalid input as an actionable warning and preserve the previous port. | `node --test tests/chrome-cdp-extension.test.ts` passed: 6 tests; `npm test` passed: 61 tests |
 | 3 | `fix: tighten plan mode readonly command checks` | Boundary design and cleanup | `extensions/plan-mode-utils.ts`, `tests/plan-mode-utils.test.ts`, `package.json`, this file | Plan mode claimed read-only semantics but allowed `curl URL \| sh` and `curl -o file` because the whitelist only checked the command prefix. Progress tracking also counted unmatched `[DONE:n]` markers as updates. | `node --test tests/plan-mode-utils.test.ts` passed: 3 tests; `npm test` passed: 64 tests |
+| 4 | `docs: align stable capability documentation` | Documentation and operator status | `README.md`, `AGENTS.md`, this file | Stable-stage docs were stale: AGENTS still said v0.6.0, README omitted `chrome_cdp`, `/cdp`, `/ugk-ui`, `chrome-cdp-guide`, and used an obsolete fixed test count. | `rg "v0\\.6\\.0\|25 个" README.md AGENTS.md` returned no matches; `npm test` passed: 64 tests |
 
 ## Findings
 
@@ -119,6 +120,11 @@ Open review items:
 - Align README, skills, extension README files, and status command output.
 - Add operational notes for stable-stage maintenance where missing.
 
+Fixed in slice 4:
+
+- README and AGENTS now describe the current v1.0.0 capability set, including Chrome CDP, `/cdp`, `/ugk-ui`, plan-mode read-only hardening, and `chrome-cdp-guide`.
+- README no longer hard-codes an obsolete test count in the directory map.
+
 ### Logging And Status
 
 Open review items:
@@ -135,3 +141,5 @@ Open review items:
 | 2026-06-17 slice 2 full | `npm test` | Passed: 61 tests, 0 failures |
 | 2026-06-17 slice 3 focused | `node --test tests/plan-mode-utils.test.ts` | Passed: 3 tests, 0 failures |
 | 2026-06-17 slice 3 full | `npm test` | Passed: 64 tests, 0 failures |
+| 2026-06-17 slice 4 stale-doc scan | `rg "v0\\.6\\.0\|25 个" README.md AGENTS.md` | No matches |
+| 2026-06-17 slice 4 full | `npm test` | Passed: 64 tests, 0 failures |

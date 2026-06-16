@@ -123,6 +123,7 @@ ugk --model deepseek-reasoner
 | `scrcpy` | 安卓投屏控制(start/stop/status/version) |
 | `subagent` | 子代理委派(single/parallel/chain 三模式) |
 | `cron` | 定时任务管理(status/list/add/remove/history) |
+| `chrome_cdp` | 受保护的本地登录态 Chrome 控制(status/tabs/navigate/evaluate/screenshot) |
 
 ### ugk 品牌 UI
 
@@ -159,6 +160,8 @@ UGK_CLEAR_STARTUP=0 ugk
 | `/ugk` | 看 agent 状态 |
 | `/welcome` | 欢迎模板 |
 | `/check-env` | 一键自检 adb/scrcpy/设备连接 |
+| `/cdp` | 管理本地 Chrome CDP 访问模式、端口、启动和标签页 |
+| `/ugk-ui` | 开关 ugk 品牌 UI |
 | `/plan` | 切换 plan-mode 只读探索模式(或 Ctrl+Alt+P) |
 | `/todos` | 查看 plan-mode 计划进度 |
 | `/implement` | scout→planner→worker 全链路实现 |
@@ -167,7 +170,23 @@ UGK_CLEAR_STARTUP=0 ugk
 
 ### plan-mode 只读探索模式
 
-`/plan` 进入只读模式:工具限制为 read/bash/grep/find/ls,bash 命令过白名单(只放行只读命令,拦 rm/git commit/npm install)。agent 产出 `Plan:` 编号计划后,可选择执行(恢复全部工具)/继续规划/精炼。执行阶段用 `[DONE:n]` 跟踪进度,状态栏显示 `📋 N/M`。
+`/plan` 进入只读模式:工具限制为 read/bash/grep/find/ls,bash 命令过白名单(只放行只读命令,拦 rm/git commit/npm install,并阻止 `curl | sh`、`curl -o`、curl 上传/变更请求等非只读形态)。agent 产出 `Plan:` 编号计划后,可选择执行(恢复全部工具)/继续规划/精炼。执行阶段用 `[DONE:n]` 跟踪进度,状态栏显示 `📋 N/M`。
+
+### Chrome CDP 本地浏览器控制
+
+`chrome_cdp` 用于需要本地登录态 Chrome 的场景:SSO、cookies、CAPTCHA、私有工作区、本地应用截图或 DOM 检查。它不是普通联网检索或文档查询的默认路径。
+
+```text
+/cdp status
+/cdp ask      # 默认:每次浏览器操作前确认
+/cdp on       # 当前会话允许浏览器操作
+/cdp off      # 禁用浏览器操作
+/cdp port 9222
+/cdp launch
+/cdp tabs
+```
+
+默认模式是 `ask`。非 status 操作需要提供原因并说明普通访问是否已经尝试或不适用。详见 `skills/chrome-cdp-guide/SKILL.md` 和 `extensions/chrome-cdp/README.md`。
 
 ### cron 定时服务(独立常驻进程)
 
@@ -196,6 +215,7 @@ npm run cron:start   # 启动常驻服务(127.0.0.1:17741)
 | `scrcpy-guide` | scrcpy 投屏安装与使用 |
 | `subagent-guide` | 子代理委派指南 |
 | `cron-guide` | 定时任务指南 |
+| `chrome-cdp-guide` | 本地登录态 Chrome/CDP 使用边界与安全流程 |
 
 ### 权限门
 
@@ -219,17 +239,18 @@ ugk-core/
 │   ├── cron.ts + cron-contract.ts  # cron 工具 + 共享类型
 │   ├── subagent.ts + subagent-runtime/rendering/agents.ts  # 子代理委派
 │   ├── plan-mode.ts + plan-mode-utils/state.ts  # plan 模式
+│   ├── chrome-cdp/          # 本地登录态 Chrome CDP 控制
 │   └── ui-*.ts               # UI 美化(品牌层/footer/状态条/标题栏spinner)
 ├── cron/
 │   └── service.ts            # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)
 │   ├── scout.md planner.md reviewer.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
-│   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide
+│   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide
 ├── themes/
 │   └── ugk-geek.json         # ugk 极客绿主题
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)
-└── tests/                    # 25 个测试(纯逻辑覆盖)
+└── tests/                    # Node test runner 逻辑覆盖
 ```
 
 ---
@@ -267,7 +288,7 @@ A: `ugk` 首次启动会默认在 `~/.pi/agent/settings.json` 写入:
 }
 ```
 
-`clearStartupScreen` 会让新会话启动页清理当前终端视口并占满终端高度。`skills` 会隐藏 `~/.agents/skills` 下的用户全局 skills,避免系统里装过的个人 skill 干扰 ugk。ugk 通过扩展注入的 `adb-guide` / `scrcpy-guide` / `subagent-guide` / `cron-guide` / `ugk-guide` 仍会加载。
+`clearStartupScreen` 会让新会话启动页清理当前终端视口并占满终端高度。`skills` 会隐藏 `~/.agents/skills` 下的用户全局 skills,避免系统里装过的个人 skill 干扰 ugk。ugk 通过扩展注入的 `adb-guide` / `scrcpy-guide` / `subagent-guide` / `cron-guide` / `chrome-cdp-guide` / `ugk-guide` 仍会加载。
 
 已有用户如果之前手动配置过 `clearStartupScreen` 或 `skills`,ugk 不会覆盖;需要启用默认行为时可手动补上对应字段。
 

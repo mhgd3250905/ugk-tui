@@ -82,6 +82,13 @@ function panelRule(left: string, label: string, right: string, width: number): s
 	return hardTruncate(`${prefix}${fill}${right}`, width);
 }
 
+function panelEdge(left: string, right: string, width: number): string {
+	const ruleWidth = panelWidth(width);
+	if (ruleWidth <= 0) return "";
+	const fill = "─".repeat(Math.max(0, ruleWidth - left.length - right.length));
+	return hardTruncate(`${left}${fill}${right}`, width);
+}
+
 function panelRow(label: string, value: string, width: number): string {
 	const rowWidth = panelWidth(width);
 	if (rowWidth <= 0) return "";
@@ -104,8 +111,8 @@ function buildUgkInfoPanelLines(options: UgkHeaderOptions): string[] {
 		panelRow("stack", "plan · subagents · cron · adb", options.width),
 		panelRule("├", "quick actions", "┤", options.width),
 		panelRow("", "/plan  /implement  /check-env  @agent", options.width),
-		panelRule("└", "model", "┘", options.width),
-		hardTruncate(`  ${model}`, options.width),
+		panelRow("model", model, options.width),
+		panelEdge("└", "┘", options.width),
 	];
 }
 

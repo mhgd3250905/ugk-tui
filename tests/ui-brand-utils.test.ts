@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import {
 	buildUgkFooterLines,
 	buildUgkHeaderLines,
@@ -21,7 +22,8 @@ test("buildUgkHeaderLines brands startup without pi copy", () => {
 	assert.match(text, /│ workspace\s+ugk-tui/);
 	assert.match(text, /│ agent\s+terminal coding agent/);
 	assert.match(text, /├─ quick actions/);
-	assert.match(text, /└─ model/);
+	assert.match(text, /│ model\s+deepseek-v4-pro\s+│/);
+	assert.doesNotMatch(text, /\n  deepseek-v4-pro/);
 	assert.match(text, /ugk v1\.0\.0/);
 	assert.match(text, /deepseek-v4-pro/);
 	assert.match(text, /\/plan/);
@@ -29,6 +31,10 @@ test("buildUgkHeaderLines brands startup without pi copy", () => {
 	for (const line of lines) {
 		assert.ok(line.length <= 96, `line exceeded width: ${line}`);
 	}
+
+	const panelLines = lines.filter((line) => /^[┌│├└]/.test(line));
+	const panelWidths = new Set(panelLines.map((line) => visibleWidth(line)));
+	assert.deepEqual([...panelWidths], [64]);
 });
 
 test("buildUgkLogoLines renders a compact block-character logo", () => {

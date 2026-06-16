@@ -38,7 +38,7 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 	}
 	if (line.startsWith("│")) {
 		return line
-			.replace(/(workspace|agent|stack)/, theme.fg("dim", "$1"))
+			.replace(/(workspace|agent|stack|model)/, theme.fg("dim", "$1"))
 			.replace("/plan", theme.fg("success", "/plan"))
 			.replace("/implement", theme.fg("success", "/implement"))
 			.replace("/check-env", theme.fg("success", "/check-env"))

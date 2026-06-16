@@ -69,17 +69,51 @@ function formatCwd(cwd: string): string {
 	return cwd;
 }
 
+function panelWidth(width: number): number {
+	if (width <= 0) return 0;
+	return Math.min(width, 64);
+}
+
+function panelRule(left: string, label: string, right: string, width: number): string {
+	const ruleWidth = panelWidth(width);
+	if (ruleWidth <= 0) return "";
+	const prefix = `${left}─ ${label} `;
+	const fill = "─".repeat(Math.max(0, ruleWidth - prefix.length - right.length));
+	return hardTruncate(`${prefix}${fill}${right}`, width);
+}
+
+function panelRow(label: string, value: string, width: number): string {
+	const rowWidth = panelWidth(width);
+	if (rowWidth <= 0) return "";
+	const bodyWidth = Math.max(0, rowWidth - 4);
+	const labelText = label ? `${label.padEnd(12)}${value}` : value;
+	const body = hardTruncate(labelText, bodyWidth);
+	return hardTruncate(`│ ${body.padEnd(bodyWidth)} │`, width);
+}
+
 export function buildUgkLogoLines(width: number): string[] {
 	return UGK_BLOCK_LOGO.map((line) => hardTruncate(line, width));
 }
 
-export function buildUgkHeaderLines(options: UgkHeaderOptions): string[] {
+function buildUgkInfoPanelLines(options: UgkHeaderOptions): string[] {
 	const model = options.modelId || "model not selected";
 	return [
+		panelRule("┌", `ugk v${options.version}`, "┐", options.width),
+		panelRow("workspace", options.cwdName, options.width),
+		panelRow("agent", "terminal coding agent", options.width),
+		panelRow("stack", "plan · subagents · cron · adb", options.width),
+		panelRule("├", "quick actions", "┤", options.width),
+		panelRow("", "/plan  /implement  /check-env  @agent", options.width),
+		panelRule("└", "model", "┘", options.width),
+		hardTruncate(`  ${model}`, options.width),
+	];
+}
+
+export function buildUgkHeaderLines(options: UgkHeaderOptions): string[] {
+	return [
 		...buildUgkLogoLines(options.width),
-		hardTruncate(`ugk v${options.version}  // ${options.cwdName}`, options.width),
-		hardTruncate("terminal coding agent · plan mode · subagents · cron · android tools", options.width),
-		hardTruncate(`model ${model} · /plan · /implement · /check-env · @agent`, options.width),
+		"",
+		...buildUgkInfoPanelLines(options),
 	];
 }
 

@@ -17,11 +17,18 @@ test("buildUgkHeaderLines brands startup without pi copy", () => {
 
 	const text = lines.join("\n");
 	assert.match(text, /█/);
+	assert.match(text, /┌─ ugk v1\.0\.0/);
+	assert.match(text, /│ workspace\s+ugk-tui/);
+	assert.match(text, /│ agent\s+terminal coding agent/);
+	assert.match(text, /├─ quick actions/);
+	assert.match(text, /└─ model/);
 	assert.match(text, /ugk v1\.0\.0/);
-	assert.match(text, /terminal coding agent/i);
 	assert.match(text, /deepseek-v4-pro/);
 	assert.match(text, /\/plan/);
 	assert.doesNotMatch(text, /\bpi v/i);
+	for (const line of lines) {
+		assert.ok(line.length <= 96, `line exceeded width: ${line}`);
+	}
 });
 
 test("buildUgkLogoLines renders a compact block-character logo", () => {

@@ -29,12 +29,23 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 	if (line.includes("█")) {
 		return theme.bold(theme.fg("success", line));
 	}
-	if (line.startsWith("ugk v")) {
-		const [brand, ...rest] = line.split("  // ");
-		const tail = rest.length ? `  // ${rest.join("  // ")}` : "";
-		return `${theme.bold(theme.fg("success", brand))}${theme.fg("dim", tail)}`;
+	if (!line.trim()) return line;
+	if (/^[┌├└]/.test(line)) {
+		return line
+			.replace("ugk", theme.bold(theme.fg("success", "ugk")))
+			.replace("quick actions", theme.fg("success", "quick actions"))
+			.replace("model", theme.fg("success", "model"));
 	}
-	if (index === 0 || line.startsWith("terminal coding agent")) return theme.fg("muted", line);
+	if (line.startsWith("│")) {
+		return line
+			.replace(/(workspace|agent|stack)/, theme.fg("dim", "$1"))
+			.replace("/plan", theme.fg("success", "/plan"))
+			.replace("/implement", theme.fg("success", "/implement"))
+			.replace("/check-env", theme.fg("success", "/check-env"))
+			.replace("@agent", theme.fg("success", "@agent"));
+	}
+	if (line.startsWith("  ")) return theme.fg("success", line);
+	if (index === 0) return theme.fg("muted", line);
 	return line
 		.replace("model", theme.fg("dim", "model"))
 		.replace("/plan", theme.fg("success", "/plan"))

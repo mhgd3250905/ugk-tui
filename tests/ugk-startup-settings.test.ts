@@ -16,6 +16,7 @@ test("ensureUgkQuietStartupDefault enables quiet startup when unset", () => {
 
 	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
 	assert.equal(settings.quietStartup, true);
+	assert.equal(settings.theme, "ugk-geek");
 });
 
 test("ensureUgkQuietStartupDefault preserves explicit quiet startup preference", () => {
@@ -26,16 +27,17 @@ test("ensureUgkQuietStartupDefault preserves explicit quiet startup preference",
 
 	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
 	assert.equal(settings.quietStartup, false);
+	assert.equal(settings.theme, "ugk-geek");
 });
 
 test("ensureUgkQuietStartupDefault keeps existing settings", () => {
 	const agentDir = makeTempAgentDir();
-	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ theme: "ugk-geek" }, null, 2));
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ theme: "custom" }, null, 2));
 
 	ensureUgkQuietStartupDefault(agentDir);
 
 	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
-	assert.equal(settings.theme, "ugk-geek");
+	assert.equal(settings.theme, "custom");
 	assert.equal(settings.quietStartup, true);
 });
 

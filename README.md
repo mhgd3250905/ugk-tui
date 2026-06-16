@@ -151,7 +151,7 @@ UGK_CLEAR_STARTUP=0 ugk
 /ugk-ui status
 ```
 
-随包还提供 `themes/ugk-geek.json`,主色是低刺激荧光绿。可在 pi `/settings` 里选择 `ugk-geek`,或作为独立主题资源接入。
+随包还提供 `themes/ugk-geek.json`,主色是低刺激荧光绿。首次启动 `ugk` 时会在 `~/.pi/agent/settings.json` 缺少 `theme` 字段时自动补上 `"theme": "ugk-geek"`;如果用户已经显式设置过其他主题,ugk 不会覆盖。也可在 pi `/settings` 里手动选择 `ugk-geek`,或作为独立主题资源接入。
 
 ### slash 命令
 
@@ -216,6 +216,8 @@ npm run cron:start   # 启动常驻服务(127.0.0.1:17741)
 | `subagent-guide` | 子代理委派指南 |
 | `cron-guide` | 定时任务指南 |
 | `chrome-cdp-guide` | 本地登录态 Chrome/CDP 使用边界与安全流程 |
+| `skill-creator` | 创建、改进和评测 agent skill(来自 Anthropic skills, Apache-2.0) |
+| `docx` | 创建、读取、编辑 Word `.docx` 文档(来自 Anthropic skills,见随包 LICENSE.txt) |
 
 ### 权限门
 
@@ -246,7 +248,7 @@ ugk-core/
 ├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)
 │   ├── scout.md planner.md reviewer.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
-│   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide
+│   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/skill-creator/docx
 ├── themes/
 │   └── ugk-geek.json         # ugk 极客绿主题
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)
@@ -288,7 +290,7 @@ A: `ugk` 首次启动会默认在 `~/.pi/agent/settings.json` 写入:
 }
 ```
 
-`clearStartupScreen` 会让新会话启动页清理当前终端视口并占满终端高度。`skills` 会隐藏 `~/.agents/skills` 下的用户全局 skills,避免系统里装过的个人 skill 干扰 ugk。ugk 通过扩展注入的 `adb-guide` / `scrcpy-guide` / `subagent-guide` / `cron-guide` / `chrome-cdp-guide` / `ugk-guide` 仍会加载。
+`clearStartupScreen` 会让新会话启动页清理当前终端视口并占满终端高度。`skills` 会隐藏 `~/.agents/skills` 下的用户全局 skills,避免系统里装过的个人 skill 干扰 ugk。ugk 通过扩展注入的 `adb-guide` / `scrcpy-guide` / `subagent-guide` / `cron-guide` / `chrome-cdp-guide` / `ugk-guide` / `skill-creator` / `docx` 仍会加载。
 
 已有用户如果之前手动配置过 `clearStartupScreen` 或 `skills`,ugk 不会覆盖;需要启用默认行为时可手动补上对应字段。
 

@@ -146,3 +146,20 @@ export function checkEnv(deps?: DeviceEnvDeps): string {
 	}
 	return lines.join("\n");
 }
+
+/**
+ * 解析用于 spawn 子进程的 ugk/pi 命令名。
+ * 优先 ugk(我们自己的 bin,npm i -g ugk-agent 后在 PATH),没有则回退 pi(开发环境/老用户)。
+ * 用于 subagent 委派和 cron 触发——它们都要起一个 agent 子进程。
+ */
+export function getUgkBin(deps?: DeviceEnvDeps): string {
+	const exec = getExec(deps);
+	// 优先 ugk:它是我们的命令,npm i -g 后在 PATH
+	try {
+		exec("ugk --version");
+		return "ugk";
+	} catch {
+		// ugk 不在 PATH(开发环境或未全局安装),回退 pi
+	}
+	return "pi";
+}

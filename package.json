@@ -1,10 +1,16 @@
 {
-  "name": "ugk-pi-agent",
-  "version": "0.6.0",
-  "private": true,
+  "name": "ugk-agent",
+  "version": "1.0.0",
+  "description": "ugk — 基于 pi 的定制化编码 agent,装即用",
   "type": "module",
+  "bin": {
+    "ugk": "bin/ugk.js"
+  },
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "cli",
+    "agent",
+    "coding-agent"
   ],
   "scripts": {
     "cron:start": "node cron/service.ts",
@@ -21,14 +27,8 @@
       "./prompts"
     ]
   },
-  "peerDependencies": {
-    "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "typebox": "*"
-  },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "*",
     "node-cron": "^4.2.1"
   }
 }

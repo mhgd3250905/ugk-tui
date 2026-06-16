@@ -12,6 +12,9 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { checkEnv } from "./device-env.ts";
 import { scrcpyTool } from "./scrcpy-tool.ts";
 import registerSubagent from "./subagent.ts";
@@ -134,5 +137,37 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		return undefined;
+	});
+
+	// 4) resources_discover:让 skills/prompts 随包走
+	//    bin/ugk.js 用 -e 加载本扩展(只管扩展文件),skills/prompts 靠这个事件带上。
+	//    扫描包内的 skills/<name>/SKILL.md 和 prompts/*.md,返回绝对路径。
+	//    模式借自官方 examples/extensions/dynamic-resources。
+	const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+	pi.on("resources_discover", () => {
+		const skillPaths: string[] = [];
+		const skillsDir = path.join(packageRoot, "skills");
+		try {
+			for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+				if (!entry.isDirectory()) continue;
+				const skillFile = path.join(skillsDir, entry.name, "SKILL.md");
+				if (fs.existsSync(skillFile)) skillPaths.push(skillFile);
+			}
+		} catch {
+			// skills 目录不存在则跳过
+		}
+
+		const promptPaths: string[] = [];
+		const promptsDir = path.join(packageRoot, "prompts");
+		try {
+			for (const entry of fs.readdirSync(promptsDir, { withFileTypes: true })) {
+				if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+				promptPaths.push(path.join(promptsDir, entry.name));
+			}
+		} catch {
+			// prompts 目录不存在则跳过
+		}
+
+		return { skillPaths, promptPaths };
 	});
 }

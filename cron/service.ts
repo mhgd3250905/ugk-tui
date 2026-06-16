@@ -106,13 +106,14 @@ async function executeJob(job: CronJob) {
 	appendRun(run);
 	console.log(`[${run.startedAt}] 触发任务: ${job.name} (${runId})`);
 
-	// 构造 ugk 命令:ugk --print "prompt"
+	// 构造命令:优先 ugk(npm i -g ugk-agent),没有则 pi(开发环境)
+	const agentBin = (() => { try { require("child_process").execSync("ugk --version", { stdio: "ignore", timeout: 5000 }); return "ugk"; } catch { return "pi"; } })();
 	const args = ["--print", job.prompt];
 	if (job.model) {
 		args.push("--model", job.model);
 	}
 
-	const child = spawn("ugk", args, {
+	const child = spawn(agentBin, args, {
 		cwd: job.cwd || process.cwd(),
 		shell: process.platform === "win32", // Windows 适配(同 subagent)
 		stdio: ["ignore", "pipe", "pipe"],

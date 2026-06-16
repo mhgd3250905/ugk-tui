@@ -22,6 +22,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./subagent-agents.ts";
+import { getUgkBin } from "./device-env.ts";
 import { renderSubagentCall, renderSubagentResult } from "./subagent-rendering.ts";
 import {
 	getFinalOutput,
@@ -61,9 +62,10 @@ function getPiInvocation(args: string[]): { command: string; args: string[]; use
 		return { command: process.execPath, args, useShell: false };
 	}
 
-	// Fallback 到裸 `pi` 命令。Windows 上 pi 是 pi.cmd 扩展名,spawn 不带 shell 会
-	// ENOENT/EINVAL(Node 安全限制)。Linux/macOS 不需要 shell。
-	return { command: "pi", args, useShell: process.platform === "win32" };
+	// Fallback 到裸命令:优先 ugk(npm i -g ugk-agent 后在 PATH),没有则 pi(开发环境)。
+	// Windows 上 .cmd 扩展名 spawn 不带 shell 会 ENOENT/EINVAL(Node 安全限制)。
+	const bin = getUgkBin();
+	return { command: bin, args, useShell: process.platform === "win32" };
 }
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;

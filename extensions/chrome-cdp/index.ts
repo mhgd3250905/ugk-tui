@@ -19,7 +19,7 @@ import {
 	type ChromeCdpState,
 } from "./config.ts";
 import { formatChromeCdpStatus, formatChromeTabs } from "./formatter.ts";
-import { launchChromeCdp } from "./launcher.ts";
+import { launchChromeCdp, launchChromeCdpAndWait } from "./launcher.ts";
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
 
@@ -31,7 +31,6 @@ export interface ChromeCdpDeps {
 	screenshot?: (port: number, target: string | undefined, path: string) => Promise<unknown>;
 	launch?: (port: number) => Promise<string>;
 }
-
 function textResult(text: string, details: Record<string, unknown> = {}): ToolResult {
 	return { content: [{ type: "text", text }], details };
 }
@@ -45,7 +44,7 @@ function defaultDeps(): Required<ChromeCdpDeps> {
 			evaluateChromeExpression(createChromeCdpClient({ port }), target, expression),
 		screenshot: async (port, target, filePath) =>
 			captureChromeScreenshot(createChromeCdpClient({ port }), target, filePath),
-		launch: async (port) => launchChromeCdp(port),
+		launch: async (port) => launchChromeCdpAndWait(port),
 	};
 }
 

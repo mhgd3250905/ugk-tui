@@ -6,23 +6,69 @@
 
 ---
 
-## 前置
+## 🚀 快速开始(从零安装,约 10 分钟)
 
-- Node.js
-- 全局安装 pi(>=0.79,带原生 DeepSeek 支持):
+按顺序做完这 6 步,就能用上全部能力。
 
-  ```cmd
-  npm i -g @earendil-works/pi-coding-agent
-  ```
+### 第 1 步:装 Node.js
 
-- DeepSeek API key(环境变量):
+需要 Node.js 18+(推荐 20+)。已装可跳过。
 
-  ```cmd
-  set DEEPSEEK_API_KEY=sk-...
-  ```
-  想永久生效用 `setx DEEPSEEK_API_KEY sk-...`(新开窗口才生效)。
+```cmd
+node --version
+:: 若提示找不到命令,去 https://nodejs.org 下载 LTS 版安装
+```
 
-## Windows 用户:修复 bash 工具(重要)
+### 第 2 步:全局安装 pi
+
+```cmd
+npm i -g @earendil-works/pi-coding-agent
+```
+
+验证:
+```cmd
+pi --version
+:: 应输出 0.79 或更高
+```
+
+### 第 3 步:配置 DeepSeek API key
+
+ugk 默认用 DeepSeek。去 [platform.deepseek.com](https://platform.deepseek.com) 申请 key,然后:
+
+```cmd
+:: 临时生效(当前窗口)
+set DEEPSEEK_API_KEY=sk-你的key
+
+:: 永久生效(推荐,新开窗口才生效)
+setx DEEPSEEK_API_KEY sk-你的key
+```
+
+> 也可以用其他模型(OpenAI/Claude 等),见 pi 官方文档。本指南以 DeepSeek 为例。
+
+### 第 4 步:克隆本项目
+
+```cmd
+git clone https://github.com/mhgd3250905/ugk-tui.git ugk-core
+cd ugk-core
+```
+
+### 第 5 步:安装依赖(含 cron 用的 node-cron)
+
+```cmd
+npm install
+```
+
+### 第 6 步:把 ugk 注册为你的默认 pi 配置
+
+```cmd
+pi install .
+```
+
+这一步会把本包写入 `~/.pi/agent/settings.json`。之后**任意目录**敲 `pi` 都自带本包的全部能力。
+
+---
+
+## ⚙️ Windows 用户:修复 bash 工具(重要,不做会报错)
 
 pi 在 Windows 上默认找 bash,但**只查 `C:\Program Files\Git`** 两个标准路径。
 若你的 Git for Windows 装在别处(如 `D:\Git`),pi 找不到就会退到 PATH 上的
@@ -42,31 +88,67 @@ WSL ERROR: execvpe /bin/bash failed 2
 }
 ```
 
-用 Git Bash 优于 PowerShell:agent(DeepSeek 等)更熟悉 Linux 命令语法,
-出错率更低。验证:`ugk --print "用 bash 工具执行 ls -la 并告诉我"`。
+> 用 Git Bash 优于 PowerShell:agent(DeepSeek 等)更熟悉 Linux 命令语法,出错率更低。
+> settings.json 在用户主目录(`%USERPROFILE%\.pi\agent\settings.json`),不进本仓库。
+> 验证:`pi --print "用 bash 工具执行 ls -la 并告诉我"`。
 
-> 注:settings.json 在用户主目录,不进本仓库。
+---
 
-## 永久安装(写入 `~/.pi/agent/settings.json`)
+## 🤖 安装 subagent 预设 agent(可选,但强烈推荐)
+
+subagent 工具随包自动加载,但 4 个预设 agent(`scout`/`planner`/`reviewer`/`worker`)
+需要复制到用户目录才生效。**不装也能用 subagent 工具,只是没有现成的 agent 可调。**
+
+**Windows(cmd / PowerShell)**:
+```cmd
+mkdir "%USERPROFILE%\.pi\agent\agents" 2>nul
+xcopy /Y agents\*.md "%USERPROFILE%\.pi\agent\agents\"
+```
+
+**Git Bash**:
+```bash
+mkdir -p ~/.pi/agent/agents
+cp agents/*.md ~/.pi/agent/agents/
+```
+
+验证:进 pi 后输入 `@scout 列出当前目录`,能调起 scout 就说明装好了。
+详见 `skills/subagent-guide/SKILL.md`。
+
+---
+
+## ✅ 验证安装
+
+进 pi 后依次试这些,全部正常说明装好了:
+
+| 输入 | 期望 |
+| --- | --- |
+| `/ugk` | 弹出状态(列全部能力) |
+| `/check-env` | 自检 adb/scrcpy/设备(没装会提示安装命令) |
+| `跟我打个招呼,我叫 Sam` | 调 `greet` 工具回复 |
+| `@scout 列出项目目录` | 调 `subagent` 委派 scout(需先装预设 agent) |
+| `/plan` | 切换只读探索模式 |
+| `rm -rf /tmp/test` | 触发权限门(弹确认) |
+
+---
+
+## 🎬 开始使用
 
 ```cmd
-pi install .
+:: 任意目录(已 pi install)
+pi
+
+:: 或在本项目目录下直接跑(未 pi install 也能用)
+pi -e extensions/index.ts --provider deepseek --model deepseek-chat
+
+:: 一次性非交互模式(脚本/cron 用)
+pi -e extensions/index.ts --provider deepseek --model deepseek-chat --print "用 greet 工具跟我打招呼"
 ```
 
-装好后任意目录敲 `pi` 即自带本包的全部能力(见下表)。
-
-## 安装 subagent 预设 agent(可选,推荐)
-
-subagent 工具本身随包加载,但 4 个预设 agent(`scout`/`planner`/`reviewer`/`worker`)
-需要复制到用户目录才生效:
-
-```bash
-# Git Bash
-mkdir -p ~/.pi/agent/agents
-cp /e/AII/ugk-core/agents/*.md ~/.pi/agent/agents/
-```
-
-详见 `skills/subagent-guide/SKILL.md`。
+进对话后,直接用自然语言或 `/命令` 即可。例:
+- `帮我看看这个项目的结构` — agent 自己探索
+- `@scout 找一下认证代码` — 委派给 scout 子代理
+- `/implement 加个 Redis 缓存` — scout→planner→worker 全链路
+- `/plan` — 先只读规划再执行
 
 ---
 
@@ -180,16 +262,23 @@ ugk-core/
 
 ---
 
-## 试跑(不改任何配置)
+## ❓ 常见问题
 
-```cmd
-cd E:\AII\ugk-core
-set DEEPSEEK_API_KEY=sk-...
-pi -e extensions/index.ts --provider deepseek --model deepseek-chat
-```
+**Q: `pi` 命令找不到?**
+A: 重开一个 cmd/PowerShell 窗口(让 PATH 刷新)。还不行就检查 `npm root -g` 下有没有 `@earendil-works/pi-coding-agent`。
 
-非交互一次性跑:
+**Q: bash 工具报 `WSL ERROR: execvpe /bin/bash failed`?**
+A: 见上面「Windows 用户:修复 bash 工具」,配 `shellPath`。
 
-```cmd
-pi -e extensions/index.ts --provider deepseek --model deepseek-chat --print "用 greet 工具跟我打招呼,我叫 Sam"
-```
+**Q: `@scout` 没反应 / 报 "Unknown agent"?**
+A: 没装预设 agent。跑上面的「安装 subagent 预设 agent」复制 .md 文件。
+
+**Q: scrcpy 投屏起不来?**
+A: 跑 `/check-env` 自检,它会告诉你缺什么(adb/scrcpy 都能 winget 装)。
+
+**Q: cron 工具报"服务未启动"?**
+A: cron 是独立常驻服务,另开一个终端跑 `npm run cron:start`。
+
+**Q: 怎么换模型(不用 DeepSeek)?**
+A: 设对应的环境变量(如 `OPENAI_API_KEY`),启动时加 `--provider openai --model gpt-4o`。详见 pi 官方文档。
+

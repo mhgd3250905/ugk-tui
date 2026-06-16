@@ -30,14 +30,14 @@ export function getScrcpyDirs(env: Record<string, string | undefined> = process.
 }
 
 export function getAdbPaths(env: Record<string, string | undefined> = process.env): string[] {
-	return [
+	return Array.from(new Set([
 		ADB_PATH,
 		"E:\\platform-tools\\adb.exe",
 		env.LOCALAPPDATA &&
 			`${env.LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe\\platform-tools\\adb.exe`,
 		env.ANDROID_HOME && `${env.ANDROID_HOME}\\platform-tools\\adb.exe`,
 		env.ANDROID_SDK_ROOT && `${env.ANDROID_SDK_ROOT}\\platform-tools\\adb.exe`,
-	].filter(Boolean) as string[];
+	].filter(Boolean) as string[]));
 }
 
 export function findScrcpy(deps?: DeviceEnvDeps): string | null {

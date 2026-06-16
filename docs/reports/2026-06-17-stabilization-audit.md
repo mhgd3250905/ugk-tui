@@ -51,6 +51,7 @@ UGK is an npm package that wraps pi rather than replacing pi internals.
 | 4 | `docs: align stable capability documentation` | Documentation and operator status | `README.md`, `AGENTS.md`, this file | Stable-stage docs were stale: AGENTS still said v0.6.0, README omitted `chrome_cdp`, `/cdp`, `/ugk-ui`, `chrome-cdp-guide`, and used an obsolete fixed test count. | `rg "v0\\.6\\.0\|25 个" README.md AGENTS.md` returned no matches; `npm test` passed: 64 tests |
 | 5 | `fix: remove cron service inline require` | Module decoupling and runtime boundary | `cron/agent-bin.ts`, `cron/service.ts`, `tests/cron-agent-bin.test.ts`, `package.json`, this file | `cron/service.ts` runs in the package's ESM context but detected `ugk` with an inline `require("child_process")` inside job execution. That could fail only when a scheduled job fires, making the boundary hard to diagnose. | `node --test tests/cron-agent-bin.test.ts` passed: 2 tests; `npm test` passed: 66 tests |
 | 6 | `feat: show cron stderr snippets in history` | Logging and operator status | `extensions/cron-contract.ts`, `tests/cron-contract.test.ts`, this file | The cron service persisted `stderrSnippet` for failed runs, but `history` did not show it. Users had to open the full output file for even a short failure reason. | `node --test tests/cron-contract.test.ts` passed: 3 tests; `npm test` passed: 67 tests |
+| 7 | `refactor: dedupe adb path candidates` | Redundant code and status accuracy | `extensions/device-env.ts`, `tests/device-env.test.ts`, this file | `getAdbPaths()` included `ADB_PATH` and the same literal path, causing duplicate probing and making later path-order changes harder to reason about. | `node --test tests/device-env.test.ts` passed: 4 tests; `npm test` passed: 68 tests |
 
 ## Findings
 
@@ -113,6 +114,10 @@ Open review items:
 - Search for unused exports and stale docs after recent Chrome CDP and UI additions.
 - Remove only code proven unused by `rg`, imports, and tests.
 
+Fixed in slice 7:
+
+- `getAdbPaths()` now de-duplicates candidate paths, removing the current duplicate `E:\platform-tools\adb.exe` entry and preventing future environment-variable duplicates.
+
 ### Cleanup
 
 Open review items:
@@ -158,3 +163,5 @@ Fixed in slice 6:
 | 2026-06-17 slice 5 full | `npm test` | Passed: 66 tests, 0 failures |
 | 2026-06-17 slice 6 focused | `node --test tests/cron-contract.test.ts` | Passed: 3 tests, 0 failures |
 | 2026-06-17 slice 6 full | `npm test` | Passed: 67 tests, 0 failures |
+| 2026-06-17 slice 7 focused | `node --test tests/device-env.test.ts` | Passed: 4 tests, 0 failures |
+| 2026-06-17 slice 7 full | `npm test` | Passed: 68 tests, 0 failures |

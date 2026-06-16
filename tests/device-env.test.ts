@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkEnv, findAdb, findScrcpy } from "../extensions/device-env.ts";
+import { checkEnv, findAdb, findScrcpy, getAdbPaths } from "../extensions/device-env.ts";
 
 test("findAdb prefers PATH when adb version succeeds", () => {
 	const adb = findAdb({
@@ -25,6 +25,12 @@ test("findScrcpy falls back to known install directories", () => {
 	});
 
 	assert.match(scrcpy ?? "", /scrcpy\.exe$/);
+});
+
+test("getAdbPaths does not return duplicate candidates", () => {
+	const paths = getAdbPaths({});
+
+	assert.equal(new Set(paths).size, paths.length);
 });
 
 test("checkEnv reports missing adb and scrcpy install commands", () => {

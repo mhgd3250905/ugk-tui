@@ -66,6 +66,26 @@ test("/cdp command manages ask on off modes and port", async () => {
 	assert.match(notifications.join("\n"), /9444/);
 });
 
+test("/cdp port reports invalid values without throwing", async () => {
+	const { pi, commands } = makePi();
+	const { ctx, notifications } = makeCtx();
+	const statusPorts: number[] = [];
+	registerChromeCdp(pi as any, {
+		getStatus: async (port) => {
+			statusPorts.push(port);
+			return { online: false, port, error: "offline" };
+		},
+		listTabs: async () => [],
+	});
+
+	const command = commands.get("cdp");
+	await assert.doesNotReject(() => command.handler("port nope", ctx));
+	await command.handler("status", ctx);
+
+	assert.match(notifications.join("\n"), /Invalid CDP port/);
+	assert.deepEqual(statusPorts, [9222]);
+});
+
 test("chrome_cdp tool blocks browser operations when mode is off", async () => {
 	const { pi, tools, commands } = makePi();
 	const { ctx } = makeCtx();

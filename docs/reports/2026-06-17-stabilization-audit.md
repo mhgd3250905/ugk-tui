@@ -46,6 +46,7 @@ UGK is an npm package that wraps pi rather than replacing pi internals.
 | Slice | Commit | Area | Files | Reason | Verification |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `docs: add stabilization audit ledger` | Planning and traceability | `docs/superpowers/plans/2026-06-17-stabilization-audit.md`, this file | Establish a durable audit ledger before making optimization changes. | `npm test` passed: 60 tests |
+| 2 | `fix: handle invalid cdp port commands` | Boundary design and operator status | `extensions/chrome-cdp/index.ts`, `tests/chrome-cdp-extension.test.ts`, this file | `/cdp port nope` escaped as an exception from the command handler. Stable command boundaries should report invalid input as an actionable warning and preserve the previous port. | `node --test tests/chrome-cdp-extension.test.ts` passed: 6 tests; `npm test` passed: 61 tests |
 
 ## Findings
 
@@ -76,8 +77,12 @@ Initial read: the risky boundaries are process spawning, bash permission gates, 
 Open review items:
 
 - Validate path and command handling in subagent prompt temp files and Chrome screenshot output.
-- Validate invalid `/cdp port` inputs and failed launch/status flows.
+- Validate failed launch/status flows.
 - Validate cron service payload validation and error text.
+
+Fixed in slice 2:
+
+- `/cdp port <value>` now catches invalid values at the command boundary, reports `Invalid CDP port: <value>. Use /cdp port <1-65535>.`, and keeps the previous resolved port.
 
 ### Code Simplicity And Readability
 
@@ -119,3 +124,5 @@ Open review items:
 | Time | Command | Result |
 | --- | --- | --- |
 | 2026-06-17 baseline | `npm test` | Passed: 60 tests, 0 failures |
+| 2026-06-17 slice 2 focused | `node --test tests/chrome-cdp-extension.test.ts` | Passed: 6 tests, 0 failures |
+| 2026-06-17 slice 2 full | `npm test` | Passed: 61 tests, 0 failures |

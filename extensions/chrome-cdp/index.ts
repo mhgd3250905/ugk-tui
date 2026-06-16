@@ -161,7 +161,12 @@ export function registerChromeCdp(pi: ExtensionAPI, overrides: ChromeCdpDeps = {
 			}
 			if (action === "port") {
 				const port = Number(value);
-				setChromeCdpPort(state, port);
+				try {
+					setChromeCdpPort(state, port);
+				} catch {
+					ctx.ui.notify(`Invalid CDP port: ${value || "(missing)"}. Use /cdp port <1-65535>.`, "warning");
+					return;
+				}
 				ctx.ui.notify(`Chrome CDP port: ${port}`, "info");
 				return;
 			}

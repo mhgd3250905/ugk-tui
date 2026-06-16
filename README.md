@@ -185,6 +185,7 @@ ugk-core/
 ├── AGENTS.md                 # 人设 + 项目上下文(给 agent 看)
 ├── extensions/
 │   ├── index.ts              # 主入口:工具/命令注册 + @mention + 权限门 + resources_discover
+│   ├── deepseek-status.ts    # /ugk 状态里识别 DEEPSEEK_API_KEY 和 pi /login auth
 │   ├── device-env.ts         # adb/scrcpy 探测 + getUgkBin(命令自适应)
 │   ├── scrcpy-tool.ts        # scrcpy 投屏工具
 │   ├── cron.ts + cron-contract.ts  # cron 工具 + 共享类型
@@ -198,7 +199,7 @@ ugk-core/
 ├── skills/                   # 随包加载(resources_discover 自动发现)
 │   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)
-└── tests/                    # 17 个测试(纯逻辑覆盖)
+└── tests/                    # 20 个测试(纯逻辑覆盖)
 ```
 
 ---
@@ -223,6 +224,19 @@ A: cron 是独立常驻服务,在本仓库目录跑 `npm install && npm run cron
 **Q: 怎么换模型(不用 DeepSeek)?**
 A: 设对应的环境变量(如 `OPENAI_API_KEY`),启动时加 `--provider openai --model gpt-4o`。详见 pi 官方文档。
 
+**Q: `/ugk` 显示 DeepSeek 未配置,但我已经 `/login` 了?**
+A: `/ugk` 会同时检查 `DEEPSEEK_API_KEY` 和 `~/.pi/agent/auth.json` 里的 deepseek 登录记录。若刚 login 后仍显示未配置,先重启 ugk;若手动编辑过 `settings.json`,注意不要用带 BOM 的 UTF-8 写入,否则 pi 可能解析失败。
+
+**Q: `/skill` 里有很多不是 ugk 自带的 skill?**
+A: pi 会自动加载用户全局 `~/.agents/skills`。若只想看到 ugk 随包 skill,在 `~/.pi/agent/settings.json` 加:
+
+```json
+{
+  "skills": ["!skills/**"]
+}
+```
+
+该配置会隐藏 `~/.agents/skills` 下的用户全局 skills,ugk 通过扩展注入的 `adb-guide` / `scrcpy-guide` / `subagent-guide` / `cron-guide` / `ugk-guide` 仍会加载。
+
 **Q: 我之前用 pi install 装过老版本,要怎么升级?**
 A: 直接 `npm i -g ugk-agent`,然后用 `ugk` 代替 `pi` 即可。老的 ~/.pi/agent/ 配置和 auth 仍然有效(ugk 复用同一目录)。
-

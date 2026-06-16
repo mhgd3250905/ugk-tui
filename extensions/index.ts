@@ -24,9 +24,7 @@ import registerUiStatusline from "./ui-statusline.ts";
 import registerUiTitlebar from "./ui-titlebar.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
-
-// DeepSeek 原生支持检测(仅供 /ugk 状态显示用)
-const DEEPSEEK_CONFIGURED = !!process.env.DEEPSEEK_API_KEY;
+import { getDeepSeekStatus } from "./deepseek-status.ts";
 
 // ---- 自定义工具(照搬 hello.ts 模式)----
 const greetTool = defineTool({
@@ -94,9 +92,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("ugk", {
 		description: "Show ugk-pi-agent status",
 		handler: async (_args, ctx) => {
-			const deepseekStatus = DEEPSEEK_CONFIGURED
-				? "deepseek: 已配置(deepseek-chat,默认)"
-				: "deepseek: 未配置(设 DEEPSEEK_API_KEY 启用)";
+			const deepseekStatus = getDeepSeekStatus();
 			ctx.ui.notify(
 				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · subagent(子代理) · cron(定时) · 命令: /ugk /welcome /check-env /footer /plan /todos · @agent名 手动委派 · UI: footer+状态条+标题栏spinner · skill: ugk-guide · adb-guide · scrcpy-guide · subagent-guide · cron-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
 				"info",

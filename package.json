@@ -7,7 +7,8 @@
     "pi-package"
   ],
   "scripts": {
-    "cron:start": "node cron/service.ts"
+    "cron:start": "node cron/service.ts",
+    "test": "node --test tests/subagent-runtime.test.ts tests/subagent-rendering.test.ts tests/device-env.test.ts tests/scrcpy-tool.test.ts tests/cron-contract.test.ts tests/plan-mode-state.test.ts"
   },
   "pi": {
     "extensions": [

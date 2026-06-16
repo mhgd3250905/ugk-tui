@@ -22,6 +22,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
+import { CRON_PATHS, type CronJob, type CronRun } from "../extensions/cron-contract.ts";
 
 // ---- 配置 ----
 const PORT = parseInt(process.env.UGK_CRON_PORT || "17741", 10);
@@ -31,29 +32,6 @@ const JOBS_FILE = path.join(PI_DIR, "cron-jobs.json");
 const RUNS_FILE = path.join(PI_DIR, "cron-runs.json");
 const OUTPUT_DIR = path.join(PI_DIR, "cron-output");
 const MAX_RUNS = 100; // 历史上限,超出删最旧
-
-// ---- 类型 ----
-interface CronJob {
-	id: string;
-	name: string;
-	schedule: string; // 标准 5 段 crontab
-	prompt: string; // agent 任务描述
-	model?: string; // 可选,指定模型
-	cwd?: string; // 可选,工作目录
-	enabled: boolean;
-	createdAt: string;
-}
-
-interface CronRun {
-	id: string;
-	jobId: string;
-	jobName: string;
-	startedAt: string;
-	finishedAt?: string;
-	exitCode: number | null;
-	outputFile?: string;
-	stderrSnippet?: string;
-}
 
 // ---- 存储 ----
 function ensureDirs() {
@@ -241,7 +219,7 @@ const server = createServer(async (req, res) => {
 		}
 
 		// GET /health
-		if (p === "/health" && method === "GET") {
+		if (p === CRON_PATHS.health && method === "GET") {
 			return send(res, 200, {
 				ok: true,
 				service: "ugk-cron",
@@ -252,12 +230,12 @@ const server = createServer(async (req, res) => {
 		}
 
 		// GET /jobs
-		if (p === "/jobs" && method === "GET") {
+		if (p === CRON_PATHS.jobs && method === "GET") {
 			return send(res, 200, { jobs: loadJobs() });
 		}
 
 		// POST /jobs
-		if (p === "/jobs" && method === "POST") {
+		if (p === CRON_PATHS.jobs && method === "POST") {
 			const body = await readBody(req);
 			if (!body.schedule || !body.prompt) {
 				return send(res, 400, { error: "schedule 和 prompt 必填" });
@@ -306,7 +284,7 @@ const server = createServer(async (req, res) => {
 		}
 
 		// GET /runs(全部历史,最近 50)
-		if (p === "/runs" && method === "GET") {
+		if (p === CRON_PATHS.runs && method === "GET") {
 			return send(res, 200, { runs: loadRuns().slice(-50) });
 		}
 

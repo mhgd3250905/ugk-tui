@@ -15,6 +15,15 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import {
+	CRON_PATHS,
+	formatCronHealth,
+	formatCronJobCreated,
+	formatCronJobList,
+	formatCronRunHistory,
+	type CronJob,
+	type CronRun,
+} from "./cron-contract.ts";
 
 const CRON_BASE = process.env.UGK_CRON_URL || "http://127.0.0.1:17741";
 
@@ -74,7 +83,7 @@ const cronTool = defineTool({
 
 		// status
 		if (action === "status") {
-			const r = await callCron("GET", "/health");
+			const r = await callCron("GET", CRON_PATHS.health);
 			if (!r.ok) {
 				return {
 					content: [{ type: "text", text: `❌ ${r.error}` }],
@@ -83,33 +92,18 @@ const cronTool = defineTool({
 			}
 			const d = r.data;
 			return {
-				content: [
-					{
-						type: "text",
-						text: `✅ cron 服务在线\n任务: ${d.jobs} 个(已调度 ${d.scheduled})\n端口: ${d.port}\n地址: ${CRON_BASE}`,
-					},
-				],
+				content: [{ type: "text", text: formatCronHealth(d, CRON_BASE) }],
 				details: { online: true, ...d },
 			};
 		}
 
 		// list
 		if (action === "list") {
-			const r = await callCron("GET", "/jobs");
+			const r = await callCron("GET", CRON_PATHS.jobs);
 			if (!r.ok) return { content: [{ type: "text", text: `❌ ${r.error}` }], details: { ok: false } };
-			const jobs = r.data.jobs || [];
-			if (jobs.length === 0) {
-				return {
-					content: [{ type: "text", text: "没有定时任务。用 action=add 新增(schedule + prompt)。" }],
-					details: { jobs: [] },
-				};
-			}
-			const lines = jobs.map(
-				(j: any) =>
-					`${j.enabled ? "✅" : "⏸️"} ${j.name} [${j.schedule}]${j.model ? ` (${j.model})` : ""}\n   id: ${j.id}\n   任务: ${j.prompt}`,
-			);
+			const jobs = (r.data.jobs || []) as CronJob[];
 			return {
-				content: [{ type: "text", text: `定时任务(${jobs.length} 个):\n\n${lines.join("\n\n")}` }],
+				content: [{ type: "text", text: formatCronJobList(jobs) }],
 				details: { jobs },
 			};
 		}
@@ -122,21 +116,16 @@ const cronTool = defineTool({
 					details: { ok: false },
 				};
 			}
-			const r = await callCron("POST", "/jobs", {
+			const r = await callCron("POST", CRON_PATHS.jobs, {
 				schedule: params.schedule,
 				prompt: params.prompt,
 				name: params.name,
 				model: params.model,
 			});
 			if (!r.ok) return { content: [{ type: "text", text: `❌ ${r.error}` }], details: { ok: false } };
-			const j = r.data.job;
+			const j = r.data.job as CronJob;
 			return {
-				content: [
-					{
-						type: "text",
-						text: `✅ 已新增任务:${j.name}\n调度:${j.schedule}\n任务:${j.prompt}${j.model ? `\n模型:${j.model}` : ""}\nid:${j.id}\n\n到点会自动执行,结果在 ~/.pi/agent/cron-output/`,
-					},
-				],
+				content: [{ type: "text", text: formatCronJobCreated(j) }],
 				details: { ok: true, job: j },
 			};
 		}
@@ -149,7 +138,7 @@ const cronTool = defineTool({
 					details: { ok: false },
 				};
 			}
-			const r = await callCron("DELETE", `/jobs/${params.id}`);
+			const r = await callCron("DELETE", CRON_PATHS.job(params.id));
 			if (!r.ok) return { content: [{ type: "text", text: `❌ ${r.error}` }], details: { ok: false } };
 			return {
 				content: [{ type: "text", text: `✅ 已删除任务:${params.id}` }],
@@ -160,23 +149,12 @@ const cronTool = defineTool({
 		// history
 		if (action === "history") {
 			const r = params.id
-				? await callCron("GET", `/jobs/${params.id}/runs`)
-				: await callCron("GET", "/runs");
+				? await callCron("GET", CRON_PATHS.jobRuns(params.id))
+				: await callCron("GET", CRON_PATHS.runs);
 			if (!r.ok) return { content: [{ type: "text", text: `❌ ${r.error}` }], details: { ok: false } };
-			const runs = r.data.runs || [];
-			if (runs.length === 0) {
-				return {
-					content: [{ type: "text", text: "没有执行历史(任务还没到点触发过)。" }],
-					details: { runs: [] },
-				};
-			}
-			const lines = runs.map((r: any) => {
-				const icon = r.exitCode === 0 ? "✅" : r.exitCode === null ? "⏳" : "❌";
-				const fin = r.finishedAt ? ` → exit=${r.exitCode}` : " (进行中)";
-				return `${icon} ${r.jobName}${fin}\n   ${r.startedAt}${r.outputFile ? `\n   输出:${r.outputFile}` : ""}`;
-			});
+			const runs = (r.data.runs || []) as CronRun[];
 			return {
-				content: [{ type: "text", text: `执行历史(最近 ${runs.length} 条):\n\n${lines.join("\n\n")}` }],
+				content: [{ type: "text", text: formatCronRunHistory(runs) }],
 				details: { runs },
 			};
 		}

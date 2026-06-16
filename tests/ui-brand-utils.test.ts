@@ -5,6 +5,7 @@ import {
 	buildUgkFooterLines,
 	buildUgkHeaderLines,
 	buildUgkLogoLines,
+	buildUgkStartupScreenLines,
 	UGK_BRAND_COLORS,
 } from "../extensions/ui-brand-utils.ts";
 
@@ -45,6 +46,45 @@ test("buildUgkLogoLines renders a compact block-character logo", () => {
 		assert.match(line, /█/);
 		assert.ok(line.length <= 96, `line exceeded width: ${line}`);
 	}
+});
+
+test("buildUgkStartupScreenLines fills the terminal viewport with character effects", () => {
+	const lines = buildUgkStartupScreenLines({
+		version: "1.0.0",
+		cwdName: "ugk-tui",
+		modelId: "deepseek-v4-pro",
+		width: 80,
+		rows: 24,
+	});
+
+	assert.equal(lines.length, 19);
+	assert.match(lines.join("\n"), /UGK TERMINAL/);
+	assert.match(lines.join("\n"), /[░▒▓]/);
+	assert.match(lines.join("\n"), /█/);
+	assert.match(lines.join("\n"), /\/plan/);
+	for (const line of lines) {
+		assert.ok(visibleWidth(line) <= 80, `line exceeded width: ${line}`);
+	}
+});
+
+test("buildUgkStartupScreenLines falls back to compact header in cramped terminals", () => {
+	const lines = buildUgkStartupScreenLines({
+		version: "1.0.0",
+		cwdName: "ugk-tui",
+		modelId: "deepseek-v4-pro",
+		width: 42,
+		rows: 12,
+	});
+
+	assert.deepEqual(
+		lines,
+		buildUgkHeaderLines({
+			version: "1.0.0",
+			cwdName: "ugk-tui",
+			modelId: "deepseek-v4-pro",
+			width: 42,
+		}),
+	);
 });
 
 test("buildUgkFooterLines keeps useful session status and truncates to width", () => {

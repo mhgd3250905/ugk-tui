@@ -57,3 +57,22 @@ test("ensureUgkQuietStartupDefault preserves explicit skills preference", () => 
 	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
 	assert.deepEqual(settings.skills, ["skills/**"]);
 });
+
+test("ensureUgkQuietStartupDefault enables clear startup screen when unset", () => {
+	const agentDir = makeTempAgentDir();
+
+	ensureUgkQuietStartupDefault(agentDir);
+
+	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+	assert.equal(settings.clearStartupScreen, true);
+});
+
+test("ensureUgkQuietStartupDefault preserves explicit clear startup screen preference", () => {
+	const agentDir = makeTempAgentDir();
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ clearStartupScreen: false }, null, 2));
+
+	ensureUgkQuietStartupDefault(agentDir);
+
+	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+	assert.equal(settings.clearStartupScreen, false);
+});

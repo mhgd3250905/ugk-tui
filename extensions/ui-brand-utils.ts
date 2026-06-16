@@ -19,6 +19,10 @@ export interface UgkHeaderOptions {
 	width: number;
 }
 
+export interface UgkStartupScreenOptions extends UgkHeaderOptions {
+	rows: number;
+}
+
 export interface UgkFooterUsage {
 	input: number;
 	output: number;
@@ -74,6 +78,33 @@ function panelWidth(width: number): number {
 	return Math.min(width, 64);
 }
 
+function centerLine(text: string, width: number): string {
+	const visible = text.length;
+	const leftPad = Math.max(0, Math.floor((width - visible) / 2));
+	return hardTruncate(`${" ".repeat(leftPad)}${text}`, width);
+}
+
+function decorativeRule(width: number, label: string): string {
+	const ruleWidth = panelWidth(width);
+	if (ruleWidth <= 0) return "";
+	const prefix = `╭─ ${label} `;
+	const suffix = "─╮";
+	const fill = "─".repeat(Math.max(0, ruleWidth - prefix.length - suffix.length));
+	return centerLine(`${prefix}${fill}${suffix}`, width);
+}
+
+function decorativeScanline(width: number): string {
+	const ruleWidth = panelWidth(width);
+	if (ruleWidth <= 0) return "";
+	const pattern = "░▒▓";
+	const repeated = pattern.repeat(Math.ceil(ruleWidth / pattern.length)).slice(0, ruleWidth);
+	return centerLine(repeated, width);
+}
+
+function centerBlock(lines: string[], width: number): string[] {
+	return lines.map((line) => centerLine(line, width));
+}
+
 function panelRule(left: string, label: string, right: string, width: number): string {
 	const ruleWidth = panelWidth(width);
 	if (ruleWidth <= 0) return "";
@@ -122,6 +153,29 @@ export function buildUgkHeaderLines(options: UgkHeaderOptions): string[] {
 		"",
 		...buildUgkInfoPanelLines(options),
 	];
+}
+
+export function buildUgkStartupScreenLines(options: UgkStartupScreenOptions): string[] {
+	if (options.width < 48 || options.rows < 18) {
+		return buildUgkHeaderLines(options);
+	}
+
+	const targetRows = Math.max(12, options.rows - 5);
+	const content = [
+		decorativeRule(options.width, "UGK TERMINAL"),
+		decorativeScanline(options.width),
+		"",
+		...centerBlock(buildUgkLogoLines(options.width), options.width),
+		"",
+		...centerBlock(buildUgkInfoPanelLines(options), options.width),
+		"",
+		centerLine("ready  //  local tools guarded  //  cdp ask mode", options.width),
+	];
+
+	const missing = Math.max(0, targetRows - content.length);
+	const topPadding = Math.floor(missing / 2);
+	const bottomPadding = missing - topPadding;
+	return [...Array(topPadding).fill(""), ...content, ...Array(bottomPadding).fill("")];
 }
 
 export function buildUgkFooterLines(options: UgkFooterOptions): string[] {

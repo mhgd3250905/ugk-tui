@@ -40,6 +40,11 @@ export function ensureUgkQuietStartupDefault(agentDir = getUgkAgentDir()) {
 		changed = true;
 	}
 
+	if (!Object.prototype.hasOwnProperty.call(nextSettings, "clearStartupScreen")) {
+		nextSettings.clearStartupScreen = true;
+		changed = true;
+	}
+
 	if (!changed) return;
 
 	fs.mkdirSync(agentDir, { recursive: true });

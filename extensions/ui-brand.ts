@@ -1,9 +1,16 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { buildUgkFooterLines, buildUgkHeaderLines, type UgkFooterUsage } from "./ui-brand-utils.ts";
+import {
+	buildUgkFooterLines,
+	buildUgkHeaderLines,
+	buildUgkStartupScreenLines,
+	type UgkFooterUsage,
+} from "./ui-brand-utils.ts";
 
 const VERSION = "1.0.0";
 const ENABLED_ENV_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -25,18 +32,51 @@ function formatTitle(pi: ExtensionAPI, cwd: string): string {
 	return session ? `ugk - ${session} - ${cwdName}` : `ugk - ${cwdName}`;
 }
 
+function getUgkSettingsPath(): string {
+	const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+	return path.join(agentDir, "settings.json");
+}
+
+function shouldClearStartupScreen(): boolean {
+	const rawEnv = process.env.UGK_CLEAR_STARTUP;
+	if (rawEnv && DISABLED_ENV_VALUES.has(rawEnv.toLowerCase())) return false;
+	if (rawEnv && ENABLED_ENV_VALUES.has(rawEnv.toLowerCase())) return true;
+
+	try {
+		const settings = JSON.parse(fs.readFileSync(getUgkSettingsPath(), "utf8"));
+		return settings.clearStartupScreen !== false;
+	} catch {
+		return true;
+	}
+}
+
+function clearStartupScreen(ctx: ExtensionContext): void {
+	if ((ctx as any).hasUI === false || !process.stdout.isTTY) return;
+	if (!shouldClearStartupScreen()) return;
+	process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+}
+
+function hasSessionMessages(ctx: ExtensionContext): boolean {
+	const entries = ctx.sessionManager?.getEntries?.() ?? ctx.sessionManager?.getBranch?.() ?? [];
+	return entries.length > 0;
+}
+
 function colorHeaderLine(line: string, index: number, theme: any): string {
+	const trimmed = line.trimStart();
 	if (line.includes("█")) {
 		return theme.bold(theme.fg("success", line));
 	}
+	if (/[░▒▓]/.test(line) || trimmed.startsWith("╭")) {
+		return theme.fg("dim", line);
+	}
 	if (!line.trim()) return line;
-	if (/^[┌├└]/.test(line)) {
+	if (/^[┌├└]/.test(trimmed)) {
 		return line
 			.replace("ugk", theme.bold(theme.fg("success", "ugk")))
 			.replace("quick actions", theme.fg("success", "quick actions"))
 			.replace("model", theme.fg("success", "model"));
 	}
-	if (line.startsWith("│")) {
+	if (trimmed.startsWith("│")) {
 		return line
 			.replace(/(workspace|agent|stack|model)/, theme.fg("dim", "$1"))
 			.replace("/plan", theme.fg("success", "/plan"))
@@ -67,12 +107,18 @@ class UgkHeader implements Component {
 
 	render(width: number): string[] {
 		const cwd = this.ctx.sessionManager?.getCwd?.() ?? this.ctx.cwd ?? process.cwd();
-		const lines = buildUgkHeaderLines({
+		const options = {
 			version: VERSION,
 			cwdName: path.basename(cwd),
 			modelId: this.ctx.model?.id,
 			width,
-		});
+		};
+		const lines = hasSessionMessages(this.ctx)
+			? buildUgkHeaderLines(options)
+			: buildUgkStartupScreenLines({
+					...options,
+					rows: process.stdout.rows || 24,
+				});
 		return ["", ...lines.map((line, i) => colorHeaderLine(line, i, this.theme)), ""];
 	}
 }
@@ -198,6 +244,7 @@ export default function registerUgkBrandUi(pi: ExtensionAPI): void {
 			return;
 		}
 		enabled = true;
+		clearStartupScreen(ctx);
 		applyBrandUi(pi, ctx);
 	});
 

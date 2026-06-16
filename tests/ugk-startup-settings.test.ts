@@ -38,3 +38,22 @@ test("ensureUgkQuietStartupDefault keeps existing settings", () => {
 	assert.equal(settings.theme, "ugk-geek");
 	assert.equal(settings.quietStartup, true);
 });
+
+test("ensureUgkQuietStartupDefault disables user global skills when unset", () => {
+	const agentDir = makeTempAgentDir();
+
+	ensureUgkQuietStartupDefault(agentDir);
+
+	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+	assert.deepEqual(settings.skills, ["!skills/**"]);
+});
+
+test("ensureUgkQuietStartupDefault preserves explicit skills preference", () => {
+	const agentDir = makeTempAgentDir();
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ skills: ["skills/**"] }, null, 2));
+
+	ensureUgkQuietStartupDefault(agentDir);
+
+	const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+	assert.deepEqual(settings.skills, ["skills/**"]);
+});

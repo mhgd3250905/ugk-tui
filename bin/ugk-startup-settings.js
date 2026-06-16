@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 const DEFAULT_AGENT_DIR = path.join(os.homedir(), ".pi", "agent");
+const DEFAULT_SKILLS = ["!skills/**"];
 
 function expandHome(input) {
 	if (input === "~") return os.homedir();
@@ -26,8 +27,21 @@ export function ensureUgkQuietStartupDefault(agentDir = getUgkAgentDir()) {
 		return;
 	}
 
-	if (Object.prototype.hasOwnProperty.call(settings, "quietStartup")) return;
+	const nextSettings = { ...settings };
+	let changed = false;
+
+	if (!Object.prototype.hasOwnProperty.call(nextSettings, "quietStartup")) {
+		nextSettings.quietStartup = true;
+		changed = true;
+	}
+
+	if (!Object.prototype.hasOwnProperty.call(nextSettings, "skills")) {
+		nextSettings.skills = DEFAULT_SKILLS;
+		changed = true;
+	}
+
+	if (!changed) return;
 
 	fs.mkdirSync(agentDir, { recursive: true });
-	fs.writeFileSync(settingsPath, `${JSON.stringify({ ...settings, quietStartup: true }, null, 2)}\n`);
+	fs.writeFileSync(settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`);
 }

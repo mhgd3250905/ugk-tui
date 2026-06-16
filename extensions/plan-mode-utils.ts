@@ -38,6 +38,9 @@ const DESTRUCTIVE_PATTERNS = [
 	/\bsystemctl\s+(start|stop|restart|enable|disable)/i,
 	/\bservice\s+\S+\s+(start|stop|restart)/i,
 	/\b(vim?|nano|emacs|code|subl)\b/i,
+	/(^|[|;&])\s*(sh|bash|zsh|fish|pwsh|powershell|cmd|node|python|python3|perl|ruby)\b/i,
+	/\bcurl\b.*(^|\s)(-o|--output|-O|--remote-name|--upload-file|-T)(\s|=|$)/i,
+	/\bcurl\b.*(^|\s)(-d|--data|--data-raw|--data-binary|-F|--form|-X|--request)(\s|=|$)/i,
 ];
 
 // Safe read-only commands allowed in plan mode
@@ -160,9 +163,13 @@ export function extractDoneSteps(message: string): number[] {
 
 export function markCompletedSteps(text: string, items: TodoItem[]): number {
 	const doneSteps = extractDoneSteps(text);
+	let completed = 0;
 	for (const step of doneSteps) {
 		const item = items.find((t) => t.step === step);
-		if (item) item.completed = true;
+		if (item && !item.completed) {
+			item.completed = true;
+			completed++;
+		}
 	}
-	return doneSteps.length;
+	return completed;
 }

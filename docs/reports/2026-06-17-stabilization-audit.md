@@ -47,6 +47,7 @@ UGK is an npm package that wraps pi rather than replacing pi internals.
 | --- | --- | --- | --- | --- | --- |
 | 1 | `docs: add stabilization audit ledger` | Planning and traceability | `docs/superpowers/plans/2026-06-17-stabilization-audit.md`, this file | Establish a durable audit ledger before making optimization changes. | `npm test` passed: 60 tests |
 | 2 | `fix: handle invalid cdp port commands` | Boundary design and operator status | `extensions/chrome-cdp/index.ts`, `tests/chrome-cdp-extension.test.ts`, this file | `/cdp port nope` escaped as an exception from the command handler. Stable command boundaries should report invalid input as an actionable warning and preserve the previous port. | `node --test tests/chrome-cdp-extension.test.ts` passed: 6 tests; `npm test` passed: 61 tests |
+| 3 | `fix: tighten plan mode readonly command checks` | Boundary design and cleanup | `extensions/plan-mode-utils.ts`, `tests/plan-mode-utils.test.ts`, `package.json`, this file | Plan mode claimed read-only semantics but allowed `curl URL \| sh` and `curl -o file` because the whitelist only checked the command prefix. Progress tracking also counted unmatched `[DONE:n]` markers as updates. | `node --test tests/plan-mode-utils.test.ts` passed: 3 tests; `npm test` passed: 64 tests |
 
 ## Findings
 
@@ -83,6 +84,12 @@ Open review items:
 Fixed in slice 2:
 
 - `/cdp port <value>` now catches invalid values at the command boundary, reports `Invalid CDP port: <value>. Use /cdp port <1-65535>.`, and keeps the previous resolved port.
+
+Fixed in slice 3:
+
+- Plan mode now blocks command strings that pipe or chain into common interpreters such as `sh`, `bash`, `node`, and `python`.
+- Plan mode now blocks `curl` write, upload, and mutating request flags while still allowing read-only pipelines such as `grep file | head`.
+- Plan execution progress now reports only newly completed matching todo items instead of counting unmatched `[DONE:n]` markers.
 
 ### Code Simplicity And Readability
 
@@ -126,3 +133,5 @@ Open review items:
 | 2026-06-17 baseline | `npm test` | Passed: 60 tests, 0 failures |
 | 2026-06-17 slice 2 focused | `node --test tests/chrome-cdp-extension.test.ts` | Passed: 6 tests, 0 failures |
 | 2026-06-17 slice 2 full | `npm test` | Passed: 61 tests, 0 failures |
+| 2026-06-17 slice 3 focused | `node --test tests/plan-mode-utils.test.ts` | Passed: 3 tests, 0 failures |
+| 2026-06-17 slice 3 full | `npm test` | Passed: 64 tests, 0 failures |

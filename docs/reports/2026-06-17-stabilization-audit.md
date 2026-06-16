@@ -49,6 +49,7 @@ UGK is an npm package that wraps pi rather than replacing pi internals.
 | 2 | `fix: handle invalid cdp port commands` | Boundary design and operator status | `extensions/chrome-cdp/index.ts`, `tests/chrome-cdp-extension.test.ts`, this file | `/cdp port nope` escaped as an exception from the command handler. Stable command boundaries should report invalid input as an actionable warning and preserve the previous port. | `node --test tests/chrome-cdp-extension.test.ts` passed: 6 tests; `npm test` passed: 61 tests |
 | 3 | `fix: tighten plan mode readonly command checks` | Boundary design and cleanup | `extensions/plan-mode-utils.ts`, `tests/plan-mode-utils.test.ts`, `package.json`, this file | Plan mode claimed read-only semantics but allowed `curl URL \| sh` and `curl -o file` because the whitelist only checked the command prefix. Progress tracking also counted unmatched `[DONE:n]` markers as updates. | `node --test tests/plan-mode-utils.test.ts` passed: 3 tests; `npm test` passed: 64 tests |
 | 4 | `docs: align stable capability documentation` | Documentation and operator status | `README.md`, `AGENTS.md`, this file | Stable-stage docs were stale: AGENTS still said v0.6.0, README omitted `chrome_cdp`, `/cdp`, `/ugk-ui`, `chrome-cdp-guide`, and used an obsolete fixed test count. | `rg "v0\\.6\\.0\|25 个" README.md AGENTS.md` returned no matches; `npm test` passed: 64 tests |
+| 5 | `fix: remove cron service inline require` | Module decoupling and runtime boundary | `cron/agent-bin.ts`, `cron/service.ts`, `tests/cron-agent-bin.test.ts`, `package.json`, this file | `cron/service.ts` runs in the package's ESM context but detected `ugk` with an inline `require("child_process")` inside job execution. That could fail only when a scheduled job fires, making the boundary hard to diagnose. | `node --test tests/cron-agent-bin.test.ts` passed: 2 tests; `npm test` passed: 66 tests |
 
 ## Findings
 
@@ -91,6 +92,11 @@ Fixed in slice 3:
 - Plan mode now blocks command strings that pipe or chain into common interpreters such as `sh`, `bash`, `node`, and `python`.
 - Plan mode now blocks `curl` write, upload, and mutating request flags while still allowing read-only pipelines such as `grep file | head`.
 - Plan execution progress now reports only newly completed matching todo items instead of counting unmatched `[DONE:n]` markers.
+
+Fixed in slice 5:
+
+- Cron agent binary detection is now a small tested module (`cron/agent-bin.ts`) instead of inline `require` inside the ESM cron service.
+- The cron service keeps the same runtime behavior: prefer `ugk`, fall back to `pi`.
 
 ### Code Simplicity And Readability
 
@@ -143,3 +149,5 @@ Open review items:
 | 2026-06-17 slice 3 full | `npm test` | Passed: 64 tests, 0 failures |
 | 2026-06-17 slice 4 stale-doc scan | `rg "v0\\.6\\.0\|25 个" README.md AGENTS.md` | No matches |
 | 2026-06-17 slice 4 full | `npm test` | Passed: 64 tests, 0 failures |
+| 2026-06-17 slice 5 focused | `node --test tests/cron-agent-bin.test.ts` | Passed: 2 tests, 0 failures |
+| 2026-06-17 slice 5 full | `npm test` | Passed: 66 tests, 0 failures |

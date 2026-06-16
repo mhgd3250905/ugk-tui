@@ -23,6 +23,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { CRON_PATHS, type CronJob, type CronRun } from "../extensions/cron-contract.ts";
+import { getCronAgentBin } from "./agent-bin.ts";
 
 // ---- 配置 ----
 const PORT = parseInt(process.env.UGK_CRON_PORT || "17741", 10);
@@ -107,7 +108,7 @@ async function executeJob(job: CronJob) {
 	console.log(`[${run.startedAt}] 触发任务: ${job.name} (${runId})`);
 
 	// 构造命令:优先 ugk(npm i -g ugk-agent),没有则 pi(开发环境)
-	const agentBin = (() => { try { require("child_process").execSync("ugk --version", { stdio: "ignore", timeout: 5000 }); return "ugk"; } catch { return "pi"; } })();
+	const agentBin = getCronAgentBin();
 	const args = ["--print", job.prompt];
 	if (job.model) {
 		args.push("--model", job.model);

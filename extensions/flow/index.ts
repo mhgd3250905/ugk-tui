@@ -15,6 +15,9 @@ const FLOW_PROMPT_PREFIXES = [
 	"[FLOW TASK REVIEW]",
 	"[FLOW STATUS]",
 	"[FLOW HELP]",
+	"[FLOW DRIVER ATTACH]",
+	"[FLOW DRIVER DETACH]",
+	"[FLOW DRIVER STATUS]",
 ];
 
 type ActionableFlowRequest = Exclude<FlowRequest, { kind: "help" } | { kind: "error"; message: string }>;

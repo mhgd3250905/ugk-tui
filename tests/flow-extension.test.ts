@@ -192,6 +192,8 @@ test("flow context filter removes stale flow task messages when no request is pe
 	const normalMessage = { role: "user", content: "正常用户消息" };
 	const plainMentionMessage = { role: "user", content: "普通用户消息提到 [FLOW TASK RUN] 但不是旧 prompt" };
 	const arrayMentionMessage = { role: "user", content: [{ type: "text", text: "说明文字 [FLOW TASK REVIEW]" }] };
+	const plainDriverMentionMessage = { role: "user", content: "普通用户消息提到 [FLOW DRIVER ATTACH] 但不是旧 prompt" };
+	const arrayDriverMentionMessage = { role: "user", content: [{ type: "text", text: "说明文字 [FLOW DRIVER STATUS]" }] };
 
 	const result = await handlers.get("context")![0]({
 		messages: [
@@ -199,11 +201,22 @@ test("flow context filter removes stale flow task messages when no request is pe
 			{ role: "user", content: "[FLOW TASK RUN]\nold" },
 			{ role: "user", content: "  [FLOW STATUS]\nold status" },
 			{ role: "user", content: [{ type: "text", text: "\n[FLOW TASK PROVE]\nold prove" }] },
+			{ role: "user", content: "[FLOW DRIVER ATTACH]\nold attach" },
+			{ role: "user", content: "  [FLOW DRIVER DETACH]\nold detach" },
+			{ role: "user", content: [{ type: "text", text: "\n[FLOW DRIVER STATUS]\nold driver status" }] },
 			normalMessage,
 			plainMentionMessage,
 			arrayMentionMessage,
+			plainDriverMentionMessage,
+			arrayDriverMentionMessage,
 		],
 	});
 
-	assert.deepEqual(result.messages, [normalMessage, plainMentionMessage, arrayMentionMessage]);
+	assert.deepEqual(result.messages, [
+		normalMessage,
+		plainMentionMessage,
+		arrayMentionMessage,
+		plainDriverMentionMessage,
+		arrayDriverMentionMessage,
+	]);
 });

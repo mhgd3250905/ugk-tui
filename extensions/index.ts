@@ -25,6 +25,7 @@ import registerUiTitlebar from "./ui-titlebar.ts";
 import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
+import registerFlow from "./flow/index.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
@@ -54,7 +55,7 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const rows = [
 		["🧰 Tools", "✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp"],
 		["🤖 Agents", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries"],
-		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /cdp  /ugk-ui"],
+		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /flow  /cdp  /ugk-ui"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		["🛡️ Guard", "dangerous bash gate enabled"],
 	] as const;
@@ -88,6 +89,9 @@ export default function (pi: ExtensionAPI) {
 
 	// 1.3b) plan-mode:只读探索模式(/plan 切换,bash 白名单,计划提取+进度跟踪)
 	registerPlanMode(pi);
+
+	// 1.3b.1) flow:Task workflow command(/flow 队列 + hidden context 注入)
+	registerFlow(pi);
 
 	// 1.3c) chrome-cdp:受保护的本地登录态 Chrome 控制器(/cdp + chrome_cdp tool)
 	registerChromeCdp(pi);

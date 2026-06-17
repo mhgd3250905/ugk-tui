@@ -41,6 +41,7 @@ test("builds task review prompt with main-agent review gate", () => {
 	assert.match(prompt, /run-001/);
 	assert.match(prompt, /不能由 driver subagent 自评/);
 	assert.match(prompt, /按 A\/B\/C\/D/);
+	assert.match(prompt, /逐环节向用户核对/);
 	assert.match(prompt, /用户确认/);
 });
 

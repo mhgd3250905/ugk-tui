@@ -64,7 +64,7 @@ export function buildFlowRequestPrompt(request: FlowRequest): string {
 				"请由 main agent 主持复盘:",
 				"- 不能由 driver subagent 自评，也不能让执行该 run 的 worker 自评。",
 				"- 检查 run 输入、日志、证据、输出和 `todo.md`。",
-				"- 按 A/B/C/D 给出结论，并说明证据和风险。",
+				"- 按 A/B/C/D（`SKILL.md` 的最优路径）逐环节向用户核对，并说明每一环节的证据和风险。",
 				"- failed/needs-human 未解决时不能写回 skill，也不能把 Task 推进为可复用状态。",
 				"- 需要用户确认后，才能把复盘结论写回 Task 状态或更新 `SKILL.md`。",
 			].join("\n");

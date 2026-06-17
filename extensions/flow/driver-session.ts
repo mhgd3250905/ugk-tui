@@ -60,7 +60,7 @@ export interface FlowDriverSession {
 	start(): Promise<void>;
 	sendUserInput(text: string): Promise<void>;
 	getTranscriptText(): string;
-	getWidgetLines(title: string): string[];
+	getWidgetLines(): string[];
 	dispose(): void;
 }
 
@@ -98,8 +98,8 @@ export async function createFlowDriverSession(
 		getTranscriptText() {
 			return transcript.toText();
 		},
-		getWidgetLines(title: string) {
-			return transcript.toWidgetLines(title);
+		getWidgetLines() {
+			return transcript.toWidgetLines(`Flow driver ${options.taskId}/${options.runId}`);
 		},
 		dispose() {
 			unsubscribe();

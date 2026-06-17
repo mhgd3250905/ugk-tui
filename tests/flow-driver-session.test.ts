@@ -92,7 +92,7 @@ test("driver session returns empty widget fallback", async () => {
 	});
 	const driver = await createFlowDriverSession(createOptions(), factory);
 
-	assert.deepEqual(driver.getWidgetLines("Driver"), ["Driver", "(no driver output yet)"]);
+	assert.deepEqual(driver.getWidgetLines(), ["Flow driver task-a/run-001", "(no driver output yet)"]);
 });
 
 test("driver session dispose unsubscribes before disposing session", async () => {

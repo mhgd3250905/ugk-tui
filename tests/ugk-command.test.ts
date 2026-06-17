@@ -44,10 +44,13 @@ test("/ugk renders a structured status panel", async () => {
 
 		const text = notifications.join("\n");
 		assert.match(text, /^🟢 UGK active/);
-		assert.match(text, /🧰 Tools:/);
-		assert.match(text, /🤖 Agents:/);
-		assert.match(text, /❌ API\s+DeepSeek 未配置/);
-		assert.match(text, /🛡️ Guard\s+dangerous bash gate enabled/);
+		assert.match(text, /┌─+┬─+┐/);
+		assert.match(text, /│\s*🧰 Tools\s*│\s*✅ greet/);
+		assert.match(text, /│\s*🤖 Agents\s*│\s*✅ @agent mention/);
+		assert.match(text, /│\s*⌨️ Commands\s*│\s*\/ugk/);
+		assert.match(text, /│\s*📡 API\s*│\s*❌ DeepSeek 未配置/);
+		assert.match(text, /│\s*🛡️ Guard\s*│\s*dangerous bash gate enabled/);
+		assert.doesNotMatch(text, /🧰 Tools:/);
 	} finally {
 		if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
 		else process.env.DEEPSEEK_API_KEY = previousApiKey;

@@ -12,6 +12,7 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +47,43 @@ const greetTool = defineTool({
 		};
 	},
 });
+
+function padEndVisible(text: string, width: number): string {
+	return `${text}${" ".repeat(Math.max(0, width - visibleWidth(text)))}`;
+}
+
+function tableRule(left: string, middle: string, right: string, labelWidth: number, valueWidth: number): string {
+	return `${left}${"─".repeat(labelWidth + 2)}${middle}${"─".repeat(valueWidth + 2)}${right}`;
+}
+
+function tableRow(label: string, value: string, labelWidth: number, valueWidth: number): string {
+	return `│ ${padEndVisible(label, labelWidth)} │ ${padEndVisible(value, valueWidth)} │`;
+}
+
+function formatUgkStatusTable(deepseekStatus: string): string {
+	const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
+	const apiSummary = deepseekStatus.replace(/^deepseek:\s*/, "DeepSeek ");
+	const rows = [
+		["🧰 Tools", "✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp"],
+		["🤖 Agents", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries"],
+		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /cdp  /ugk-ui"],
+		["📡 API", `${apiIcon} ${apiSummary}`],
+		["🛡️ Guard", "dangerous bash gate enabled"],
+	] as const;
+	const header = ["模块", "状态"] as const;
+	const labelWidth = Math.max(visibleWidth(header[0]), ...rows.map(([label]) => visibleWidth(label)));
+	const valueWidth = Math.max(visibleWidth(header[1]), ...rows.map(([, value]) => visibleWidth(value)));
+
+	return [
+		"🟢 UGK active",
+		"",
+		tableRule("┌", "┬", "┐", labelWidth, valueWidth),
+		tableRow(header[0], header[1], labelWidth, valueWidth),
+		tableRule("├", "┼", "┤", labelWidth, valueWidth),
+		...rows.map(([label, value]) => tableRow(label, value, labelWidth, valueWidth)),
+		tableRule("└", "┴", "┘", labelWidth, valueWidth),
+	].join("\n");
+}
 
 export default function (pi: ExtensionAPI) {
 	// 1) 自定义工具
@@ -106,28 +144,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("ugk", {
 		description: "Show ugk-pi-agent status",
 		handler: async (_args, ctx) => {
-			const deepseekStatus = getDeepSeekStatus();
-			const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
-			const apiSummary = deepseekStatus.replace(/^deepseek:\s*/, "DeepSeek ");
-			ctx.ui.notify(
-				[
-					"🟢 UGK active",
-					"",
-					"🧰 Tools:",
-					"  ✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp",
-					"",
-					"🤖 Agents:",
-					"  ✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries",
-					"",
-					"⌨️ Commands:",
-					"  /ugk  /doctor  /check-env  /update  /plan  /cdp  /ugk-ui",
-					"",
-					"📡 State:",
-					`  ${apiIcon} API     ${apiSummary}`,
-					"  🛡️ Guard   dangerous bash gate enabled",
-				].join("\n"),
-				"info",
-			);
+			ctx.ui.notify(formatUgkStatusTable(getDeepSeekStatus()), "info");
 		},
 	});
 

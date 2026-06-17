@@ -113,8 +113,7 @@ function makeTempFlowProject(
 	return cwd;
 }
 
-function makeTempTaskProject(taskId: string): string {
-	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
+function writeTempTask(cwd: string, taskId: string): void {
 	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
 	fs.mkdirSync(taskDir, { recursive: true });
 	fs.writeFileSync(
@@ -125,6 +124,11 @@ function makeTempTaskProject(taskId: string): string {
 	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n\n## 最优路径\n\nA. Prepare\n", "utf8");
 	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Run Todo\n", "utf8");
 	fs.writeFileSync(path.join(taskDir, "validator.md"), "# Validator\n", "utf8");
+}
+
+function makeTempTaskProject(taskId: string): string {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
+	writeTempTask(cwd, taskId);
 	return cwd;
 }
 
@@ -299,6 +303,7 @@ test("/flow task prove creates a run and starts a driver session", async () => {
 		assert.equal(fs.existsSync(path.join(runDir, "input.json")), true);
 		assert.equal(sentMessages.length, 0);
 		assert.match(notifications.at(-1)!.message, /Flow driver running/);
+		assert.match(notifications.at(-1)!.message, /\/flow attach x\/run-001/);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -527,6 +532,84 @@ test("driver focus input is forwarded to live driver sessions", async () => {
 		assert.deepEqual(started, ["started", "先暂停"]);
 		assert.deepEqual(widgets.get("flow-driver-view"), ["driver updated"]);
 		assert.match(notifications.at(-1)?.message ?? "", /Sent to Flow driver run-001/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("live driver lookup disambiguates colliding run ids by task", async () => {
+	const sent: string[] = [];
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: `${options.taskId}.jsonl`,
+		async start() {},
+		async sendUserInput(text: string) {
+			sent.push(`${options.taskId}:${text}`);
+		},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return [`${options.taskId} driver`];
+		},
+		dispose() {},
+	}));
+	try {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
+		writeTempTask(cwd, "task-a");
+		writeTempTask(cwd, "task-b");
+		const { pi, commands, handlers } = makePi();
+		const { ctx } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove task-a --input a", ctx);
+		await commands.get("flow").handler("task prove task-b --input b", ctx);
+		await commands.get("flow").handler("attach task-a/run-001", ctx);
+		const result = await handlers.get("input")![0]({ text: "只发给 task-a", source: "interactive" }, ctx);
+
+		assert.deepEqual(result, { action: "handled" });
+		assert.deepEqual(sent, ["task-a:只发给 task-a"]);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("session_shutdown disposes live drivers with colliding run ids", async () => {
+	const disposed: string[] = [];
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: `${options.taskId}.jsonl`,
+		async start() {},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return [`${options.taskId} driver`];
+		},
+		dispose() {
+			disposed.push(options.taskId);
+		},
+	}));
+	try {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
+		writeTempTask(cwd, "task-a");
+		writeTempTask(cwd, "task-b");
+		const { pi, commands, handlers } = makePi();
+		const { ctx } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove task-a --input a", ctx);
+		await commands.get("flow").handler("task prove task-b --input b", ctx);
+		for (const handler of handlers.get("session_shutdown") ?? []) {
+			await handler();
+		}
+
+		assert.deepEqual(disposed.sort(), ["task-a", "task-b"]);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}

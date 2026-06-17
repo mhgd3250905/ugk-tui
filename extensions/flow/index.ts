@@ -66,6 +66,10 @@ function getFlowContextId(message: { content?: unknown; customType?: string }): 
 	return message.content.match(FLOW_CONTEXT_ID_PATTERN)?.[1];
 }
 
+function getDriverKey(taskId: string, runId: string): string {
+	return `${taskId}/${runId}`;
+}
+
 let driverSessionFactoryForTests:
 	| ((options: Parameters<typeof createFlowDriverSession>[0]) => Promise<FlowDriverSession>)
 	| undefined;
@@ -131,7 +135,8 @@ export function registerFlow(pi: ExtensionAPI): void {
 			runDir: artifacts.runDir,
 			initialPrompt,
 		});
-		liveDrivers.set(runId, driver);
+		const driverKey = getDriverKey(taskId, runId);
+		liveDrivers.set(driverKey, driver);
 		writeDriverStatus(artifacts.runDir, {
 			taskId,
 			runId,
@@ -151,7 +156,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 				sessionFile: driver.sessionFile,
 			});
 		});
-		ctx.ui.notify(`Flow driver running: ${taskId}/${runId}\nAttach: /flow attach ${runId}`, "info");
+		ctx.ui.notify(`Flow driver running: ${driverKey}\nAttach: /flow attach ${driverKey}`, "info");
 	}
 
 	function findDriverForAttach(ctx: ExtensionContext, target: string): FlowDriverSummary | undefined {
@@ -346,7 +351,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 			driverResponse: "queued to driver",
 			affectedStep: driver.step,
 		});
-		const liveDriver = liveDrivers.get(driver.runId);
+		const liveDriver = liveDrivers.get(getDriverKey(driver.taskId, driver.runId));
 		if (!liveDriver) {
 			ctx.ui.notify(`Flow driver ${driver.runId} is recoverable but not live in this process. Feedback was recorded.`, "warning");
 			return { action: "handled" };

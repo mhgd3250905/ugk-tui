@@ -1,14 +1,34 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFile } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import {
+	applyUgkUpdate,
+	detectUgkUpdate,
+	formatUgkUpdateNotice,
+	readUgkUpdateState,
+	shouldCheckForUgkUpdate,
+	shouldPromptForUgkUpdate,
+	writeUgkUpdateState,
+} from "../bin/update-core.js";
 
-const execFileAsync = promisify(execFile);
-const GITHUB_MAIN_COMMIT_URL = "https://api.github.com/repos/mhgd3250905/ugk-tui/commits/main";
-const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export {
+	applyGlobalNpmUpdate,
+	applyLocalGitUpdate,
+	applyUgkUpdate,
+	detectUgkUpdate,
+	formatUgkUpdateNotice,
+	getGithubMainRef,
+	getGlobalPackageInstallCommand,
+	getLocalGitRef,
+	getPackageInstallCommand,
+	getUgkUpdateCommandLabel,
+	isGitAncestor,
+	isGitCheckout,
+	readPackageVersion,
+	readUgkUpdateState,
+	shouldCheckForUgkUpdate,
+	shouldPromptForUgkUpdate,
+	shortRef,
+	writeUgkUpdateState,
+} from "../bin/update-core.js";
 
 export interface UgkUpdateState {
 	lastCheckedAt?: string;
@@ -41,169 +61,40 @@ export interface UgkCommandSpec {
 	args: string[];
 }
 
-function shortRef(ref: string): string {
-	return ref.slice(0, 7);
-}
+const UPDATE_NOW = "现在更新";
+const SKIP_ONCE = "跳过本次";
+const SKIP_UNTIL_NEXT = "跳过到下个版本";
 
-function defaultPackageRoot(): string {
-	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-}
-
-function defaultAgentDir(): string {
-	return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
-}
-
-function statePath(agentDir = defaultAgentDir()): string {
-	return path.join(agentDir, "ugk-update.json");
-}
-
-export function readUgkUpdateState(agentDir = defaultAgentDir()): UgkUpdateState {
-	try {
-		return JSON.parse(fs.readFileSync(statePath(agentDir), "utf8"));
-	} catch {
-		return {};
-	}
-}
-
-export function writeUgkUpdateState(state: UgkUpdateState, agentDir = defaultAgentDir()): void {
-	fs.mkdirSync(agentDir, { recursive: true });
-	fs.writeFileSync(statePath(agentDir), `${JSON.stringify(state, null, 2)}\n`);
-}
-
-export function shouldCheckForUgkUpdate(state: UgkUpdateState, now: Date, force = false): boolean {
-	if (force) return true;
-	return true;
-}
-
-export function shouldPromptForUgkUpdate(state: UgkUpdateState, info: UgkUpdateInfo, now = new Date()): boolean {
-	if (state.skippedRef !== info.latestRef) return true;
-	if (!state.skippedAt) return true;
-	const skippedAt = Date.parse(state.skippedAt);
-	if (!Number.isFinite(skippedAt)) return true;
-	return now.getTime() - skippedAt >= CHECK_INTERVAL_MS;
-}
-
-export function formatUgkUpdateNotice(info: UgkUpdateInfo): string {
-	return [
-		"UGK 有新版本可用",
-		"",
-		`当前版本: ${info.currentVersion} (${shortRef(info.currentRef)})`,
-		`最新版本: ${shortRef(info.latestRef)}`,
-		"",
-		"更新内容:",
-		"- 同步 UGK 最新功能、修复和文档",
-	].join("\n");
-}
-
-export async function detectUgkUpdate(deps: UgkUpdateDeps = {}): Promise<UgkUpdateInfo | undefined> {
-	const currentRef = await (deps.getCurrentRef || (() => getLocalGitRef(deps.packageRoot)))();
-	const latestRef = await (deps.getLatestRef || getGithubMainRef)();
-	const currentVersion = (deps.getCurrentVersion || (() => readPackageVersion(deps.packageRoot)))();
-
-	if (!currentRef || !latestRef || currentRef === latestRef) return undefined;
-	const localAlreadyContainsLatest = await (deps.isLatestAncestorOfCurrent ||
-		((current, latest) => isGitAncestor(latest, current, deps.packageRoot)))(currentRef, latestRef);
-	if (localAlreadyContainsLatest) return undefined;
-
-	return {
-		currentRef,
-		latestRef,
-		currentVersion,
-		source: "github-main",
-	};
-}
-
-export async function isGitAncestor(
-	ancestorRef: string,
-	descendantRef: string,
-	packageRoot = defaultPackageRoot(),
-): Promise<boolean> {
-	try {
-		await execFileAsync("git", ["-C", packageRoot, "merge-base", "--is-ancestor", ancestorRef, descendantRef]);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-export async function getLocalGitRef(packageRoot = defaultPackageRoot()): Promise<string | undefined> {
-	try {
-		const { stdout } = await execFileAsync("git", ["-C", packageRoot, "rev-parse", "HEAD"]);
-		return stdout.trim() || undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-export async function getGithubMainRef(): Promise<string | undefined> {
-	try {
-		const response = await fetch(GITHUB_MAIN_COMMIT_URL, {
-			headers: { "user-agent": "ugk-agent/update-check" },
-		});
-		if (!response.ok) return undefined;
-		const body = (await response.json()) as { sha?: string };
-		return body.sha;
-	} catch {
-		return undefined;
-	}
-}
-
-export function readPackageVersion(packageRoot = defaultPackageRoot()): string {
-	try {
-		const pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
-		return pkg.version || "unknown";
-	} catch {
-		return "unknown";
-	}
-}
-
-export function getPackageInstallCommand(platform = process.platform): UgkCommandSpec {
-	if (platform === "win32") {
-		return {
-			command: "cmd.exe",
-			args: ["/d", "/s", "/c", "npm", "install"],
-		};
-	}
-
-	return {
-		command: "npm",
-		args: ["install"],
-	};
-}
-
-export async function applyLocalGitUpdate(packageRoot = defaultPackageRoot()): Promise<string> {
-	const status = await execFileAsync("git", ["-C", packageRoot, "status", "--porcelain", "--untracked-files=no"]);
-	if (status.stdout.trim()) {
-		throw new Error("当前本地项目有未提交的已跟踪改动,为避免覆盖修改,已取消自动更新。");
-	}
-
-	await execFileAsync("git", ["-C", packageRoot, "pull", "--rebase", "origin", "main"]);
-	const install = getPackageInstallCommand();
-	await execFileAsync(install.command, install.args, { cwd: packageRoot });
-	return "UGK 已更新完成。请重启 ugk 使用新版本。";
-}
-
-async function promptAndMaybeUpdate(ctx: any, info: UgkUpdateInfo, deps: UgkUpdateDeps, state: UgkUpdateState): Promise<void> {
+async function promptAndMaybeUpdate(
+	ctx: any,
+	info: UgkUpdateInfo,
+	deps: UgkUpdateDeps,
+	state: UgkUpdateState,
+): Promise<void> {
 	if (!ctx.hasUI || !ctx.ui?.select) {
 		ctx.ui?.notify?.(formatUgkUpdateNotice(info), "info");
 		return;
 	}
 
-	const choice = await ctx.ui.select(formatUgkUpdateNotice(info), ["现在更新", "跳过本次"]);
-	if (choice === "跳过本次") {
+	const choice = await ctx.ui.select(formatUgkUpdateNotice(info), [UPDATE_NOW, SKIP_ONCE, SKIP_UNTIL_NEXT]);
+	if (choice === SKIP_ONCE) {
+		ctx.ui.notify("已跳过本次 UGK 更新提示。", "info");
+		return;
+	}
+	if (choice === SKIP_UNTIL_NEXT) {
 		(deps.writeState || ((next) => writeUgkUpdateState(next, deps.agentDir)))({
 			...state,
 			skippedRef: info.latestRef,
 			skippedAt: (deps.now || (() => new Date()))().toISOString(),
 		});
-		ctx.ui.notify("已跳过本次 UGK 更新提示。", "info");
+		ctx.ui.notify("已跳过该版本 UGK 更新提示。", "info");
 		return;
 	}
-	if (choice !== "现在更新") return;
+	if (choice !== UPDATE_NOW) return;
 
 	try {
 		ctx.ui.notify("正在更新 UGK...", "info");
-		const result = await (deps.applyUpdate || (() => applyLocalGitUpdate(deps.packageRoot)))();
+		const result = await (deps.applyUpdate || (() => applyUgkUpdate(deps.packageRoot)))();
 		ctx.ui.notify(result, "info");
 	} catch (error) {
 		ctx.ui.notify(error instanceof Error ? error.message : "UGK 更新失败。", "warning");
@@ -219,14 +110,15 @@ async function checkAndPrompt(ctx: any, deps: UgkUpdateDeps = {}, force = false)
 	if (!shouldCheckForUgkUpdate(state, now, force)) return;
 
 	const info = await detectUgkUpdate(deps);
-	writeState({ ...state, lastCheckedAt: now.toISOString() });
+	const checkedState = { ...state, lastCheckedAt: now.toISOString() };
+	writeState(checkedState);
 	if (!info) {
 		if (force) ctx.ui.notify("UGK 已是最新版本。", "info");
 		return;
 	}
 	if (!force && !shouldPromptForUgkUpdate(state, info, now)) return;
 
-	await promptAndMaybeUpdate(ctx, info, deps, state);
+	await promptAndMaybeUpdate(ctx, info, deps, checkedState);
 }
 
 export function registerUgkUpdate(pi: ExtensionAPI, deps: UgkUpdateDeps = {}): void {
@@ -242,3 +134,4 @@ export function registerUgkUpdate(pi: ExtensionAPI, deps: UgkUpdateDeps = {}): v
 		void checkAndPrompt(ctx, deps, false).catch(() => undefined);
 	});
 }
+

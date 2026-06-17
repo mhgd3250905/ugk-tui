@@ -17,9 +17,22 @@ import { dirname, resolve } from "node:path";
 import { buildUgkCliArgs } from "./ugk-cli-args.js";
 import { applyUgkRuntimePolicy } from "./ugk-runtime-policy.js";
 import { ensureUgkQuietStartupDefault } from "./ugk-startup-settings.js";
+import { runUgkUpdatePreflight } from "./update-preflight.js";
 import { ensureWorkspaceTrusted } from "./workspace-trust.js";
 
 applyUgkRuntimePolicy();
+
+// 扩展文件绝对路径(与 cwd 无关,基于本文件位置定位)
+const here = dirname(fileURLToPath(import.meta.url));
+const packageRoot = resolve(here, "..");
+
+const update = await runUgkUpdatePreflight({
+	argv: process.argv.slice(2),
+	packageRoot,
+});
+if (update.action === "exit") {
+	process.exit(update.exitCode ?? 0);
+}
 
 const trust = await ensureWorkspaceTrusted();
 if (!trust.trusted) {
@@ -28,10 +41,6 @@ if (!trust.trusted) {
 }
 
 const { main } = await import("@earendil-works/pi-coding-agent");
-
-// 扩展文件绝对路径(与 cwd 无关,基于本文件位置定位)
-const here = dirname(fileURLToPath(import.meta.url));
-const packageRoot = resolve(here, "..");
 
 ensureUgkQuietStartupDefault();
 

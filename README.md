@@ -116,22 +116,29 @@ ugk --model deepseek-reasoner
 
 ## 🔄 更新 UGK
 
-UGK 会在 TUI 启动时限频检查 GitHub `main` 是否有新版本。发现更新时只显示 UGK 自己的选择:
+UGK 会在进入 TUI 前检查 GitHub `main` 是否有新版本。发现更新时会像 Codex CLI 一样先停在启动入口,只显示 UGK 自己的选择:
 
 ```text
-UGK 有新版本可用
+✨ Update available! 1.0.0 (aaaaaaa) -> bbbbbbb
 
-> 现在更新
-  跳过本次
+Release notes: https://github.com/mhgd3250905/ugk-tui/commits/main
+
+› 1. Update now (runs `git pull --rebase origin main && npm install`)
+  2. Skip
+  3. Skip until next version
+
+  Press enter to continue
 ```
 
-选择“现在更新”后,UGK 会自动执行本地更新流程;选择“跳过本次”后,同一个远端版本不会反复打扰。也可以在会话中手动输入:
+选择 `1` 或直接回车会执行更新,成功后提示重启并退出,不会继续加载旧 TUI。开发仓库内运行时执行 `git pull --rebase origin main && npm install`;正式 npm 安装场景执行 `npm install -g ugk-agent`。`2` 只跳过当前启动,`3` 会跳过当前远端版本直到下个版本出现。
+
+也可以在会话中手动输入:
 
 ```text
 /update
 ```
 
-UGK 不暴露 pi 更新。pi 是内部 runtime,版本只随 UGK 发布策略变化。
+`--print`、`--version`、非交互终端和 `UGK_SKIP_UPDATE_CHECK=1` 会跳过启动前更新检查。UGK 不暴露 pi 更新。pi 是内部 runtime,版本只随 UGK 发布策略变化。
 
 ---
 

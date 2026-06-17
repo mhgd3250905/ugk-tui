@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+	advanceTrustPromptSelection,
 	ensureWorkspaceTrusted,
 	findWorkspaceRoot,
 	isWorkspaceTrusted,
@@ -102,4 +103,26 @@ test("isWorkspaceTrusted supports legacy array-shaped state", () => {
 	} as unknown as TrustedWorkspacesState;
 
 	assert.equal(isWorkspaceTrusted(workspace, legacyState), true);
+});
+
+test("advanceTrustPromptSelection supports arrow navigation and enter selection", () => {
+	let state = { selected: 0 };
+
+	state = advanceTrustPromptSelection(state, "\u001b[B");
+	assert.equal(state.selected, 1);
+
+	state = advanceTrustPromptSelection(state, "\r");
+	assert.equal(state.done, true);
+	assert.equal(state.approved, false);
+});
+
+test("advanceTrustPromptSelection wraps with arrow keys and cancels on escape", () => {
+	let state = { selected: 0 };
+
+	state = advanceTrustPromptSelection(state, "\u001b[A");
+	assert.equal(state.selected, 1);
+
+	state = advanceTrustPromptSelection(state, "\u001b");
+	assert.equal(state.done, true);
+	assert.equal(state.approved, false);
 });

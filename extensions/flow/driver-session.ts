@@ -5,6 +5,7 @@ import {
 	getAgentDir,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import type { ExtensionMode, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { DriverTranscriptTail } from "./driver-view.ts";
 
 export interface FlowDriverSessionOptions {
@@ -14,6 +15,8 @@ export interface FlowDriverSessionOptions {
 	runDir: string;
 	initialPrompt: string;
 	onTranscriptUpdate?: () => void;
+	uiContext?: ExtensionUIContext;
+	extensionMode?: ExtensionMode;
 }
 
 type DriverSessionEvent = {
@@ -22,6 +25,8 @@ type DriverSessionEvent = {
 		type?: string;
 		delta?: string;
 	};
+	toolName?: string;
+	isError?: boolean;
 };
 
 export interface DriverSessionLike {
@@ -36,6 +41,83 @@ export interface DriverSessionLike {
 
 export type DriverSessionFactory = (options: FlowDriverSessionOptions) => Promise<{ session: DriverSessionLike }>;
 
+function formatRuntimeEvent(event: DriverSessionEvent): string | undefined {
+	if (event.type === "agent_start") {
+		return "[runtime] driver turn started";
+	}
+	if (event.type === "agent_end") {
+		return "[runtime] driver turn ended";
+	}
+	if (event.type === "tool_execution_start" && event.toolName) {
+		return `[tool] ${event.toolName} started`;
+	}
+	if (event.type === "tool_execution_end" && event.toolName) {
+		return `[tool] ${event.toolName} ${event.isError ? "failed" : "completed"}`;
+	}
+	return undefined;
+}
+
+const SUPPRESSED_DRIVER_UI_METHODS = new Set<PropertyKey>([
+	"setStatus",
+	"setWorkingMessage",
+	"setWorkingVisible",
+	"setWorkingIndicator",
+	"setHiddenThinkingLabel",
+	"setWidget",
+	"setFooter",
+	"setHeader",
+	"setTitle",
+	"pasteToEditor",
+	"setEditorText",
+	"addAutocompleteProvider",
+	"setEditorComponent",
+	"setTheme",
+	"setToolsExpanded",
+]);
+
+export function createFlowDriverUiContext(parentUi: ExtensionUIContext, driverLabel: string): ExtensionUIContext {
+	return new Proxy({} as ExtensionUIContext, {
+		get(_target, property) {
+			if (SUPPRESSED_DRIVER_UI_METHODS.has(property)) {
+				return () => {};
+			}
+			if (property === "notify") {
+				return (message: string, type?: "info" | "warning" | "error") =>
+					parentUi.notify(`[Flow driver ${driverLabel}] ${message}`, type);
+			}
+
+			const parentValue = (parentUi as any)[property];
+			if (typeof parentValue === "function") {
+				return parentValue.bind(parentUi);
+			}
+			if (parentValue !== undefined) {
+				return parentValue;
+			}
+
+			if (property === "select" || property === "input" || property === "editor" || property === "custom") {
+				return async () => undefined;
+			}
+			if (property === "confirm") {
+				return async () => false;
+			}
+			if (property === "getEditorText") {
+				return () => "";
+			}
+			if (property === "getAllThemes") {
+				return () => [];
+			}
+			if (property === "getTheme") {
+				return () => undefined;
+			}
+			if (property === "getToolsExpanded") {
+				return () => false;
+			}
+
+			return undefined;
+		},
+	});
+}
+
 export async function defaultDriverSessionFactory(
 	options: FlowDriverSessionOptions,
 ): Promise<{ session: DriverSessionLike }> {
@@ -49,6 +131,26 @@ export async function defaultDriverSessionFactory(
 		resourceLoader,
 		sessionManager: SessionManager.create(options.cwd, path.join(options.runDir, "session")),
 	});
+	await session.bindExtensions({
+		mode: options.extensionMode ?? "print",
+		uiContext: options.uiContext,
+		commandContextActions: {
+			waitForIdle: () => session.agent.waitForIdle(),
+			newSession: async () => ({ cancelled: true }),
+			fork: async () => ({ cancelled: true }),
+			navigateTree: async () => ({ cancelled: true }),
+			switchSession: async () => ({ cancelled: true }),
+			reload: async () => {
+				await session.reload();
+			},
+		},
+		onError: (error) => {
+			options.uiContext?.notify(
+				`[Flow driver ${options.taskId}/${options.runId}] Extension error (${error.extensionPath}): ${error.error}`,
+				"warning",
+			);
+		},
+	});
 
 	return { session };
 }
@@ -58,6 +160,7 @@ export interface FlowDriverSession {
 	readonly runId: string;
 	readonly runDir: string;
 	readonly sessionFile?: string;
+	readonly visibleSession?: unknown;
 	start(): Promise<void>;
 	sendUserInput(text: string): Promise<void>;
 	getTranscriptText(): string;
@@ -79,6 +182,13 @@ export async function createFlowDriverSession(
 		) {
 			transcript.appendText(event.assistantMessageEvent.delta);
 			options.onTranscriptUpdate?.();
+			return;
+		}
+
+		const runtimeLine = formatRuntimeEvent(event);
+		if (runtimeLine) {
+			transcript.appendLine(runtimeLine);
+			options.onTranscriptUpdate?.();
 		}
 	});
 
@@ -87,6 +197,7 @@ export async function createFlowDriverSession(
 		runId: options.runId,
 		runDir: options.runDir,
 		sessionFile: session.sessionFile,
+		visibleSession: session,
 		async start() {
 			await session.prompt(options.initialPrompt);
 		},

@@ -111,6 +111,20 @@ test("readDriverStatus returns undefined for invalid JSON and falls back unknown
 	assert.equal(status?.updatedAt, new Date(0).toISOString());
 });
 
+test("readDriverStatus treats completed as a done status alias", () => {
+	const cwd = makeTempCwd();
+	const runDir = path.join(cwd, ".flow", "tasks", "demo-task", "runs", "run-001");
+	mkdirSync(runDir, { recursive: true });
+	writeFileSync(path.join(runDir, "status.json"), '{ "status": "completed", "summary": "PASS" }\n');
+
+	const status = readDriverStatus(runDir);
+
+	assert.equal(status?.taskId, "demo-task");
+	assert.equal(status?.runId, "run-001");
+	assert.equal(status?.status, "done");
+	assert.equal(status?.summary, "PASS");
+});
+
 test("store helpers reject task ids that would escape the flow tasks directory", () => {
 	const cwd = makeTempCwd();
 	const outsideDir = path.resolve(cwd, "outside", "runs");

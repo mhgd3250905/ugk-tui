@@ -35,18 +35,24 @@ function makePi() {
 
 function makeCtx(cwd = process.cwd()) {
 	const notifications: Array<{ message: string; type?: string }> = [];
+	const confirms: Array<{ title: string; message: string }> = [];
 	const status = new Map<string, string | undefined>();
 	const widgets = new Map<string, unknown>();
 	const statusCalls: Array<{ key: string; value: string | undefined }> = [];
 	const widgetCalls: Array<{ key: string; value: unknown }> = [];
+	const sessionViewCalls: Array<{ action: "attach" | "detach"; owner: string; session?: unknown; options?: any }> = [];
 	return {
 		notifications,
+		confirms,
 		status,
 		widgets,
 		statusCalls,
 		widgetCalls,
+		sessionViewCalls,
 		ctx: {
 			cwd,
+			hasUI: true,
+			mode: "tui",
 			isIdle() {
 				return true;
 			},
@@ -59,6 +65,10 @@ function makeCtx(cwd = process.cwd()) {
 				notify(message: string, type?: string) {
 					notifications.push({ message, type });
 				},
+				async confirm(title: string, message: string) {
+					confirms.push({ title, message });
+					return true;
+				},
 				select(_title: string, options: string[]) {
 					return options[0];
 				},
@@ -69,6 +79,14 @@ function makeCtx(cwd = process.cwd()) {
 				setWidget(key: string, value: unknown) {
 					widgets.set(key, value);
 					widgetCalls.push({ key, value });
+				},
+				attachSessionView(owner: string, session: unknown, options?: any) {
+					sessionViewCalls.push({ action: "attach", owner, session, options });
+					return true;
+				},
+				detachSessionView(owner: string) {
+					sessionViewCalls.push({ action: "detach", owner });
+					return true;
 				},
 				theme: {
 					fg(_name: string, text: string) {
@@ -277,6 +295,7 @@ test("/flow task prove creates a run and starts a driver session", async () => {
 			initialPrompt = options.initialPrompt;
 			runDir = options.runDir;
 			started.push("started");
+			await new Promise(() => {});
 		},
 		async sendUserInput(text: string) {
 			started.push(text);
@@ -305,6 +324,44 @@ test("/flow task prove creates a run and starts a driver session", async () => {
 		assert.equal(sentMessages.length, 0);
 		assert.match(notifications.at(-1)!.message, /Flow driver running/);
 		assert.match(notifications.at(-1)!.message, /\/flow attach x\/run-001/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow task prove passes a confirmation-capable driver UI proxy", async () => {
+	let driverConfirmResult: boolean | undefined;
+	setFlowDriverSessionFactoryForTests(async (options: any) => {
+		driverConfirmResult = await options.uiContext.confirm("Allow Chrome CDP?", "driver needs logged-in Chrome");
+		options.uiContext.setStatus("driver-probe", "must not touch main status");
+		options.uiContext.setWidget("driver-probe", ["must not touch main widget"]);
+		return {
+			taskId: "x",
+			runId: "run-001",
+			runDir: options.runDir,
+			async start() {},
+			async sendUserInput() {},
+			getTranscriptText() {
+				return "";
+			},
+			getWidgetLines() {
+				return ["driver"];
+			},
+			dispose() {},
+		};
+	});
+	try {
+		const { pi, commands } = makePi();
+		const { ctx, confirms, status, widgets } = makeCtx();
+		ctx.cwd = makeTempTaskProject("x");
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+
+		assert.equal(driverConfirmResult, true);
+		assert.deepEqual(confirms, [{ title: "Allow Chrome CDP?", message: "driver needs logged-in Chrome" }]);
+		assert.equal(status.has("driver-probe"), false);
+		assert.equal(widgets.has("driver-probe"), false);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -544,6 +601,59 @@ test("driver start failure disposes and removes the live driver", async () => {
 	}
 });
 
+test("driver terminal completion detaches focused driver and disposes the live session", async () => {
+	let disposed = false;
+	let releaseStart!: () => void;
+	const startCompleted = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		async start() {
+			await startCompleted;
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "PASS";
+		},
+		getWidgetLines() {
+			return ["PASS"];
+		},
+		dispose() {
+			disposed = true;
+		},
+	}));
+	try {
+		const cwd = makeTempTaskProject("x");
+		const { pi, commands, entries } = makePi();
+		const { ctx, notifications, status, widgets } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		await commands.get("flow").handler("attach x/run-001", ctx);
+
+		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
+		releaseStart();
+		await sleep(10);
+
+		const runStatus = readDriverStatus(runDir);
+		assert.equal(disposed, true);
+		assert.equal(runStatus?.status, "done");
+		assert.equal(runStatus?.summary, "driver completed");
+		assert.equal(status.get("flow-driver"), undefined);
+		assert.equal(widgets.get("flow-driver-view"), undefined);
+		assert.deepEqual(entries.at(-1)?.data, { focus: "main" });
+		assert.equal(notifications.at(-1)?.type, "info");
+		assert.match(notifications.at(-1)?.message ?? "", /Flow driver completed: x\/run-001/);
+		assert.match(notifications.at(-1)?.message ?? "", /driver completed/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
 test("/flow attach with no args opens picker and focuses selected driver", async () => {
 	const updatedAt = new Date().toISOString();
 	const cwd = makeTempFlowProject([
@@ -761,6 +871,7 @@ test("driver focus input is forwarded to live driver sessions", async () => {
 		sessionFile: "driver.jsonl",
 		async start() {
 			started.push("started");
+			await new Promise(() => {});
 		},
 		async sendUserInput(text: string) {
 			started.push(text);
@@ -791,6 +902,123 @@ test("driver focus input is forwarded to live driver sessions", async () => {
 	}
 });
 
+test("/flow attach live driver activates native session view when a visible session is available", async () => {
+	const visibleSession = { kind: "driver-session" };
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		visibleSession,
+		async start() {
+			await new Promise(() => {});
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver widget fallback"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands } = makePi();
+		const { ctx, sessionViewCalls, widgets } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		await commands.get("flow").handler("attach x/run-001", ctx);
+
+		assert.deepEqual(sessionViewCalls.map((call) => call.action), ["attach"]);
+		assert.equal(sessionViewCalls[0].owner, "flow-driver");
+		assert.equal(sessionViewCalls[0].session, visibleSession);
+		assert.equal(sessionViewCalls[0].options.detachCommand, "/flow detach");
+		assert.match(sessionViewCalls[0].options.label, /x\/run-001/);
+		assert.equal(widgets.get("flow-driver-view"), undefined);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("driver focus input continues to native visible session instead of Flow forwarding", async () => {
+	const sent: string[] = [];
+	const visibleSession = { kind: "driver-session" };
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		visibleSession,
+		async start() {
+			await new Promise(() => {});
+		},
+		async sendUserInput(text: string) {
+			sent.push(text);
+		},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver widget fallback"];
+		},
+		dispose() {},
+	}));
+	try {
+		const cwd = makeTempTaskProject("x");
+		const { pi, commands, handlers } = makePi();
+		const { ctx } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		await commands.get("flow").handler("attach x/run-001", ctx);
+		const result = await handlers.get("input")![0]({ text: "先暂停", source: "interactive" }, ctx);
+
+		const feedback = fs.readFileSync(path.join(cwd, ".flow", "tasks", "x", "runs", "run-001", "feedback.md"), "utf8");
+		assert.deepEqual(result, { action: "continue" });
+		assert.deepEqual(sent, []);
+		assert.equal(feedback, "# User Feedback\n\n");
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow detach clears native session view", async () => {
+	const visibleSession = { kind: "driver-session" };
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		visibleSession,
+		async start() {
+			await new Promise(() => {});
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver widget fallback"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands } = makePi();
+		const { ctx, sessionViewCalls } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		await commands.get("flow").handler("attach x/run-001", ctx);
+		await commands.get("flow").handler("detach", ctx);
+
+		assert.deepEqual(sessionViewCalls.map((call) => call.action), ["attach", "detach"]);
+		assert.equal(sessionViewCalls[1].owner, "flow-driver");
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
 test("live driver transcript updates refresh the attached driver widget", async () => {
 	let onTranscriptUpdate: (() => void) | undefined;
 	let widgetLines = ["initial driver"];
@@ -801,7 +1029,9 @@ test("live driver transcript updates refresh the attached driver widget", async 
 			runId: options.runId,
 			runDir: options.runDir,
 			sessionFile: "driver.jsonl",
-			async start() {},
+			async start() {
+				await new Promise(() => {});
+			},
 			async sendUserInput() {},
 			getTranscriptText() {
 				return "";
@@ -839,7 +1069,9 @@ test("driver focus input delivery failure is handled and marks the run failed", 
 		runId: options.runId,
 		runDir: options.runDir,
 		sessionFile: "driver.jsonl",
-		async start() {},
+		async start() {
+			await new Promise(() => {});
+		},
 		async sendUserInput() {
 			sendCalls += 1;
 			throw new Error("delivery failed");
@@ -892,7 +1124,9 @@ test("live driver lookup disambiguates colliding run ids by task", async () => {
 		runId: options.runId,
 		runDir: options.runDir,
 		sessionFile: `${options.taskId}.jsonl`,
-		async start() {},
+		async start() {
+			await new Promise(() => {});
+		},
 		async sendUserInput(text: string) {
 			sent.push(`${options.taskId}:${text}`);
 		},
@@ -931,7 +1165,9 @@ test("session_shutdown pauses transient live drivers and disposes them", async (
 		runId: options.runId,
 		runDir: options.runDir,
 		sessionFile: `${options.taskId}.jsonl`,
-		async start() {},
+		async start() {
+			await new Promise(() => {});
+		},
 		async sendUserInput() {},
 		getTranscriptText() {
 			return "";

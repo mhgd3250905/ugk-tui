@@ -63,6 +63,16 @@ function isDriverStatus(value: unknown): value is FlowDriverStatus {
 	return typeof value === "string" && DRIVER_STATUSES.includes(value as FlowDriverStatus);
 }
 
+function normalizeDriverStatus(value: unknown): FlowDriverStatus {
+	if (isDriverStatus(value)) {
+		return value;
+	}
+	if (value === "completed") {
+		return "done";
+	}
+	return "paused";
+}
+
 function inferTaskId(runDir: string): string | undefined {
 	const parts = path.normalize(runDir).split(path.sep);
 	const runsIndex = parts.lastIndexOf("runs");
@@ -114,7 +124,7 @@ export function readDriverStatus(runDir: string): FlowDriverStatusFile | undefin
 	return {
 		taskId,
 		runId,
-		status: isDriverStatus(parsed.status) ? parsed.status : "paused",
+		status: normalizeDriverStatus(parsed.status),
 		step: optionalString(parsed.step),
 		summary: optionalString(parsed.summary),
 		updatedAt: optionalString(parsed.updatedAt) ?? new Date(0).toISOString(),
@@ -247,7 +257,7 @@ export function buildDriverInitialPrompt(args: { taskId: string; runId: string; 
 		"- 每一步都填写 todo.md 的实际执行、偏离旧方案、解决过程和证据。",
 		"- 输出写入 run/output/，证据写入 run/evidence/。",
 		"- 进度写入 progress.md。",
-		"- 状态写入 status.json。",
+		"- 不要写入或修改 status.json；run 生命周期状态由 Flow runtime 统一控制。",
 		"- 你不能修改 SKILL.md、todo.template.md 或 validator.md。",
 		"- 如果用户通过 driver focus 插嘴，先记录反馈，再调整执行。",
 	].join("\n");

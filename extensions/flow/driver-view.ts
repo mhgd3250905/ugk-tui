@@ -3,6 +3,12 @@ const MAX_TRANSCRIPT_LINES = 30;
 export class DriverTranscriptTail {
 	private lines: string[] = [];
 
+	private trim(): void {
+		if (this.lines.length > MAX_TRANSCRIPT_LINES) {
+			this.lines = this.lines.slice(-MAX_TRANSCRIPT_LINES);
+		}
+	}
+
 	appendText(text: string): void {
 		const parts = text.split(/\r\n|\n|\r/);
 		if (parts.length === 0) {
@@ -18,9 +24,12 @@ export class DriverTranscriptTail {
 			this.lines.push(part);
 		}
 
-		if (this.lines.length > MAX_TRANSCRIPT_LINES) {
-			this.lines = this.lines.slice(-MAX_TRANSCRIPT_LINES);
-		}
+		this.trim();
+	}
+
+	appendLine(line: string): void {
+		this.lines.push(line);
+		this.trim();
 	}
 
 	toText(): string {

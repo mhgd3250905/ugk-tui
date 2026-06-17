@@ -19,23 +19,24 @@ function createOptions(): FlowDriverSessionOptions {
 
 test("driver session starts with the generated prompt and records transcript tail", async () => {
 	const prompts: string[] = [];
-	const factory: DriverSessionFactory = async () => ({
-		session: {
-			isStreaming: false,
-			subscribe(callback) {
-				callback({
-					type: "message_update",
-					assistantMessageEvent: { type: "text_delta", delta: "hello" },
-				});
-				return () => {};
-			},
-			async prompt(text) {
-				prompts.push(text);
-			},
-			async steer() {},
-			async followUp() {},
-			dispose() {},
+	const sessionHandle = {
+		isStreaming: false,
+		subscribe(callback: (event: any) => void) {
+			callback({
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: "hello" },
+			});
+			return () => {};
 		},
+		async prompt(text: string) {
+			prompts.push(text);
+		},
+		async steer() {},
+		async followUp() {},
+		dispose() {},
+	};
+	const factory: DriverSessionFactory = async () => ({
+		session: sessionHandle,
 	});
 
 	const driver = await createFlowDriverSession(createOptions(), factory);
@@ -43,6 +44,7 @@ test("driver session starts with the generated prompt and records transcript tai
 
 	assert.deepEqual(prompts, ["start driver"]);
 	assert.equal(driver.getTranscriptText(), "hello");
+	assert.equal(driver.visibleSession, sessionHandle);
 });
 
 test("driver session notifies when transcript receives text deltas", async () => {
@@ -93,6 +95,41 @@ test("driver session ignores non-text transcript events for update callback", as
 	listener!({ type: "message_update", assistantMessageEvent: { type: "tool_call_delta", delta: "ignored" } });
 
 	assert.equal(updates, 0);
+});
+
+test("driver session appends runtime tool execution events to transcript", async () => {
+	let listener: ((event: any) => void) | undefined;
+	let updates = 0;
+	const factory: DriverSessionFactory = async () => ({
+		session: {
+			isStreaming: false,
+			subscribe(callback) {
+				listener = callback;
+				return () => {};
+			},
+			async prompt() {},
+			async steer() {},
+			async followUp() {},
+			dispose() {},
+		},
+	});
+
+	const driver = await createFlowDriverSession({ ...createOptions(), onTranscriptUpdate: () => updates += 1 }, factory);
+	listener!({ type: "agent_start" });
+	listener!({ type: "tool_execution_start", toolName: "chrome_cdp" });
+	listener!({ type: "tool_execution_end", toolName: "chrome_cdp", isError: false });
+	listener!({ type: "agent_end" });
+
+	assert.equal(
+		driver.getTranscriptText(),
+		[
+			"[runtime] driver turn started",
+			"[tool] chrome_cdp started",
+			"[tool] chrome_cdp completed",
+			"[runtime] driver turn ended",
+		].join("\n"),
+	);
+	assert.equal(updates, 4);
 });
 
 test("driver session sends steer while streaming and prompt while idle", async () => {

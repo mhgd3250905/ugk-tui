@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { buildUgkCliArgs } from "./ugk-cli-args.js";
 import { applyUgkRuntimePolicy } from "./ugk-runtime-policy.js";
+import { installUgkSessionViewPatch } from "./ugk-session-view-patch.js";
 import { ensureUgkQuietStartupDefault } from "./ugk-startup-settings.js";
 import { runUgkUpdatePreflight } from "./update-preflight.js";
 import { ensureWorkspaceTrusted } from "./workspace-trust.js";
@@ -40,7 +41,8 @@ if (!trust.trusted) {
 	process.exit(1);
 }
 
-const { main } = await import("@earendil-works/pi-coding-agent");
+const { InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
+installUgkSessionViewPatch({ InteractiveMode });
 
 ensureUgkQuietStartupDefault();
 

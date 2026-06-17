@@ -29,9 +29,9 @@ function buildTaskExecutionPrompt(kind: "task-prove" | "task-run", taskId: strin
 			? [
 					`- 读取 ${taskPath}；如果 status 是 draft，将本次尝试的任务状态更新为 proving。`,
 					"- 创建 `runs/run-<timestamp-or-id>/`，写入 `input.json`，并从 `todo.template.md` 复制生成本次 `todo.md`。",
-					"- 启动 interactive driver session 执行任务主体；main agent 只负责创建 run、记录状态和转发 driver focus 输入。",
+					"- 启动 interactive driver session 执行任务主体；Flow runtime 负责创建 run、维护状态和转发 driver focus 输入。",
 					"- driver 必须读取当前 Task 的 `SKILL.md`、`todo.md` 和 `validator.md`，按最优路径逐项执行并填写证据。",
-					"- 执行后写入输出、日志、证据、`validation.md` 和 `status.json`。",
+					"- 执行后写入输出、日志、证据和 `validation.md`；不要写入或修改 `status.json`。",
 					"- 只有 `validator.md` 的验收通过且证据完整，才可把 Task 推进为 verified；否则标记 failed 或 needs-human。",
 				]
 			: [
@@ -39,9 +39,9 @@ function buildTaskExecutionPrompt(kind: "task-prove" | "task-run", taskId: strin
 					"- 如果 status 是 needs-human，停止执行并说明需要用户先完成复盘或补充指导。",
 					"- 只有 status 是 verified/active 时，才允许创建新的 `runs/run-<timestamp-or-id>/`。",
 					"- 为本次 run 写入 `input.json`，并从 `todo.template.md` 复制生成本次 `todo.md`。",
-					"- 启动 interactive driver session 执行任务主体；main agent 只负责创建 run、记录状态和转发 driver focus 输入。",
+					"- 启动 interactive driver session 执行任务主体；Flow runtime 负责创建 run、维护状态和转发 driver focus 输入。",
 					"- driver 必须读取当前 Task 的 `SKILL.md`、`todo.md` 和 `validator.md`，按最优路径逐项执行并填写证据。",
-					"- 执行后写入输出、日志、证据、`validation.md` 和 `status.json`。",
+					"- 执行后写入输出、日志、证据和 `validation.md`；不要写入或修改 `status.json`。",
 				];
 	return [
 		title,

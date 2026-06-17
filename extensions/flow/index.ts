@@ -11,7 +11,7 @@ import {
 	restoreFlowFocus,
 } from "./driver-focus.ts";
 import { getDriverPickerOptions, parseDriverPickerSelection } from "./driver-picker.ts";
-import { createFlowDriverSession, type FlowDriverSession } from "./driver-session.ts";
+import { createFlowDriverSession, createFlowDriverUiContext, type FlowDriverSession } from "./driver-session.ts";
 import {
 	appendDriverFeedback,
 	buildDriverInitialPrompt,
@@ -47,11 +47,24 @@ const TRANSIENT_DRIVER_STATUSES: FlowDriverStatus[] = [
 	"waiting-for-user",
 	"validating",
 ];
+const FLOW_SESSION_VIEW_OWNER = "flow-driver";
 
 type ActionableFlowRequest = Exclude<FlowRequest, { kind: "help" } | { kind: "error"; message: string }>;
 type TaskGuardResult =
 	| { ok: true; taskDir: string; status: string | undefined }
 	| { ok: false; message: string; type: "warning" | "error" };
+type FlowSessionViewUi = ExtensionContext["ui"] & {
+	attachSessionView?: (
+		owner: string,
+		session: unknown,
+		options?: {
+			label?: string;
+			detachCommand?: string;
+			onDetach?: () => void | Promise<void>;
+		},
+	) => boolean;
+	detachSessionView?: (owner: string) => boolean;
+};
 
 function isActionableFlowRequest(request: FlowRequest): request is ActionableFlowRequest {
 	return request.kind !== "help" && request.kind !== "error";
@@ -165,6 +178,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 	let activeContextId: string | undefined;
 	let focusState: FlowFocusState = { focus: "main" };
 	const liveDrivers = new Map<string, FlowDriverSession>();
+	let activeSessionViewDriverKey: string | undefined;
 
 	function persistFocus(state: FlowFocusState): void {
 		pi.appendEntry(FLOW_FOCUS_ENTRY_TYPE, state);
@@ -174,12 +188,37 @@ export function registerFlow(pi: ExtensionAPI): void {
 		return typeof ctx.cwd === "string" ? ctx.cwd : process.cwd();
 	}
 
-	function renderFocus(ctx: ExtensionContext, driver?: FlowDriverSummary): void {
+	function detachVisibleSessionView(ctx: ExtensionContext): void {
+		if (!activeSessionViewDriverKey) {
+			return;
+		}
+		(ctx.ui as FlowSessionViewUi).detachSessionView?.(FLOW_SESSION_VIEW_OWNER);
+		activeSessionViewDriverKey = undefined;
+	}
+
+	function clearFocusedDriver(ctx: ExtensionContext, options?: { skipSessionViewDetach?: boolean }): void {
+		if (!options?.skipSessionViewDetach) {
+			detachVisibleSessionView(ctx);
+		}
+		focusState = detachFlowDriver(focusState);
+		persistFocus(focusState);
+		renderFocus(ctx, undefined, { skipSessionViewDetach: true });
+	}
+
+	function renderFocus(
+		ctx: ExtensionContext,
+		driver?: FlowDriverSummary,
+		options?: { skipSessionViewDetach?: boolean },
+	): void {
 		if (focusState.focus === "driver" && driver) {
 			setFlowDriverBanner({ taskId: driver.taskId, runId: driver.runId, status: driver.status });
 			const statusText = `driver:${driver.runId}`;
 			const liveDriver = liveDrivers.get(getDriverKey(driver.taskId, driver.runId));
 			ctx.ui.setStatus?.("flow-driver", ctx.ui.theme?.fg?.("warning", statusText) ?? statusText);
+			if (activeSessionViewDriverKey === getDriverKey(driver.taskId, driver.runId)) {
+				ctx.ui.setWidget?.("flow-driver-view", undefined);
+				return;
+			}
 			ctx.ui.setWidget?.(
 				"flow-driver-view",
 				liveDriver?.getWidgetLines() ?? [
@@ -192,14 +231,49 @@ export function registerFlow(pi: ExtensionAPI): void {
 			return;
 		}
 
+		if (!options?.skipSessionViewDetach) {
+			detachVisibleSessionView(ctx);
+		}
 		clearFlowDriverBanner();
 		ctx.ui.setStatus?.("flow-driver", undefined);
 		ctx.ui.setWidget?.("flow-driver-view", undefined);
 	}
 
+	function attachVisibleSessionView(ctx: ExtensionContext, driver: FlowDriverSummary, liveDriver: FlowDriverSession): boolean {
+		if (!liveDriver.visibleSession) {
+			return false;
+		}
+		const ui = ctx.ui as FlowSessionViewUi;
+		if (typeof ui.attachSessionView !== "function") {
+			return false;
+		}
+
+		const driverKey = getDriverKey(driver.taskId, driver.runId);
+		const attached = ui.attachSessionView(FLOW_SESSION_VIEW_OWNER, liveDriver.visibleSession, {
+			label: `Flow driver ${driverKey}`,
+			detachCommand: "/flow detach",
+			onDetach: () => {
+				if (focusState.focus === "driver" && getDriverKey(focusState.taskId ?? driver.taskId, focusState.runId) === driverKey) {
+					clearFocusedDriver(ctx, { skipSessionViewDetach: true });
+					ctx.ui.notify("Flow driver detached.", "info");
+				}
+			},
+		});
+		if (!attached) {
+			return false;
+		}
+
+		activeSessionViewDriverKey = driverKey;
+		return true;
+	}
+
 	function attachDriverBySummary(driver: FlowDriverSummary, ctx: ExtensionContext): void {
 		focusState = attachFlowDriver(focusState, driver);
 		persistFocus(focusState);
+		const liveDriver = liveDrivers.get(getDriverKey(driver.taskId, driver.runId));
+		if (liveDriver) {
+			attachVisibleSessionView(ctx, driver, liveDriver);
+		}
 		renderFocus(ctx, driver);
 		ctx.ui.notify(`Flow driver attached: ${driver.taskId}/${driver.runId}`, "info");
 	}
@@ -229,7 +303,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 			focusState.runId === runId &&
 			(focusState.taskId === undefined || focusState.taskId === taskId);
 		const scheduleTranscriptWidgetRefresh = () => {
-			if (!isCurrentFocusedDriver() || transcriptRefreshQueued) {
+			if (!isCurrentFocusedDriver() || activeSessionViewDriverKey === driverKey || transcriptRefreshQueued) {
 				return;
 			}
 			transcriptRefreshQueued = true;
@@ -249,6 +323,8 @@ export function registerFlow(pi: ExtensionAPI): void {
 				runDir: artifacts.runDir,
 				initialPrompt,
 				onTranscriptUpdate: scheduleTranscriptWidgetRefresh,
+				uiContext: ctx.hasUI ? createFlowDriverUiContext(ctx.ui, driverKey) : undefined,
+				extensionMode: "print",
 			});
 		} catch (error) {
 			const summary = errorMessage(error);
@@ -276,20 +352,45 @@ export function registerFlow(pi: ExtensionAPI): void {
 			sessionFile: liveDriver.sessionFile,
 		});
 		ctx.ui.setWidget?.("flow-driver-view", liveDriver.getWidgetLines(), { placement: "aboveEditor" });
-		void liveDriver.start().catch((error) => {
-			const summary = errorMessage(error);
-			writeDriverStatus(artifacts.runDir, {
-				taskId,
-				runId,
-				status: "failed",
-				step: "driver start",
-				summary,
-				sessionFile: liveDriver.sessionFile,
+		void liveDriver
+			.start()
+			.then(() => {
+				writeDriverStatus(artifacts.runDir, {
+					taskId,
+					runId,
+					status: "done",
+					step: "complete",
+					summary: "driver completed",
+					sessionFile: liveDriver.sessionFile,
+				});
+				const status = readDriverStatus(artifacts.runDir)!;
+
+				if (isCurrentFocusedDriver()) {
+					clearFocusedDriver(ctx);
+				}
+				liveDrivers.delete(driverKey);
+				liveDriver.dispose();
+				const summary = status.summary ? `\n${status.summary}` : "";
+				const type = status.status === "failed" ? "error" : status.status === "needs-human" ? "warning" : "info";
+				ctx.ui.notify(`Flow driver completed: ${driverKey}\nStatus: ${status.status}${summary}`, type);
+			})
+			.catch((error) => {
+				const summary = errorMessage(error);
+				writeDriverStatus(artifacts.runDir, {
+					taskId,
+					runId,
+					status: "failed",
+					step: "driver start",
+					summary,
+					sessionFile: liveDriver.sessionFile,
+				});
+				if (isCurrentFocusedDriver()) {
+					clearFocusedDriver(ctx);
+				}
+				liveDrivers.delete(driverKey);
+				liveDriver.dispose();
+				ctx.ui.notify(`Flow driver failed: ${driverKey}\n${summary}`, "error");
 			});
-			liveDrivers.delete(driverKey);
-			liveDriver.dispose();
-			ctx.ui.notify(`Flow driver failed: ${driverKey}\n${summary}`, "error");
-		});
 		ctx.ui.notify(`Flow driver running: ${driverKey}\nAttach: /flow attach ${driverKey}`, "info");
 	}
 
@@ -370,9 +471,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 			}
 
 			if (request.kind === "detach") {
-				focusState = detachFlowDriver(focusState);
-				persistFocus(focusState);
-				renderFocus(ctx);
+				clearFocusedDriver(ctx);
 				ctx.ui.notify("Flow driver detached.", "info");
 				return;
 			}
@@ -495,6 +594,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 			ctx.ui.notify(`Flow driver ${driver.runId} is recoverable but not live in this process. Feedback was recorded.`, "warning");
 			return { action: "handled" };
 		}
+		if (activeSessionViewDriverKey === getDriverKey(driver.taskId, driver.runId)) {
+			return { action: "continue" };
+		}
 		appendDriverFeedback(driver.runDir, {
 			message: event.text,
 			driverResponse: "queued to driver",
@@ -528,7 +630,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 		return { action: "handled" };
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
+		if (ctx) {
+			detachVisibleSessionView(ctx);
+		}
 		for (const driver of liveDrivers.values()) {
 			const status = readDriverStatus(driver.runDir);
 			if (status && isTransientDriverStatus(status.status)) {

@@ -256,17 +256,29 @@ test("/flow attach with no args opens picker and focuses selected driver", async
 			step: "step 4",
 			updatedAt: "2026-06-17T00:00:02.000Z",
 		},
+		{
+			taskId: "task-done",
+			runId: "run-009",
+			status: "done",
+			step: "complete",
+			updatedAt: "2026-06-17T00:00:03.000Z",
+		},
 	]);
 	const { pi, commands, sentMessages, entries } = makePi();
 	const { ctx, notifications, status } = makeCtx(cwd);
-	ctx.ui.select = async (_title: string, options: string[]) => options[1];
+	let pickerOptions: string[] = [];
+	ctx.ui.select = async (_title: string, options: string[]) => {
+		pickerOptions = options;
+		return options[1];
+	};
 	registerFlow(pi as any);
 
 	await commands.get("flow").handler("attach", ctx);
 
 	assert.equal(notifications.at(-1)?.type, "info");
 	assert.match(notifications.at(-1)?.message ?? "", /Flow driver attached/);
-	assert.match(notifications.at(-1)?.message ?? "", /run-004/);
+	assert.match(notifications.at(-1)?.message ?? "", /task-b\/run-004/);
+	assert.ok(pickerOptions.some((option) => option.includes("done") && option.includes("run-009")));
 	assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "task-b", runId: "run-004" });
 	assert.equal(status.get("flow-driver"), "driver:run-004");
 	assert.equal(sentMessages.length, 0);
@@ -284,7 +296,7 @@ test("/flow attach <run-id> direct attach", async () => {
 
 	assert.equal(notifications.at(-1)?.type, "info");
 	assert.match(notifications.at(-1)?.message ?? "", /Flow driver attached/);
-	assert.match(notifications.at(-1)?.message ?? "", /run-001/);
+	assert.match(notifications.at(-1)?.message ?? "", /task-a\/run-001/);
 	assert.equal(sentMessages.length, 0);
 });
 

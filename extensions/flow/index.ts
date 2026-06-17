@@ -93,11 +93,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 		focusState = attachFlowDriver(focusState, driver);
 		persistFocus(focusState);
 		renderFocus(ctx, driver);
-		ctx.ui.notify(`Flow driver attached: ${driver.runId}`, "info");
-	}
-
-	function getAttachableDrivers(ctx: ExtensionContext): FlowDriverSummary[] {
-		return listDriverSummaries(getCwd(ctx)).filter((driver) => driver.status !== "done");
+		ctx.ui.notify(`Flow driver attached: ${driver.taskId}/${driver.runId}`, "info");
 	}
 
 	pi.registerCommand("flow", {
@@ -125,7 +121,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 					return;
 				}
 
-				const drivers = getAttachableDrivers(ctx);
+				const drivers = listDriverSummaries(getCwd(ctx));
 				if (drivers.length === 0) {
 					ctx.ui.notify("No Flow drivers available to attach.", "info");
 					return;

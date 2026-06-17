@@ -5,15 +5,20 @@ import { registerFlow } from "../extensions/flow/index.ts";
 function makePi() {
 	const commands = new Map<string, any>();
 	const handlers = new Map<string, Function[]>();
+	const sentMessages: Array<{ message: any; options?: any }> = [];
 	return {
 		commands,
 		handlers,
+		sentMessages,
 		pi: {
 			registerCommand(name: string, options: any) {
 				commands.set(name, options);
 			},
 			on(event: string, handler: Function) {
 				handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+			},
+			sendMessage(message: any, options?: any) {
+				sentMessages.push({ message, options });
 			},
 		},
 	};
@@ -24,6 +29,9 @@ function makeCtx() {
 	return {
 		notifications,
 		ctx: {
+			isIdle() {
+				return true;
+			},
 			ui: {
 				notify(message: string, type?: string) {
 					notifications.push({ message, type });
@@ -43,7 +51,7 @@ test("registerFlow registers /flow command", () => {
 });
 
 test('/flow task create "..." queues request and injects hidden task context', async () => {
-	const { pi, commands, handlers } = makePi();
+	const { pi, commands, sentMessages } = makePi();
 	const { ctx, notifications } = makeCtx();
 	registerFlow(pi as any);
 
@@ -54,49 +62,46 @@ test('/flow task create "..." queues request and injects hidden task context', a
 	assert.match(notifications[0].message, /创建 Task 草案/);
 	assert.match(notifications[0].message, /整理代码审查流程/);
 
-	const result = await handlers.get("before_agent_start")![0]();
-
-	assert.equal(result.message.customType, "flow-task-context");
-	assert.equal(result.message.display, false);
-	assert.match(result.message.content, /\[FLOW TASK CREATE\]/);
-	assert.match(result.message.content, /整理代码审查流程/);
+	assert.equal(sentMessages.length, 1);
+	assert.equal(sentMessages[0].message.customType, "flow-task-context");
+	assert.equal(sentMessages[0].message.display, false);
+	assert.match(sentMessages[0].message.content, /\[FLOW TASK CREATE\]/);
+	assert.match(sentMessages[0].message.content, /整理代码审查流程/);
+	assert.match(sentMessages[0].message.content, /\[FLOW CONTEXT ID: flow-1\]/);
+	assert.deepEqual(sentMessages[0].options, { triggerTurn: true });
 });
 
-test("/flow help only notifies and does not inject request", async () => {
-	const { pi, commands, handlers } = makePi();
+test("/flow help only notifies and does not send request", async () => {
+	const { pi, commands, sentMessages } = makePi();
 	const { ctx, notifications } = makeCtx();
 	registerFlow(pi as any);
 
 	await commands.get("flow").handler("", ctx);
-	const result = await handlers.get("before_agent_start")![0]();
 
 	assert.equal(notifications.length, 1);
 	assert.equal(notifications[0].type, "info");
 	assert.match(notifications[0].message, /\[FLOW HELP\]/);
-	assert.equal(result, undefined);
+	assert.equal(sentMessages.length, 0);
 });
 
-test("flow task context is injected once then cleared", async () => {
-	const { pi, commands, handlers } = makePi();
+test("flow command does not run while agent is busy", async () => {
+	const { pi, commands, sentMessages } = makePi();
 	const { ctx } = makeCtx();
+	ctx.isIdle = () => false;
 	registerFlow(pi as any);
 
 	await commands.get("flow").handler("status", ctx);
 
-	const first = await handlers.get("before_agent_start")![0]();
-	const second = await handlers.get("before_agent_start")![0]();
-
-	assert.match(first.message.content, /\[FLOW STATUS\]/);
-	assert.equal(second, undefined);
+	assert.equal(sentMessages.length, 0);
 });
 
 test("context filter preserves current injected flow context and removes stale contexts", async () => {
-	const { pi, commands, handlers } = makePi();
+	const { pi, commands, handlers, sentMessages } = makePi();
 	const { ctx } = makeCtx();
 	registerFlow(pi as any);
 
 	await commands.get("flow").handler("status", ctx);
-	const current = (await handlers.get("before_agent_start")![0]()).message;
+	const current = sentMessages[0].message;
 	const stale = {
 		customType: "flow-task-context",
 		content: "[FLOW TASK RUN]\nold",
@@ -110,8 +115,28 @@ test("context filter preserves current injected flow context and removes stale c
 	assert.deepEqual(result.messages, [current, { role: "user", content: "正常用户消息" }]);
 });
 
+test("context filter keeps current flow context through turn_end and removes it after agent_end", async () => {
+	const { pi, commands, handlers, sentMessages } = makePi();
+	const { ctx } = makeCtx();
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("status", ctx);
+	const current = sentMessages[0].message;
+
+	for (const handler of handlers.get("turn_end") ?? []) {
+		await handler();
+	}
+	const afterTurnEnd = await handlers.get("context")![0]({ messages: [current] });
+
+	await handlers.get("agent_end")![0]();
+	const afterAgentEnd = await handlers.get("context")![0]({ messages: [current] });
+
+	assert.deepEqual(afterTurnEnd.messages, [current]);
+	assert.deepEqual(afterAgentEnd.messages, []);
+});
+
 test("/flow status queues a status request", async () => {
-	const { pi, commands, handlers } = makePi();
+	const { pi, commands, sentMessages } = makePi();
 	const { ctx, notifications } = makeCtx();
 	registerFlow(pi as any);
 
@@ -120,8 +145,7 @@ test("/flow status queues a status request", async () => {
 	assert.equal(notifications.length, 1);
 	assert.equal(notifications[0].type, "info");
 	assert.match(notifications[0].message, /查看状态/);
-	const injected = await handlers.get("before_agent_start")![0]();
-	assert.match(injected.message.content, /\[FLOW STATUS\]/);
+	assert.match(sentMessages[0].message.content, /\[FLOW STATUS\]/);
 });
 
 test("flow context filter removes stale flow task messages when no request is pending", async () => {

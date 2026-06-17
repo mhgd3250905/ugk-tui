@@ -47,7 +47,6 @@ function getFlowContextId(message: { content?: unknown; customType?: string }): 
 }
 
 export function registerFlow(pi: ExtensionAPI): void {
-	let pendingRequest: ActionableFlowRequest | undefined;
 	let nextContextId = 0;
 	let activeContextId: string | undefined;
 
@@ -65,14 +64,26 @@ export function registerFlow(pi: ExtensionAPI): void {
 				return;
 			}
 
-			pendingRequest = request;
+			if (!ctx.isIdle()) {
+				ctx.ui.notify("Flow 请求需要等待当前 agent 空闲后再运行。", "warning");
+				return;
+			}
+
+			const contextId = `flow-${++nextContextId}`;
+			activeContextId = contextId;
+			pi.sendMessage(
+				{
+					customType: FLOW_CONTEXT_TYPE,
+					content: `${buildFlowRequestPrompt(request)}\n\n[FLOW CONTEXT ID: ${contextId}]`,
+					display: false,
+				},
+				{ triggerTurn: true },
+			);
 			ctx.ui.notify(formatFlowQueued(request), "info");
 		},
 	});
 
 	pi.on("context", async (event) => {
-		if (pendingRequest) return;
-
 		return {
 			messages: event.messages.filter((message) => {
 				const msg = message as AgentMessage & { customType?: string };
@@ -82,27 +93,6 @@ export function registerFlow(pi: ExtensionAPI): void {
 				return !hasFlowPromptMarker(msg);
 			}),
 		};
-	});
-
-	pi.on("before_agent_start", async () => {
-		if (!pendingRequest) return;
-
-		const request = pendingRequest;
-		pendingRequest = undefined;
-		const contextId = `flow-${++nextContextId}`;
-		activeContextId = contextId;
-
-		return {
-			message: {
-				customType: FLOW_CONTEXT_TYPE,
-				content: `${buildFlowRequestPrompt(request)}\n\n[FLOW CONTEXT ID: ${contextId}]`,
-				display: false,
-			},
-		};
-	});
-
-	pi.on("turn_end", async () => {
-		activeContextId = undefined;
 	});
 
 	pi.on("agent_end", async () => {

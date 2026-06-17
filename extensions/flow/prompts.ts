@@ -89,6 +89,8 @@ export function buildFlowRequestPrompt(request: FlowRequest): string {
 				"- 检查 run 输入、日志、证据、输出、`todo.md`、`validation.md`、`status.json` 和 `feedback.md`（如果存在）。",
 				"- 按 A/B/C/D（`SKILL.md` 的最优路径）逐环节向用户核对，并说明每一环节的证据和风险。",
 				"- 把复盘问答、是否修改旧方案、修正过程和用户确认结果写入 `review.md`。",
+				"- 只有 run 成功或修复成功，并且用户确认后，才能把经验写回 `SKILL.md`、`todo.template.md`、`validator.md`。",
+				"- 写回成功经验时必须 bump `task.json` 的 `version`，记录变更原因，并更新 Task 状态。",
 				"- failed/needs-human 未解决时不能写回 skill，也不能把 Task 推进为可复用状态。",
 				"- 需要用户确认后，才能把复盘结论写回 Task 状态或更新 `SKILL.md`。",
 			].join("\n");

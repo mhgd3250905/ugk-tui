@@ -76,6 +76,11 @@ test("builds task review prompt with main-agent review gate", () => {
 	assert.match(prompt, /status\.json/);
 	assert.match(prompt, /feedback\.md/);
 	assert.match(prompt, /review\.md/);
+	assert.match(prompt, /成功或修复成功/);
+	assert.match(prompt, /SKILL\.md/);
+	assert.match(prompt, /todo\.template\.md/);
+	assert.match(prompt, /validator\.md/);
+	assert.match(prompt, /version/);
 	assert.match(prompt, /按 A\/B\/C\/D/);
 	assert.match(prompt, /逐环节向用户核对/);
 	assert.match(prompt, /用户确认/);

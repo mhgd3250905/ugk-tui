@@ -1,4 +1,13 @@
-import { appendFile, copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+	appendFileSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import type { FlowDriverStatus, FlowDriverSummary } from "./types.ts";
 
@@ -66,10 +75,10 @@ function optionalString(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
 
-export async function readDriverStatus(runDir: string): Promise<FlowDriverStatusFile | undefined> {
+export function readDriverStatus(runDir: string): FlowDriverStatusFile | undefined {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(await readFile(path.join(runDir, "status.json"), "utf8"));
+		parsed = JSON.parse(readFileSync(path.join(runDir, "status.json"), "utf8"));
 	} catch {
 		return undefined;
 	}
@@ -95,44 +104,41 @@ export async function readDriverStatus(runDir: string): Promise<FlowDriverStatus
 	};
 }
 
-export async function writeDriverStatus(runDir: string, status: WritableDriverStatus): Promise<void> {
-	await mkdir(runDir, { recursive: true });
+export function writeDriverStatus(runDir: string, status: WritableDriverStatus): void {
+	mkdirSync(runDir, { recursive: true });
 	const statusFile: FlowDriverStatusFile = {
 		...status,
 		updatedAt: status.updatedAt ?? new Date().toISOString(),
 	};
-	await writeFile(path.join(runDir, "status.json"), `${JSON.stringify(statusFile, null, "\t")}\n`);
+	writeFileSync(path.join(runDir, "status.json"), `${JSON.stringify(statusFile, null, "\t")}\n`);
 }
 
-export async function createRunArtifacts(
+export function createRunArtifacts(
 	cwd: string,
 	taskId: string,
 	input: string | undefined,
 	runId: string,
-): Promise<CreatedRunArtifacts> {
+): CreatedRunArtifacts {
 	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
 	const runDir = path.join(taskDir, "runs", runId);
-	await mkdir(path.join(runDir, "output"), { recursive: true });
-	await mkdir(path.join(runDir, "evidence"), { recursive: true });
+	mkdirSync(path.join(runDir, "output"), { recursive: true });
+	mkdirSync(path.join(runDir, "evidence"), { recursive: true });
 
-	await writeFile(path.join(runDir, "input.json"), `${JSON.stringify({ input: input ?? "" }, null, "\t")}\n`);
-	await writeFile(
+	writeFileSync(path.join(runDir, "input.json"), `${JSON.stringify({ input: input ?? "" }, null, "\t")}\n`);
+	writeFileSync(
 		path.join(runDir, "prompt.md"),
 		["# Driver Prompt", "", `Task: ${taskId}`, `Run: ${runId}`, `Input: ${input ?? ""}`, ""].join("\n"),
 	);
 
-	try {
-		await copyFile(path.join(taskDir, "todo.template.md"), path.join(runDir, "todo.md"));
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-			throw error;
-		}
-		await writeFile(path.join(runDir, "todo.md"), "# Run Todo\n");
+	if (existsSync(path.join(taskDir, "todo.template.md"))) {
+		copyFileSync(path.join(taskDir, "todo.template.md"), path.join(runDir, "todo.md"));
+	} else {
+		writeFileSync(path.join(runDir, "todo.md"), "# Run Todo\n");
 	}
 
-	await writeFile(path.join(runDir, "progress.md"), "# Progress\n\nStatus: starting\n\n## Timeline\n");
-	await writeFile(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
-	await writeDriverStatus(runDir, {
+	writeFileSync(path.join(runDir, "progress.md"), "# Progress\n\nStatus: starting\n\n## Timeline\n");
+	writeFileSync(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
+	writeDriverStatus(runDir, {
 		taskId,
 		runId,
 		status: "starting",
@@ -143,11 +149,11 @@ export async function createRunArtifacts(
 	return { taskId, runId, taskDir, runDir };
 }
 
-export async function appendDriverFeedback(
+export function appendDriverFeedback(
 	runDir: string,
 	feedback: { message: string; driverResponse: string; affectedStep?: string },
 	now = new Date(),
-): Promise<void> {
+): void {
 	const entry = [
 		`## ${now.toISOString()}`,
 		"",
@@ -158,36 +164,30 @@ export async function appendDriverFeedback(
 		"should review for skill update: unknown",
 		"",
 	].join("\n");
-	await appendFile(path.join(runDir, "feedback.md"), entry);
+	appendFileSync(path.join(runDir, "feedback.md"), entry);
 }
 
-export async function listDriverSummaries(cwd: string): Promise<FlowDriverSummary[]> {
+export function listDriverSummaries(cwd: string): FlowDriverSummary[] {
 	const tasksDir = path.join(cwd, ".flow", "tasks");
-	let taskEntries;
-	try {
-		taskEntries = await readdir(tasksDir, { withFileTypes: true });
-	} catch {
+	if (!existsSync(tasksDir)) {
 		return [];
 	}
 
 	const summaries: FlowDriverSummary[] = [];
-	for (const taskEntry of taskEntries) {
+	for (const taskEntry of readdirSync(tasksDir, { withFileTypes: true })) {
 		if (!taskEntry.isDirectory()) {
 			continue;
 		}
 		const runsDir = path.join(tasksDir, taskEntry.name, "runs");
-		let runEntries;
-		try {
-			runEntries = await readdir(runsDir, { withFileTypes: true });
-		} catch {
+		if (!existsSync(runsDir) || !statSync(runsDir).isDirectory()) {
 			continue;
 		}
-		for (const runEntry of runEntries) {
+		for (const runEntry of readdirSync(runsDir, { withFileTypes: true })) {
 			if (!runEntry.isDirectory()) {
 				continue;
 			}
 			const runDir = path.join(runsDir, runEntry.name);
-			const status = await readDriverStatus(runDir);
+			const status = readDriverStatus(runDir);
 			if (!status) {
 				continue;
 			}
@@ -204,6 +204,6 @@ export async function listDriverSummaries(cwd: string): Promise<FlowDriverSummar
 	});
 }
 
-export async function findDriverSummary(cwd: string, runId: string): Promise<FlowDriverSummary | undefined> {
-	return (await listDriverSummaries(cwd)).find((summary) => summary.runId === runId);
+export function findDriverSummary(cwd: string, runId: string): FlowDriverSummary | undefined {
+	return listDriverSummaries(cwd).find((summary) => summary.runId === runId);
 }

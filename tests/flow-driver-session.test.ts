@@ -45,6 +45,56 @@ test("driver session starts with the generated prompt and records transcript tai
 	assert.equal(driver.getTranscriptText(), "hello");
 });
 
+test("driver session notifies when transcript receives text deltas", async () => {
+	let listener: ((event: any) => void) | undefined;
+	let updates = 0;
+	const factory: DriverSessionFactory = async () => ({
+		session: {
+			isStreaming: false,
+			subscribe(callback) {
+				listener = callback;
+				return () => {};
+			},
+			async prompt() {},
+			async steer() {},
+			async followUp() {},
+			dispose() {},
+		},
+	});
+
+	const driver = await createFlowDriverSession({ ...createOptions(), onTranscriptUpdate: () => updates += 1 }, factory);
+	listener!({
+		type: "message_update",
+		assistantMessageEvent: { type: "text_delta", delta: "hello" },
+	});
+
+	assert.equal(driver.getTranscriptText(), "hello");
+	assert.equal(updates, 1);
+});
+
+test("driver session ignores non-text transcript events for update callback", async () => {
+	let listener: ((event: any) => void) | undefined;
+	let updates = 0;
+	const factory: DriverSessionFactory = async () => ({
+		session: {
+			isStreaming: false,
+			subscribe(callback) {
+				listener = callback;
+				return () => {};
+			},
+			async prompt() {},
+			async steer() {},
+			async followUp() {},
+			dispose() {},
+		},
+	});
+
+	await createFlowDriverSession({ ...createOptions(), onTranscriptUpdate: () => updates += 1 }, factory);
+	listener!({ type: "message_update", assistantMessageEvent: { type: "tool_call_delta", delta: "ignored" } });
+
+	assert.equal(updates, 0);
+});
+
 test("driver session sends steer while streaming and prompt while idle", async () => {
 	const calls: string[] = [];
 	let streaming = true;

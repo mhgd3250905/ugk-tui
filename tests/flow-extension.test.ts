@@ -433,6 +433,36 @@ test("/flow task prove missing required task files is blocked before creating a 
 	}
 });
 
+test("/flow task prove rejects invalid task ids before resolving task paths", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async () => {
+		factoryCalls += 1;
+		throw new Error("factory should not run");
+	});
+	try {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
+		const outsideTaskDir = path.join(cwd, "outside");
+		fs.mkdirSync(outsideTaskDir, { recursive: true });
+		fs.writeFileSync(path.join(outsideTaskDir, "task.json"), JSON.stringify({ id: "outside", status: "draft" }), "utf8");
+		fs.writeFileSync(path.join(outsideTaskDir, "SKILL.md"), "# Skill\n", "utf8");
+		fs.writeFileSync(path.join(outsideTaskDir, "todo.template.md"), "# Todo\n", "utf8");
+		fs.writeFileSync(path.join(outsideTaskDir, "validator.md"), "# Validator\n", "utf8");
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove ../../outside", ctx);
+
+		assert.equal(factoryCalls, 0);
+		assert.equal(sentMessages.length, 0);
+		assert.equal(fs.existsSync(path.join(outsideTaskDir, "runs")), false);
+		assert.equal(notifications.at(-1)?.type, "error");
+		assert.match(notifications.at(-1)?.message ?? "", /Invalid task id/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
 test("driver factory failure marks the run failed without registering a live driver", async () => {
 	setFlowDriverSessionFactoryForTests(async () => {
 		throw new Error("session create failed");
@@ -595,6 +625,23 @@ test("/flow attach <task-id>/<run-id> directly attaches an exact driver", async 
 	assert.equal(sentMessages.length, 0);
 });
 
+test("/flow task review warns instead of queueing hidden prompt while focused on a driver", async () => {
+	const cwd = makeTempFlowProject([
+		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },
+	]);
+	const { pi, commands, sentMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach run-001", ctx);
+	await commands.get("flow").handler("task review run-001", ctx);
+
+	assert.equal(sentMessages.length, 0);
+	assert.equal(notifications.at(-1)?.type, "warning");
+	assert.match(notifications.at(-1)?.message ?? "", /flow detach/i);
+	assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "task-a", runId: "run-001" });
+});
+
 test("/flow attach <run-id> direct attach", async () => {
 	const cwd = makeTempFlowProject([
 		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },
@@ -739,6 +786,46 @@ test("driver focus input is forwarded to live driver sessions", async () => {
 		assert.deepEqual(started, ["started", "先暂停"]);
 		assert.deepEqual(widgets.get("flow-driver-view"), ["driver updated"]);
 		assert.match(notifications.at(-1)?.message ?? "", /Sent to Flow driver run-001/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("live driver transcript updates refresh the attached driver widget", async () => {
+	let onTranscriptUpdate: (() => void) | undefined;
+	let widgetLines = ["initial driver"];
+	setFlowDriverSessionFactoryForTests(async (options) => {
+		onTranscriptUpdate = options.onTranscriptUpdate;
+		return {
+			taskId: options.taskId,
+			runId: options.runId,
+			runDir: options.runDir,
+			sessionFile: "driver.jsonl",
+			async start() {},
+			async sendUserInput() {},
+			getTranscriptText() {
+				return "";
+			},
+			getWidgetLines() {
+				return widgetLines;
+			},
+			dispose() {},
+		};
+	});
+	try {
+		const { pi, commands } = makePi();
+		const { ctx, widgets } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		await commands.get("flow").handler("attach x/run-001", ctx);
+		assert.equal(typeof onTranscriptUpdate, "function");
+
+		widgetLines = ["fresh live line"];
+		onTranscriptUpdate!();
+		await sleep(0);
+
+		assert.deepEqual(widgets.get("flow-driver-view"), ["fresh live line"]);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}

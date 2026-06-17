@@ -1,5 +1,15 @@
 import type { FlowRequest } from "./types.ts";
 
+const FLOW_TASK_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function isValidFlowTaskId(taskId: string): boolean {
+	return FLOW_TASK_ID_PATTERN.test(taskId);
+}
+
+export function invalidFlowTaskIdMessage(taskId: string): string {
+	return `Invalid task id: ${taskId}. Use lowercase letters/numbers with internal dashes only.`;
+}
+
 function unquote(value: string): string {
 	const trimmed = value.trim();
 	if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
@@ -48,6 +58,7 @@ export function parseFlowCommand(args: string): FlowRequest {
 	if (text.startsWith(`${provePrefix} `)) {
 		const parsed = splitInlineInput(text.slice(provePrefix.length));
 		if (!parsed) return { kind: "error", message: "Usage: /flow task prove <task-id> [--input <inline-input>]" };
+		if (!isValidFlowTaskId(parsed.taskId)) return { kind: "error", message: invalidFlowTaskIdMessage(parsed.taskId) };
 		return { kind: "task-prove", ...parsed };
 	}
 
@@ -56,6 +67,7 @@ export function parseFlowCommand(args: string): FlowRequest {
 	if (text.startsWith(`${runPrefix} `)) {
 		const parsed = splitInlineInput(text.slice(runPrefix.length));
 		if (!parsed) return { kind: "error", message: "Usage: /flow run <task-id> [--input <inline-input>]" };
+		if (!isValidFlowTaskId(parsed.taskId)) return { kind: "error", message: invalidFlowTaskIdMessage(parsed.taskId) };
 		return { kind: "task-run", ...parsed };
 	}
 

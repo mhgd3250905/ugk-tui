@@ -70,3 +70,13 @@ test("parses interactive driver commands", () => {
 		kind: "driver-status",
 	});
 });
+
+test("rejects invalid task ids for task prove and run", () => {
+	for (const taskId of ["../x", "..\\x", "x/y", "_x", "x_", "x--y", "X", ""]) {
+		const proveCommand = taskId ? `task prove ${taskId}` : "task prove";
+		const runCommand = taskId ? `run ${taskId}` : "run";
+
+		assert.equal(parseFlowCommand(proveCommand).kind, "error");
+		assert.equal(parseFlowCommand(runCommand).kind, "error");
+	}
+});

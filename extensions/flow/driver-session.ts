@@ -13,6 +13,7 @@ export interface FlowDriverSessionOptions {
 	runId: string;
 	runDir: string;
 	initialPrompt: string;
+	onTranscriptUpdate?: () => void;
 }
 
 type DriverSessionEvent = {
@@ -77,6 +78,7 @@ export async function createFlowDriverSession(
 			typeof event.assistantMessageEvent.delta === "string"
 		) {
 			transcript.appendText(event.assistantMessageEvent.delta);
+			options.onTranscriptUpdate?.();
 		}
 	});
 

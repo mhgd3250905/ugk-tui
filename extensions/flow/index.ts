@@ -22,7 +22,7 @@ import {
 	writeDriverStatus,
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
-import { parseFlowCommand } from "./parser.ts";
+import { invalidFlowTaskIdMessage, isValidFlowTaskId, parseFlowCommand } from "./parser.ts";
 import { buildFlowHelpText, buildFlowRequestPrompt } from "./prompts.ts";
 import type { FlowDriverStatus, FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
 
@@ -97,6 +97,9 @@ function isTransientDriverStatus(status: FlowDriverStatus): boolean {
 }
 
 function readTaskMetadata(cwd: string, taskId: string): TaskGuardResult {
+	if (!isValidFlowTaskId(taskId)) {
+		return { ok: false, message: invalidFlowTaskIdMessage(taskId), type: "error" };
+	}
 	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
 	const taskJsonPath = path.join(taskDir, "task.json");
 	if (!existsSync(taskJsonPath)) {
@@ -175,12 +178,17 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (focusState.focus === "driver" && driver) {
 			setFlowDriverBanner({ taskId: driver.taskId, runId: driver.runId, status: driver.status });
 			const statusText = `driver:${driver.runId}`;
+			const liveDriver = liveDrivers.get(getDriverKey(driver.taskId, driver.runId));
 			ctx.ui.setStatus?.("flow-driver", ctx.ui.theme?.fg?.("warning", statusText) ?? statusText);
-			ctx.ui.setWidget?.("flow-driver-view", [
-				`Flow driver: ${driver.taskId}/${driver.runId}`,
-				`Status: ${driver.status}`,
-				`Step: ${driver.step ?? "-"}`,
-			]);
+			ctx.ui.setWidget?.(
+				"flow-driver-view",
+				liveDriver?.getWidgetLines() ?? [
+					`Flow driver: ${driver.taskId}/${driver.runId}`,
+					`Status: ${driver.status}`,
+					`Step: ${driver.step ?? "-"}`,
+				],
+				{ placement: "aboveEditor" },
+			);
 			return;
 		}
 
@@ -214,7 +222,25 @@ export function registerFlow(pi: ExtensionAPI): void {
 		const initialPrompt = buildDriverInitialPrompt(artifacts);
 		const createDriver = driverSessionFactoryForTests ?? createFlowDriverSession;
 		const driverKey = getDriverKey(taskId, runId);
-		let driver: FlowDriverSession;
+		let driver: FlowDriverSession | undefined;
+		let transcriptRefreshQueued = false;
+		const isCurrentFocusedDriver = () =>
+			focusState.focus === "driver" &&
+			focusState.runId === runId &&
+			(focusState.taskId === undefined || focusState.taskId === taskId);
+		const scheduleTranscriptWidgetRefresh = () => {
+			if (!isCurrentFocusedDriver() || transcriptRefreshQueued) {
+				return;
+			}
+			transcriptRefreshQueued = true;
+			queueMicrotask(() => {
+				transcriptRefreshQueued = false;
+				if (!driver || !isCurrentFocusedDriver()) {
+					return;
+				}
+				ctx.ui.setWidget?.("flow-driver-view", driver.getWidgetLines(), { placement: "aboveEditor" });
+			});
+		};
 		try {
 			driver = await createDriver({
 				cwd,
@@ -222,6 +248,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 				runId,
 				runDir: artifacts.runDir,
 				initialPrompt,
+				onTranscriptUpdate: scheduleTranscriptWidgetRefresh,
 			});
 		} catch (error) {
 			const summary = errorMessage(error);
@@ -235,17 +262,21 @@ export function registerFlow(pi: ExtensionAPI): void {
 			ctx.ui.notify(`Flow driver failed: ${driverKey}\n${summary}`, "error");
 			return;
 		}
-		liveDrivers.set(driverKey, driver);
+		if (!driver) {
+			return;
+		}
+		const liveDriver = driver;
+		liveDrivers.set(driverKey, liveDriver);
 		writeDriverStatus(artifacts.runDir, {
 			taskId,
 			runId,
 			status: "running",
 			step: "starting",
 			summary: `${kind} driver running`,
-			sessionFile: driver.sessionFile,
+			sessionFile: liveDriver.sessionFile,
 		});
-		ctx.ui.setWidget?.("flow-driver-view", driver.getWidgetLines(), { placement: "aboveEditor" });
-		void driver.start().catch((error) => {
+		ctx.ui.setWidget?.("flow-driver-view", liveDriver.getWidgetLines(), { placement: "aboveEditor" });
+		void liveDriver.start().catch((error) => {
 			const summary = errorMessage(error);
 			writeDriverStatus(artifacts.runDir, {
 				taskId,
@@ -253,10 +284,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 				status: "failed",
 				step: "driver start",
 				summary,
-				sessionFile: driver.sessionFile,
+				sessionFile: liveDriver.sessionFile,
 			});
 			liveDrivers.delete(driverKey);
-			driver.dispose();
+			liveDriver.dispose();
 			ctx.ui.notify(`Flow driver failed: ${driverKey}\n${summary}`, "error");
 		});
 		ctx.ui.notify(`Flow driver running: ${driverKey}\nAttach: /flow attach ${driverKey}`, "info");
@@ -365,6 +396,11 @@ export function registerFlow(pi: ExtensionAPI): void {
 						.join("\n"),
 					"info",
 				);
+				return;
+			}
+
+			if (request.kind === "task-review" && focusState.focus === "driver") {
+				ctx.ui.notify("Flow task review cannot start while a Flow driver is focused. Run /flow detach first.", "warning");
 				return;
 			}
 

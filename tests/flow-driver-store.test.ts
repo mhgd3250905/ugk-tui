@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
 	appendDriverFeedback,
 	createRunArtifacts,
 	listDriverSummaries,
+	nextRunId,
 	readDriverStatus,
 	writeDriverStatus,
 } from "../extensions/flow/driver-store.ts";
@@ -108,4 +109,13 @@ test("readDriverStatus returns undefined for invalid JSON and falls back unknown
 	assert.equal(status?.runId, "run-001");
 	assert.equal(status?.status, "paused");
 	assert.equal(status?.updatedAt, new Date(0).toISOString());
+});
+
+test("store helpers reject task ids that would escape the flow tasks directory", () => {
+	const cwd = makeTempCwd();
+	const outsideDir = path.resolve(cwd, "outside", "runs");
+
+	assert.throws(() => nextRunId(cwd, "../../outside"), /Invalid task id/);
+	assert.throws(() => createRunArtifacts(cwd, "../../outside", undefined, "run-001"), /Invalid task id/);
+	assert.equal(existsSync(outsideDir), false);
 });

@@ -432,6 +432,44 @@ test("driver focus input is handled instead of reaching main", async () => {
 	assert.match(notifications.at(-1)?.message ?? "", /Sent to Flow driver run-001/);
 });
 
+test("driver focus input writes feedback to the focused task when run ids collide", async () => {
+	const cwd = makeTempFlowProject([
+		{
+			taskId: "task-a",
+			runId: "run-001",
+			status: "running",
+			step: "wrong task",
+			updatedAt: "2026-06-17T00:00:01.000Z",
+		},
+		{
+			taskId: "task-b",
+			runId: "run-001",
+			status: "waiting",
+			step: "right task",
+			updatedAt: "2026-06-17T00:00:02.000Z",
+		},
+	]);
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach task-b/run-001", ctx);
+	const result = await handlers.get("input")![0]({ text: "只发给 task-b", source: "interactive" }, ctx);
+
+	const taskAFeedback = fs.readFileSync(
+		path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001", "feedback.md"),
+		"utf8",
+	);
+	const taskBFeedback = fs.readFileSync(
+		path.join(cwd, ".flow", "tasks", "task-b", "runs", "run-001", "feedback.md"),
+		"utf8",
+	);
+	assert.deepEqual(result, { action: "handled" });
+	assert.equal(taskAFeedback, "# User Feedback\n\n");
+	assert.match(taskBFeedback, /只发给 task-b/);
+	assert.match(taskBFeedback, /affected step: right task/);
+});
+
 test("slash input while focused returns continue and does not append feedback", async () => {
 	const cwd = makeTempFlowProject([
 		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },

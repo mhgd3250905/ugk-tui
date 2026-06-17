@@ -9,7 +9,7 @@ import {
 	restoreFlowFocus,
 } from "./driver-focus.ts";
 import { getDriverPickerOptions, parseDriverPickerSelection } from "./driver-picker.ts";
-import { appendDriverFeedback, findDriverSummary, listDriverSummaries } from "./driver-store.ts";
+import { appendDriverFeedback, listDriverSummaries } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
 import { parseFlowCommand } from "./parser.ts";
 import { buildFlowHelpText, buildFlowRequestPrompt } from "./prompts.ts";
@@ -114,6 +114,20 @@ export function registerFlow(pi: ExtensionAPI): void {
 			return undefined;
 		}
 		return matches[0];
+	}
+
+	function findDriverForFocus(ctx: ExtensionContext): FlowDriverSummary | undefined {
+		if (focusState.focus !== "driver") {
+			return undefined;
+		}
+
+		const drivers = listDriverSummaries(getCwd(ctx));
+		if (focusState.taskId) {
+			return drivers.find((driver) => driver.taskId === focusState.taskId && driver.runId === focusState.runId);
+		}
+
+		const matches = drivers.filter((driver) => driver.runId === focusState.runId);
+		return matches.length === 1 ? matches[0] : undefined;
 	}
 
 	pi.registerCommand("flow", {
@@ -223,7 +237,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 		const entries = ctx.sessionManager?.getEntries?.() ?? [];
 		focusState = restoreFlowFocus(entries);
 		if (focusState.focus === "driver") {
-			const driver = findDriverSummary(getCwd(ctx), focusState.runId);
+			const driver = findDriverForFocus(ctx);
 			if (driver) {
 				renderFocus(ctx, driver);
 				return;
@@ -251,7 +265,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 			return { action: "continue" };
 		}
 
-		const driver = findDriverSummary(getCwd(ctx), focusState.runId);
+		const driver = findDriverForFocus(ctx);
 		if (!driver) {
 			ctx.ui.notify(`Focused Flow driver not found: ${focusState.runId}`, "warning");
 			focusState = detachFlowDriver(focusState);

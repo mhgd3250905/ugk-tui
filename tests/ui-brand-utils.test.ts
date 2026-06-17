@@ -38,6 +38,21 @@ test("buildUgkHeaderLines brands startup without pi copy", () => {
 	assert.deepEqual([...panelWidths], [64]);
 });
 
+test("buildUgkHeaderLines keeps panel borders aligned for wide workspace names", () => {
+	const lines = buildUgkHeaderLines({
+		version: "1.0.0",
+		cwdName: "TUI专区",
+		modelId: "deepseek-v4-pro",
+		width: 96,
+	});
+
+	const panelLines = lines.filter((line) => /^[┌│├└]/.test(line));
+	for (const line of panelLines) {
+		assert.equal(visibleWidth(line), 64, line);
+	}
+	assert.match(panelLines.join("\n"), /│ workspace\s+TUI专区\s+│/);
+});
+
 test("buildUgkLogoLines renders a compact block-character logo", () => {
 	const lines = buildUgkLogoLines(96);
 

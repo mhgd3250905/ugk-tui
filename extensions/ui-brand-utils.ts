@@ -1,4 +1,4 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 export const UGK_BRAND_COLORS = {
 	accent: "#9be564",
@@ -55,6 +55,10 @@ function hardTruncate(text: string, width: number): string {
 	if (width <= 0) return "";
 	const truncated = truncateToWidth(text, width, "");
 	return truncated.length <= width ? truncated : truncated.slice(0, width);
+}
+
+function padEndVisible(text: string, width: number): string {
+	return `${text}${" ".repeat(Math.max(0, width - visibleWidth(text)))}`;
 }
 
 function formatTokens(count: number): string {
@@ -126,7 +130,7 @@ function panelRow(label: string, value: string, width: number): string {
 	const bodyWidth = Math.max(0, rowWidth - 4);
 	const labelText = label ? `${label.padEnd(12)}${value}` : value;
 	const body = hardTruncate(labelText, bodyWidth);
-	return hardTruncate(`│ ${body.padEnd(bodyWidth)} │`, width);
+	return hardTruncate(`│ ${padEndVisible(body, bodyWidth)} │`, width);
 }
 
 export function buildUgkLogoLines(width: number): string[] {

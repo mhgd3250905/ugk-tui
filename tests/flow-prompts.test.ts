@@ -46,7 +46,14 @@ test("builds task review prompt with main-agent review gate", () => {
 });
 
 test("builds status prompt", () => {
-	assert.match(buildFlowRequestPrompt({ kind: "status" }), /\[FLOW STATUS\]/);
+	const prompt = buildFlowRequestPrompt({ kind: "status" });
+
+	assert.match(prompt, /\[FLOW STATUS\]/);
+	assert.match(prompt, /读取 \.flow\/tasks/);
+	assert.match(prompt, /task id/);
+	assert.match(prompt, /status/);
+	assert.match(prompt, /下一步建议/);
+	assert.match(prompt, /\/flow task create "目标"/);
 });
 
 test("builds flow help text", () => {

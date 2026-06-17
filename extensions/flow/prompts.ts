@@ -72,7 +72,9 @@ export function buildFlowRequestPrompt(request: FlowRequest): string {
 			return [
 				"[FLOW STATUS]",
 				"",
-				"请读取 `.flow/` 下的 Task 和 run 状态，汇总 draft、active、failed、needs-human 与待 review 项。",
+				"请读取 .flow/tasks 下的 Task 和 run 状态，输出简洁表格。",
+				"表格列必须包含：task id、status、version、最近 run、下一步建议。",
+				"如果 .flow/tasks 不存在，说明当前项目还没有 Flow Task，并提示：/flow task create \"目标\"。",
 			].join("\n");
 		case "help":
 			return buildFlowHelpText();

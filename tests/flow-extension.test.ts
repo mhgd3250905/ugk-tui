@@ -90,6 +90,20 @@ test("flow task context is injected once then cleared", async () => {
 	assert.equal(second, undefined);
 });
 
+test("/flow status queues a status request", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("status", ctx);
+
+	assert.equal(notifications.length, 1);
+	assert.equal(notifications[0].type, "info");
+	assert.match(notifications[0].message, /查看状态/);
+	const injected = await handlers.get("before_agent_start")![0]();
+	assert.match(injected.message.content, /\[FLOW STATUS\]/);
+});
+
 test("flow context filter removes stale flow task messages when no request is pending", async () => {
 	const { pi, handlers } = makePi();
 	registerFlow(pi as any);

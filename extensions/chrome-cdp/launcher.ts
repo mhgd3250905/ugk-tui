@@ -9,6 +9,11 @@ export interface ChromeLaunchCommand {
 	profilePath: string;
 }
 
+export interface ChromeBinaryResolution {
+	found: boolean;
+	command: string;
+}
+
 export function getDefaultChromeProfilePath(homeDir = os.homedir()): string {
 	return path.join(homeDir, ".ugk", "chrome-cdp-profile");
 }
@@ -40,6 +45,47 @@ function findWindowsChrome(): string | null {
 		}
 	}
 	return null;
+}
+
+function findCommandOnPath(command: string, env: NodeJS.ProcessEnv = process.env): string | null {
+	const pathValue = env.PATH ?? "";
+	const extensions =
+		process.platform === "win32"
+			? (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean)
+			: [""];
+	for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
+		const lowerCommand = command.toLowerCase();
+		const candidates = extensions.map((ext) =>
+			path.join(dir, lowerCommand.endsWith(ext.toLowerCase()) ? command : `${command}${ext}`),
+		);
+		for (const candidate of candidates) {
+			try {
+				if (fs.existsSync(candidate)) return candidate;
+			} catch {
+				// Ignore unreadable PATH entries.
+			}
+		}
+	}
+	return null;
+}
+
+export function resolveChromeBinary(options: {
+	platform?: NodeJS.Platform;
+	env?: NodeJS.ProcessEnv;
+} = {}): ChromeBinaryResolution {
+	const platform = options.platform ?? process.platform;
+	if (platform === "darwin") {
+		const command = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+		return { command, found: fs.existsSync(command) };
+	}
+	if (platform === "win32") {
+		const installed = findWindowsChrome();
+		if (installed) return { command: installed, found: true };
+		const onPath = findCommandOnPath("chrome.exe", options.env);
+		return { command: onPath ?? "chrome.exe", found: Boolean(onPath) };
+	}
+	const onPath = findCommandOnPath("google-chrome", options.env);
+	return { command: onPath ?? "google-chrome", found: Boolean(onPath) };
 }
 
 export function getChromeLaunchCommand(options: {

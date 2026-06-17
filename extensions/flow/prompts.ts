@@ -19,6 +19,26 @@ function inputText(input: string | undefined): string {
 
 function buildTaskExecutionPrompt(kind: "task-prove" | "task-run", taskId: string, input: string | undefined): string {
 	const title = kind === "task-prove" ? "[FLOW TASK PROVE]" : "[FLOW TASK RUN]";
+	const taskPath = `.flow/tasks/${taskId}/task.json`;
+	const statusPolicy =
+		kind === "task-prove"
+			? [
+					`- 读取 ${taskPath}；如果 status 是 draft，将本次尝试的任务状态更新为 proving。`,
+					"- 创建 `runs/run-<timestamp-or-id>/`，写入 `input.json`，并从 `todo.template.md` 复制生成本次 `todo.md`。",
+					"- main agent 使用现有 `subagent` 工具启动 `worker`，让隔离 worker 执行任务主体；main agent 只负责派发和复核。",
+					"- worker 必须读取当前 Task 的 `SKILL.md`、`todo.md` 和 `validator.md`，按最优路径逐项执行并填写证据。",
+					"- 执行后写入输出、日志、证据、`validation.md` 和 `status.json`。",
+					"- 只有 `validator.md` 的验收通过且证据完整，才可把 Task 推进为 verified；否则标记 failed 或 needs-human。",
+				]
+			: [
+					`- 读取 ${taskPath}；如果 status 是 draft，停止执行并提示先运行 \`/flow task prove ${taskId}\`。`,
+					"- 如果 status 是 needs-human，停止执行并说明需要用户先完成复盘或补充指导。",
+					"- 只有 status 是 verified/active 时，才允许创建新的 `runs/run-<timestamp-or-id>/`。",
+					"- 为本次 run 写入 `input.json`，并从 `todo.template.md` 复制生成本次 `todo.md`。",
+					"- main agent 使用现有 `subagent` 工具启动 `worker`，让隔离 worker 执行任务主体；main agent 只负责派发和复核。",
+					"- worker 必须读取当前 Task 的 `SKILL.md`、`todo.md` 和 `validator.md`，按最优路径逐项执行并填写证据。",
+					"- 执行后写入输出、日志、证据、`validation.md` 和 `status.json`。",
+				];
 	return [
 		title,
 		"",
@@ -26,12 +46,10 @@ function buildTaskExecutionPrompt(kind: "task-prove" | "task-run", taskId: strin
 		`用户输入: ${inputText(input)}`,
 		"",
 		"请按 Flow 原则执行:",
-		"- 由 driver 调起 subagent worker 执行，不要让 driver 自己完成任务主体。",
-		"- 读取当前 Task 的 `SKILL.md`，按其中的输入、流程和验收标准工作。",
-		"- 基于 `.flow/tasks/<task-id>/todo.template.md` 填写 `todo.md`，记录实际步骤和证据。",
-		"- 为本次尝试创建 `runs/run-<timestamp-or-id>/`，保存输入、输出、日志、证据和状态。",
+		...statusPolicy,
+		"- 填写 `todo.md` 时必须记录原计划、实际执行、偏离旧方案、解决过程、证据和复盘候选，不能只写结论。",
 		"- 如果结果是 failed 或 needs-human 且问题未解决，不能写回 skill 或把经验固化为成功流程。",
-		"- prove/run 完成后交回 main agent 复核；driver 不负责复盘。",
+		"- prove/run 完成后交回 main agent 复核；worker 不负责复盘。",
 	].join("\n");
 }
 
@@ -45,9 +63,13 @@ export function buildFlowRequestPrompt(request: FlowRequest): string {
 				"",
 				"请创建 Flow Task 草案:",
 				"- 只生成 draft，不要执行任务本体。",
-				"- 在 `.flow/tasks/<task-id>/task.json` 写入元数据，包含 `status` 且值为 `draft`。",
-				"- 在同一目录创建 `SKILL.md`，描述任务边界、输入、流程、输出和验收标准。",
-				"- 创建 `todo.template.md`，作为后续 run/prove 的执行清单模板。",
+				"- 从用户目标推断稳定、可读、短横线风格的 task id，并创建 `.flow/tasks/<task-id>/`。",
+				"- 在 `.flow/tasks/<task-id>/task.json` 写入元数据，包含 `version: 1`、`status: draft`、原始目标和创建时间。",
+				"- 在同一目录创建 `SKILL.md`，描述任务边界、输入、最优路径 A/B/C/D、每步注意事项、输出和验收标准。",
+				"- 创建 `todo.template.md`，作为后续 prove/run 的执行清单模板，字段覆盖原计划、实际执行、偏离旧方案、解决过程、证据和复盘候选。",
+				"- 创建 `input.schema.json` 与 `output.schema.json`，约束输入输出结构。",
+				"- 创建 `validator.md`，写清每次 run 必须怎样验收、需要哪些证据、失败如何标记。",
+				"- 创建空的 `runs/` 目录，后续每次执行写入 `runs/run-<id>/`。",
 				"- 不要把 Task 标记为 active；只有 prove/review 通过并经用户确认后才可推进。",
 				"- 最后提示用户下一步运行 `/flow task prove <task-id>`。",
 			].join("\n");
@@ -63,8 +85,10 @@ export function buildFlowRequestPrompt(request: FlowRequest): string {
 				"",
 				"请由 main agent 主持复盘:",
 				"- 不能由 driver subagent 自评，也不能让执行该 run 的 worker 自评。",
-				"- 检查 run 输入、日志、证据、输出和 `todo.md`。",
+				`- 定位 \`.flow/tasks/<task-id>/runs/${request.runId}\`；如果只知道 run id，就在 \`.flow/tasks/*/runs/${request.runId}\` 中查找。`,
+				"- 检查 run 输入、日志、证据、输出、`todo.md`、`validation.md`、`status.json` 和 `feedback.md`（如果存在）。",
 				"- 按 A/B/C/D（`SKILL.md` 的最优路径）逐环节向用户核对，并说明每一环节的证据和风险。",
+				"- 把复盘问答、是否修改旧方案、修正过程和用户确认结果写入 `review.md`。",
 				"- failed/needs-human 未解决时不能写回 skill，也不能把 Task 推进为可复用状态。",
 				"- 需要用户确认后，才能把复盘结论写回 Task 状态或更新 `SKILL.md`。",
 			].join("\n");

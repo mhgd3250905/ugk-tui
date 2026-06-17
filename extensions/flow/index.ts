@@ -7,6 +7,7 @@ import { buildFlowHelpText, buildFlowRequestPrompt } from "./prompts.ts";
 import type { FlowRequest } from "./types.ts";
 
 const FLOW_CONTEXT_TYPE = "flow-task-context";
+const FLOW_CONTEXT_ID_PATTERN = /\[FLOW CONTEXT ID: ([^\]]+)\]/;
 const FLOW_PROMPT_PREFIXES = [
 	"[FLOW TASK CREATE]",
 	"[FLOW TASK PROVE]",
@@ -40,8 +41,15 @@ function hasFlowPromptMarker(message: AgentMessage): boolean {
 	return false;
 }
 
+function getFlowContextId(message: { content?: unknown; customType?: string }): string | undefined {
+	if (message.customType !== FLOW_CONTEXT_TYPE || typeof message.content !== "string") return undefined;
+	return message.content.match(FLOW_CONTEXT_ID_PATTERN)?.[1];
+}
+
 export function registerFlow(pi: ExtensionAPI): void {
 	let pendingRequest: ActionableFlowRequest | undefined;
+	let nextContextId = 0;
+	let activeContextId: string | undefined;
 
 	pi.registerCommand("flow", {
 		description: "Queue Flow task workflow requests",
@@ -68,7 +76,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 		return {
 			messages: event.messages.filter((message) => {
 				const msg = message as AgentMessage & { customType?: string };
-				if (msg.customType === FLOW_CONTEXT_TYPE) return false;
+				if (msg.customType === FLOW_CONTEXT_TYPE) {
+					return activeContextId !== undefined && getFlowContextId(msg) === activeContextId;
+				}
 				return !hasFlowPromptMarker(msg);
 			}),
 		};
@@ -79,14 +89,24 @@ export function registerFlow(pi: ExtensionAPI): void {
 
 		const request = pendingRequest;
 		pendingRequest = undefined;
+		const contextId = `flow-${++nextContextId}`;
+		activeContextId = contextId;
 
 		return {
 			message: {
 				customType: FLOW_CONTEXT_TYPE,
-				content: buildFlowRequestPrompt(request),
+				content: `${buildFlowRequestPrompt(request)}\n\n[FLOW CONTEXT ID: ${contextId}]`,
 				display: false,
 			},
 		};
+	});
+
+	pi.on("turn_end", async () => {
+		activeContextId = undefined;
+	});
+
+	pi.on("agent_end", async () => {
+		activeContextId = undefined;
 	});
 }
 

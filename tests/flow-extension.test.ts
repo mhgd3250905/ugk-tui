@@ -90,6 +90,26 @@ test("flow task context is injected once then cleared", async () => {
 	assert.equal(second, undefined);
 });
 
+test("context filter preserves current injected flow context and removes stale contexts", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("status", ctx);
+	const current = (await handlers.get("before_agent_start")![0]()).message;
+	const stale = {
+		customType: "flow-task-context",
+		content: "[FLOW TASK RUN]\nold",
+		display: false,
+	};
+
+	const result = await handlers.get("context")![0]({
+		messages: [stale, current, { role: "user", content: "正常用户消息" }],
+	});
+
+	assert.deepEqual(result.messages, [current, { role: "user", content: "正常用户消息" }]);
+});
+
 test("/flow status queues a status request", async () => {
 	const { pi, commands, handlers } = makePi();
 	const { ctx, notifications } = makeCtx();

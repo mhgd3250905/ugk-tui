@@ -146,3 +146,73 @@ test("ugk brand footer hides DeepSeek model when API credentials are missing", a
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 	}
 });
+
+test("ugk brand footer colors stateful fields by severity", async () => {
+	const previousApiKey = process.env.DEEPSEEK_API_KEY;
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	delete process.env.DEEPSEEK_API_KEY;
+	process.env.PI_CODING_AGENT_DIR = tempAgentDir();
+	try {
+		const handlers = new Map<string, Function>();
+		const pi = {
+			on(event: string, handler: Function) {
+				handlers.set(event, handler);
+			},
+			registerCommand() {},
+			registerFlag() {},
+			getFlag() {
+				return undefined;
+			},
+			getSessionName() {
+				return "demo";
+			},
+		};
+		let footerFactory: Function | undefined;
+		const ctx = {
+			cwd: "/Users/shengkai/projects/ugk-tui",
+			model: { id: "deepseek-v4-pro" },
+			sessionManager: {
+				getCwd: () => "/Users/shengkai/projects/ugk-tui",
+				getEntries: () => [],
+				getBranch: () => [],
+			},
+			getContextUsage: () => ({ percent: 0, contextWindow: 1000000 }),
+			ui: {
+				setHeader: () => {},
+				setFooter: (factory: unknown) => {
+					footerFactory = factory as Function;
+				},
+				setTitle: () => {},
+			},
+		};
+
+		registerUgkBrandUi(pi as any);
+		await handlers.get("session_start")!({ reason: "startup" }, ctx);
+		const theme = {
+			fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+			bold: (text: string) => text,
+		};
+		const footer = footerFactory!({ requestRender() {} }, theme, {
+			getGitBranch: () => null,
+			getExtensionStatuses: () =>
+				new Map([
+					["bash", "bash unavailable"],
+					["subagent", "subagent not loaded"],
+					["turn-progress", "✓ 第 1 轮完成"],
+				]),
+			onBranchChange: () => () => {},
+		});
+		const text = footer.render(140).join("\n");
+
+		assert.match(text, /<error>api not configured<\/error>/);
+		assert.doesNotMatch(text, /<success>configured<\/success>/);
+		assert.match(text, /<error>bash unavailable<\/error>/);
+		assert.match(text, /<error>subagent not loaded<\/error>/);
+		assert.match(text, /<success>✓ 第 1 轮完成<\/success>/);
+	} finally {
+		if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+		else process.env.DEEPSEEK_API_KEY = previousApiKey;
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});

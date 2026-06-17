@@ -9,6 +9,7 @@ import {
 	buildUgkFooterLines,
 	buildUgkHeaderLines,
 	buildUgkStartupScreenLines,
+	classifyUgkStatusTone,
 	resolveUgkDisplayModelId,
 	type UgkFooterUsage,
 } from "./ui-brand-utils.ts";
@@ -79,12 +80,13 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 			.replace("model", theme.fg("success", "model"));
 	}
 	if (trimmed.startsWith("│")) {
-		return line
+		const colored = line
 			.replace(/(workspace|agent|stack|model)/, theme.fg("dim", "$1"))
 			.replace("/plan", theme.fg("success", "/plan"))
 			.replace("/implement", theme.fg("success", "/implement"))
 			.replace("/check-env", theme.fg("success", "/check-env"))
 			.replace("@agent", theme.fg("success", "@agent"));
+		return colorStatefulText(colored, theme);
 	}
 	if (line.startsWith("  ")) return theme.fg("success", line);
 	if (index === 0) return theme.fg("muted", line);
@@ -94,6 +96,28 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 		.replace("/implement", theme.fg("success", "/implement"))
 		.replace("/check-env", theme.fg("success", "/check-env"))
 		.replace("@agent", theme.fg("success", "@agent"));
+}
+
+function colorStatefulText(text: string, theme: any): string {
+	const statefulValues = ["api not configured", "model not selected", "bash unavailable", "subagent not loaded"];
+	return statefulValues.reduce((current, value) => {
+		if (!current.includes(value)) return current;
+		return current.replace(value, theme.fg(classifyUgkStatusTone(value), value));
+	}, text);
+}
+
+function colorFooterUsageLine(line: string, theme: any): string {
+	const separator = "  ";
+	const index = line.lastIndexOf(separator);
+	if (index === -1) return theme.fg("dim", line);
+	const usage = line.slice(0, index);
+	const modelOrState = line.slice(index + separator.length);
+	return `${theme.fg("dim", usage)}${separator}${theme.fg(classifyUgkStatusTone(modelOrState), modelOrState)}`;
+}
+
+function colorFooterStatusLine(statuses: string[], fallback: string, theme: any): string {
+	const values = statuses.length ? statuses : [fallback];
+	return values.map((status) => theme.fg(classifyUgkStatusTone(status), status)).join(" ");
 }
 
 class UgkHeader implements Component {
@@ -190,9 +214,8 @@ class UgkFooter implements Component {
 
 		const [pwd, usage, status] = lines;
 		const coloredPwd = pwd.replace(/^ugk/, this.theme.fg("success", "ugk"));
-		const coloredUsage = usage.replace(/([^\s]+)$/, this.theme.fg("success", "$1"));
-		const rendered = [this.theme.fg("dim", coloredPwd), this.theme.fg("dim", coloredUsage)];
-		if (status.trim()) rendered.push(this.theme.fg("dim", status));
+		const rendered = [this.theme.fg("dim", coloredPwd), colorFooterUsageLine(usage, this.theme)];
+		if (status.trim()) rendered.push(colorFooterStatusLine(statuses, status, this.theme));
 		return rendered.map((line) => {
 			if (visibleWidth(line) <= width) return line;
 			return truncateToWidth(line, width, this.theme.fg("dim", "..."));

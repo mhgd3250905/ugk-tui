@@ -43,11 +43,23 @@ export interface UgkFooterOptions {
 	width: number;
 }
 
+export type UgkStatusTone = "error" | "warning" | "success" | "dim";
+
 export function resolveUgkDisplayModelId(modelId: string | undefined, deepSeekStatus: string): string | undefined {
 	if (!modelId) return undefined;
 	const isDeepSeekModel = modelId.toLowerCase().startsWith("deepseek");
 	if (isDeepSeekModel && /未配置/.test(deepSeekStatus)) return "api not configured";
 	return modelId;
+}
+
+export function classifyUgkStatusTone(text: string): UgkStatusTone {
+	const normalized = text.toLowerCase();
+	if (/\[fail\]|✗|未配置|api not configured|unavailable|not loaded|missing|failed|error/.test(normalized)) {
+		return "error";
+	}
+	if (/\[warn\]|⚠|warn|not reachable|not ready|timeout|skipped/.test(normalized)) return "warning";
+	if (/\[pass\]|✓|已配置|configured|available|loaded|reachable|online|success/.test(normalized)) return "success";
+	return "dim";
 }
 
 const UGK_BLOCK_LOGO = [

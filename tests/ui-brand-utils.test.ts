@@ -6,6 +6,7 @@ import {
 	buildUgkHeaderLines,
 	buildUgkLogoLines,
 	buildUgkStartupScreenLines,
+	classifyUgkStatusTone,
 	resolveUgkDisplayModelId,
 	UGK_BRAND_COLORS,
 } from "../extensions/ui-brand-utils.ts";
@@ -138,6 +139,16 @@ test("resolveUgkDisplayModelId hides DeepSeek model when API credentials are mis
 	assert.equal(resolveUgkDisplayModelId("deepseek-v4-pro", "deepseek: 已配置(DEEPSEEK_API_KEY, deepseek-chat/默认模型可用)"), "deepseek-v4-pro");
 	assert.equal(resolveUgkDisplayModelId("gpt-4o", "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)"), "gpt-4o");
 	assert.equal(resolveUgkDisplayModelId(undefined, "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)"), undefined);
+});
+
+test("classifyUgkStatusTone maps stateful text to semantic color tones", () => {
+	assert.equal(classifyUgkStatusTone("api not configured"), "error");
+	assert.equal(classifyUgkStatusTone("bash unavailable"), "error");
+	assert.equal(classifyUgkStatusTone("subagent not loaded"), "error");
+	assert.equal(classifyUgkStatusTone("Chrome CDP not reachable"), "warning");
+	assert.equal(classifyUgkStatusTone("DeepSeek configured"), "success");
+	assert.equal(classifyUgkStatusTone("✓ 第 1 轮完成"), "success");
+	assert.equal(classifyUgkStatusTone("plan 2/5"), "dim");
 });
 
 test("UGK brand palette prefers subdued neon green over blue purple", () => {

@@ -16,8 +16,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { applyUgkRuntimePolicy } from "./ugk-runtime-policy.js";
 import { ensureUgkQuietStartupDefault } from "./ugk-startup-settings.js";
+import { ensureWorkspaceTrusted } from "./workspace-trust.js";
 
 applyUgkRuntimePolicy();
+
+const trust = await ensureWorkspaceTrusted();
+if (!trust.trusted) {
+	console.error(trust.reason || "Workspace trust declined.");
+	process.exit(1);
+}
 
 const { main } = await import("@earendil-works/pi-coding-agent");
 

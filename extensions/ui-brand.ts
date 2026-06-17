@@ -99,7 +99,7 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 }
 
 function colorStatefulText(text: string, theme: any): string {
-	const statefulValues = ["api not configured", "model not selected", "bash unavailable", "subagent not loaded"];
+	const statefulValues = ["❌ API not configured", "api not configured", "model not selected", "bash unavailable", "subagent not loaded"];
 	return statefulValues.reduce((current, value) => {
 		if (!current.includes(value)) return current;
 		return current.replace(value, theme.fg(classifyUgkStatusTone(value), value));

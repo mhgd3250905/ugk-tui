@@ -12,9 +12,8 @@
  * 用 StringEnum(非 Type.Union)以兼容 Google API(官方 README 警告)。
  */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import {
 	CRON_PATHS,
 	formatCronHealth,

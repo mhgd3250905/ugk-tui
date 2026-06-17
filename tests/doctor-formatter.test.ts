@@ -27,9 +27,9 @@ test("formatDoctorReport renders passing checks and success footer", () => {
 
 	const text = formatDoctorReport(runs);
 
-	assert.match(text, /^UGK Doctor/);
-	assert.match(text, /\[pass\] Shell\s+bash available/);
-	assert.match(text, /All core checks passed\./);
+	assert.match(text, /^🧪 UGK Doctor/);
+	assert.match(text, /✅ Shell\s+bash available/);
+	assert.match(text, /✨ All core checks passed\./);
 });
 
 test("formatDoctorReport de-duplicates next steps from warning and failure checks", () => {
@@ -64,7 +64,7 @@ test("formatDoctorReport de-duplicates next steps from warning and failure check
 
 	const text = formatDoctorReport(runs);
 
-	assert.match(text, /\[warn\] Chrome\s+Chrome found, but CDP not reachable/);
-	assert.match(text, /Next steps:\n  \/cdp launch\n  \/cdp status/);
+	assert.match(text, /⚠️ Chrome\s+Chrome found, but CDP not reachable/);
+	assert.match(text, /👉 Next steps:\n  \/cdp launch\n  \/cdp status/);
 	assert.equal((text.match(/\/cdp launch/g) ?? []).length, 1);
 });

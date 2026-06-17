@@ -107,8 +107,25 @@ export default function (pi: ExtensionAPI) {
 		description: "Show ugk-pi-agent status",
 		handler: async (_args, ctx) => {
 			const deepseekStatus = getDeepSeekStatus();
+			const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
+			const apiSummary = deepseekStatus.replace(/^deepseek:\s*/, "DeepSeek ");
 			ctx.ui.notify(
-				`ugk-pi-agent active\n工具: greet · scrcpy(投屏) · subagent(子代理) · cron(定时) · chrome_cdp(本地登录态 Chrome,ask-gated) · 命令: /ugk /welcome /doctor /check-env /update /ugk-ui /footer /plan /todos /cdp · @agent名 手动委派 · UI: ugk品牌层+footer+状态条+标题栏spinner · skill: ugk-guide · adb-guide · scrcpy-guide · subagent-guide · cron-guide · chrome-cdp-guide\n${deepseekStatus}\n危险 bash(rm -rf/sudo/chmod 777)有权限门`,
+				[
+					"🟢 UGK active",
+					"",
+					"🧰 Tools:",
+					"  ✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp",
+					"",
+					"🤖 Agents:",
+					"  ✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries",
+					"",
+					"⌨️ Commands:",
+					"  /ugk  /doctor  /check-env  /update  /plan  /cdp  /ugk-ui",
+					"",
+					"📡 State:",
+					`  ${apiIcon} API     ${apiSummary}`,
+					"  🛡️ Guard   dangerous bash gate enabled",
+				].join("\n"),
 				"info",
 			);
 		},

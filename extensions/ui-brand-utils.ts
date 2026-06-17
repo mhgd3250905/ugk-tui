@@ -48,7 +48,7 @@ export type UgkStatusTone = "error" | "warning" | "success" | "dim";
 export function resolveUgkDisplayModelId(modelId: string | undefined, deepSeekStatus: string): string | undefined {
 	if (!modelId) return undefined;
 	const isDeepSeekModel = modelId.toLowerCase().startsWith("deepseek");
-	if (isDeepSeekModel && /未配置/.test(deepSeekStatus)) return "api not configured";
+	if (isDeepSeekModel && /未配置/.test(deepSeekStatus)) return "❌ API not configured";
 	return modelId;
 }
 

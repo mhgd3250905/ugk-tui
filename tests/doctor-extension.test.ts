@@ -63,8 +63,8 @@ test("/doctor reports check results without throwing", async () => {
 
 	assert.equal(notifications.length, 1);
 	assert.match(notifications[0], /UGK Doctor/);
-	assert.match(notifications[0], /\[pass\] Shell/);
-	assert.match(notifications[0], /\[fail\] API/);
+	assert.match(notifications[0], /✅ Shell/);
+	assert.match(notifications[0], /❌ API/);
 	assert.match(notifications[0], /Set DEEPSEEK_API_KEY or run \/login\./);
 });
 
@@ -86,5 +86,5 @@ test("/doctor converts thrown checks into failure rows", async () => {
 
 	await commands.get("doctor").handler("", ctx);
 
-	assert.match(notifications[0], /\[fail\] Chrome\s+chrome\.cdp check failed: boom/);
+	assert.match(notifications[0], /❌ Chrome\s+chrome\.cdp check failed: boom/);
 });

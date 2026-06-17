@@ -82,9 +82,9 @@ test("formatChromeTabs summarizes useful tab details", () => {
 });
 
 test("formatChromeCdpStatus reports online and offline states", () => {
-	assert.match(formatChromeCdpStatus({ online: true, port: 9222, tabs: [sampleTabs[0]] }), /online/);
+	assert.match(formatChromeCdpStatus({ online: true, port: 9222, tabs: [sampleTabs[0]] }), /✅ 127\.0\.0\.1:9222 online/);
 	assert.match(formatChromeCdpStatus({ online: false, port: 9444, error: "ECONNREFUSED" }), /9444/);
-	assert.match(formatChromeCdpStatus({ online: false, port: 9444, error: "ECONNREFUSED" }), /not reachable/);
+	assert.match(formatChromeCdpStatus({ online: false, port: 9444, error: "ECONNREFUSED" }), /⚠️ 127\.0\.0\.1:9444 not reachable/);
 });
 
 test("navigateChromeTab sends Page.navigate to the matched tab", async () => {

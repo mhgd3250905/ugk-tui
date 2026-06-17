@@ -138,7 +138,7 @@ test("ugk brand footer hides DeepSeek model when API credentials are missing", a
 		const text = footer.render(100).join("\n");
 
 		assert.doesNotMatch(text, /deepseek-v4-pro/);
-		assert.match(text, /api not configured/);
+		assert.match(text, /❌ API not configured/);
 	} finally {
 		if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
 		else process.env.DEEPSEEK_API_KEY = previousApiKey;
@@ -204,7 +204,7 @@ test("ugk brand footer colors stateful fields by severity", async () => {
 		});
 		const text = footer.render(140).join("\n");
 
-		assert.match(text, /<error>api not configured<\/error>/);
+		assert.match(text, /<error>❌ API not configured<\/error>/);
 		assert.doesNotMatch(text, /<success>configured<\/success>/);
 		assert.match(text, /<error>bash unavailable<\/error>/);
 		assert.match(text, /<error>subagent not loaded<\/error>/);

@@ -9,7 +9,7 @@ export function formatChromeTabs(tabs: ChromeTab[]): string {
 
 export function formatChromeCdpStatus(status: ChromeCdpStatus): string {
 	if (!status.online) {
-		return `Chrome CDP is not reachable on 127.0.0.1:${status.port}.\n${status.error || "Connection failed"}`;
+		return `🌐 Chrome CDP\n⚠️ 127.0.0.1:${status.port} not reachable\n${status.error || "Connection failed"}`;
 	}
-	return `Chrome CDP online on 127.0.0.1:${status.port}.\nTabs: ${status.tabs?.length ?? 0}`;
+	return `🌐 Chrome CDP\n✅ 127.0.0.1:${status.port} online\nTabs: ${status.tabs?.length ?? 0}`;
 }

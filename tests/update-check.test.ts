@@ -163,3 +163,42 @@ test("/update records skipped ref when user skips", async () => {
 	assert.equal(state.skippedRef, LATEST);
 	assert.equal(state.skippedAt, "2026-06-17T00:00:00.000Z");
 });
+
+test("/update cancel does not record skipped ref", async () => {
+	const commands = new Map<string, { handler: Function }>();
+	const pi = {
+		registerCommand(name: string, options: { handler: Function }) {
+			commands.set(name, options);
+		},
+		on() {},
+	};
+	let state: UgkUpdateState = {};
+	let applied = false;
+
+	registerUgkUpdate(pi as any, {
+		now: () => new Date("2026-06-17T00:00:00.000Z"),
+		getCurrentRef: async () => CURRENT,
+		getLatestRef: async () => LATEST,
+		getCurrentVersion: () => "1.0.0",
+		readState: () => state,
+		writeState: (next) => {
+			state = next;
+		},
+		applyUpdate: async () => {
+			applied = true;
+			return "must not update";
+		},
+	});
+
+	await commands.get("update")!.handler("", {
+		hasUI: true,
+		ui: {
+			select: async () => undefined,
+			notify: () => {},
+		},
+	});
+
+	assert.equal(applied, false);
+	assert.equal(state.skippedRef, undefined);
+	assert.equal(state.skippedAt, undefined);
+});

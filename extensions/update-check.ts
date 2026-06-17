@@ -153,7 +153,7 @@ async function promptAndMaybeUpdate(ctx: any, info: UgkUpdateInfo, deps: UgkUpda
 	}
 
 	const choice = await ctx.ui.select(formatUgkUpdateNotice(info), ["现在更新", "跳过本次"]);
-	if (choice !== "现在更新") {
+	if (choice === "跳过本次") {
 		(deps.writeState || ((next) => writeUgkUpdateState(next, deps.agentDir)))({
 			...state,
 			skippedRef: info.latestRef,
@@ -162,6 +162,7 @@ async function promptAndMaybeUpdate(ctx: any, info: UgkUpdateInfo, deps: UgkUpda
 		ctx.ui.notify("已跳过本次 UGK 更新提示。", "info");
 		return;
 	}
+	if (choice !== "现在更新") return;
 
 	try {
 		ctx.ui.notify("正在更新 UGK...", "info");

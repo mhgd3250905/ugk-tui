@@ -83,6 +83,8 @@ Attach: /flow attach run-001
 
 ### 进入 driver
 
+如果用户知道 run id，可以直接进入：
+
 ```text
 /flow attach run-001
 ```
@@ -105,6 +107,31 @@ Flow focus: driver x-search-post-collector/run-001
 2. 调整当前执行。
 3. 在 `todo.md` 对应步骤记录“偏离旧方案”和“解决过程”。
 4. 继续执行或说明阻塞。
+
+如果用户不带参数执行 `/flow attach`，Flow 打开 driver picker，而不是要求用户记住 run id：
+
+```text
+/flow attach
+```
+
+picker 列出当前所有正在运行或可恢复的 driver：
+
+```text
+Select Flow driver
+
+> running   x-search-post-collector/run-001   step 2/5  waiting first page load   12s ago
+  waiting   reddit-search/run-004             step 1/4  needs user input          2m ago
+  failed    tiktok-search/run-003             step 3/6  validator failed          8m ago
+  done      instagram-search/run-002          step 5/5  validated                14m ago
+```
+
+交互规则：
+
+- `Up/Down` 移动选择。
+- `Enter` attach 到当前选中的 driver。
+- `Esc` 取消 picker，focus 留在 main。
+- picker 打开期间不改变 focus，只有用户确认选择后才进入 driver focus。
+- 列表默认按 `running`、`waiting/needs-human`、`failed`、`done` 排序，同状态内按最近更新时间倒序。
 
 ### 退出 driver
 
@@ -135,6 +162,8 @@ Flow focus: driver x-search-post-collector/run-001
 
 - `focus = main` 时，普通输入走 main agent。
 - `focus = driver:<run-id>` 时，普通输入走对应 driver。
+- `/flow attach` 不带参数时由 Flow extension 打开 driver picker，不发给 main agent。
+- driver picker 打开期间，方向键、回车、Esc 由 picker 消费；focus 不变。
 - `/flow detach` 始终由 Flow extension 处理，不发给 driver。
 - `/flow driver status` 始终由 Flow extension 处理。
 - `/flow task review <run-id>` 只能在 main focus 中执行；如果当前在 driver focus，先提示用户 detach。
@@ -280,6 +309,7 @@ driver 状态和 focus 状态独立：driver 可以继续 running，而用户 fo
 新增命令：
 
 ```text
+/flow attach
 /flow attach <run-id>
 /flow detach
 /flow driver status
@@ -289,6 +319,8 @@ driver 状态和 focus 状态独立：driver 可以继续 running，而用户 fo
 
 - `/flow task prove <task-id>`：创建 run 后启动 interactive driver，并提示 attach 命令。
 - `/flow run <task-id>`：同上，但只允许 verified/active Task。
+- `/flow attach`：打开可选择的 driver picker。
+- `/flow attach <run-id>`：跳过 picker，直接 attach 到指定 run。
 - `/flow task review <run-id>`：在 main focus 中读取 driver artifacts 复盘。
 
 ## UI 表示
@@ -325,10 +357,34 @@ driver focus 下的滚动内容显示：
 Driver is running a tool. Your message will be delivered next.
 ```
 
+### Driver Picker
+
+当存在多个并行 driver 时，用户不应该靠记忆 run id 操作。`/flow attach` 的默认体验是打开一个可滚动选择器。
+
+picker 每行至少包含：
+
+- driver 状态：`starting` / `running` / `waiting` / `needs-human` / `validating` / `done` / `failed`。
+- task id 和 run id。
+- 当前 step 或最近 step。
+- 最近状态摘要。
+- 最近更新时间。
+
+如果没有可进入或可恢复的 driver，picker 不打开全屏选择器，只显示：
+
+```text
+No Flow drivers are running or recoverable.
+```
+
+第一版只要求键盘上下选择；搜索过滤、分组、多选和批量操作不进入范围。
+
 ## 测试建议
 
 不依赖真实网站或浏览器，先测路由和 artifacts：
 
+- `/flow attach` 无参数时打开 driver picker。
+- driver picker 列出 running/waiting/failed/done 等可进入或可恢复 driver，并展示状态。
+- driver picker 中 `Up/Down` 改变选中项，`Enter` attach 到选中 driver，`Esc` 取消且 focus 保持 main。
+- 没有 driver 时 `/flow attach` 给出空状态提示。
 - `/flow attach run-001` 把 focus 设置为 `driver:run-001`。
 - driver focus 下普通 input 不触发 main Flow prompt，而是路由到 driver。
 - `/flow detach` 把 focus 恢复为 main。
@@ -351,6 +407,8 @@ Driver is running a tool. Your message will be delivered next.
 ## 验收标准
 
 - 用户可以在同一个 TUI 中 `/flow attach <run-id>` 进入 driver focus。
+- 用户可以通过 `/flow attach` 打开可滚动 driver picker，并从多个 driver 中选择进入。
+- driver picker 展示每个 driver 的运行状态、task/run 标识、最近步骤和最近更新时间。
 - attach 后滚动展示 driver 内容。
 - attach 后 TUI 顶部常驻高亮显示当前 driver。
 - attach 后普通输入发给 driver。

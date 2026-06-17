@@ -48,6 +48,22 @@ test("detectUgkUpdate returns undefined when refs match or cannot be read", asyn
 	);
 });
 
+test("detectUgkUpdate does not report an update when local ref already contains latest main", async () => {
+	assert.equal(
+		await detectUgkUpdate({
+			getCurrentRef: async () => CURRENT,
+			getLatestRef: async () => LATEST,
+			getCurrentVersion: () => "1.0.0",
+			isLatestAncestorOfCurrent: async (currentRef, latestRef) => {
+				assert.equal(currentRef, CURRENT);
+				assert.equal(latestRef, LATEST);
+				return true;
+			},
+		}),
+		undefined,
+	);
+});
+
 test("shouldCheckForUgkUpdate always allows startup checks unless force rules apply elsewhere", () => {
 	const now = new Date("2026-06-17T00:00:00.000Z");
 

@@ -29,6 +29,7 @@ export interface UgkUpdateDeps {
 	agentDir?: string;
 	getCurrentRef?: () => Promise<string | undefined>;
 	getLatestRef?: () => Promise<string | undefined>;
+	isLatestAncestorOfCurrent?: (currentRef: string, latestRef: string) => Promise<boolean>;
 	getCurrentVersion?: () => string;
 	readState?: () => UgkUpdateState;
 	writeState?: (state: UgkUpdateState) => void;
@@ -100,6 +101,9 @@ export async function detectUgkUpdate(deps: UgkUpdateDeps = {}): Promise<UgkUpda
 	const currentVersion = (deps.getCurrentVersion || (() => readPackageVersion(deps.packageRoot)))();
 
 	if (!currentRef || !latestRef || currentRef === latestRef) return undefined;
+	const localAlreadyContainsLatest = await (deps.isLatestAncestorOfCurrent ||
+		((current, latest) => isGitAncestor(latest, current, deps.packageRoot)))(currentRef, latestRef);
+	if (localAlreadyContainsLatest) return undefined;
 
 	return {
 		currentRef,
@@ -107,6 +111,19 @@ export async function detectUgkUpdate(deps: UgkUpdateDeps = {}): Promise<UgkUpda
 		currentVersion,
 		source: "github-main",
 	};
+}
+
+export async function isGitAncestor(
+	ancestorRef: string,
+	descendantRef: string,
+	packageRoot = defaultPackageRoot(),
+): Promise<boolean> {
+	try {
+		await execFileAsync("git", ["-C", packageRoot, "merge-base", "--is-ancestor", ancestorRef, descendantRef]);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 export async function getLocalGitRef(packageRoot = defaultPackageRoot()): Promise<string | undefined> {

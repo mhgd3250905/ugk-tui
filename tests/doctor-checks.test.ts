@@ -58,6 +58,7 @@ test("checkDeepSeekApi passes and fails using existing status text", async () =>
 
 	const fail = await checkDeepSeekApi({ env: {}, authPath: "auth.json", readFile: () => "{}" });
 	assert.equal(fail.status, "fail");
+	assert.deepEqual(fail.details, ["底栏模型名只表示当前选择的模型,不代表 DeepSeek API 已配置。"]);
 	assert.deepEqual(fail.nextSteps, ["Set DEEPSEEK_API_KEY or run /login."]);
 });
 

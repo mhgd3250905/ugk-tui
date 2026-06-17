@@ -121,6 +121,7 @@ export async function checkDeepSeekApi(deps: DeepSeekStatusDeps = {}): Promise<D
 	return {
 		status: "fail",
 		summary: status.replace(/^deepseek:\s*/, "DeepSeek "),
+		details: ["底栏模型名只表示当前选择的模型,不代表 DeepSeek API 已配置。"],
 		nextSteps: ["Set DEEPSEEK_API_KEY or run /login."],
 	};
 }

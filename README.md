@@ -16,6 +16,7 @@ npm i -g ugk-agent
 
 > 需要先有 Node.js 18+。没有的话去 [nodejs.org](https://nodejs.org) 装 LTS 版。
 > ugk 内置 pi 作为依赖,**不用单独装 pi、不用 clone 本仓库、不用 pi install**。
+> pi 是 UGK 的内部运行时依赖,版本由 UGK 发行版固定管理;用户不要单独运行 `pi update`。
 
 ### 第 2 步:配置 API key
 
@@ -296,3 +297,6 @@ A: `ugk` 首次启动会默认在 `~/.pi/agent/settings.json` 写入:
 
 **Q: 我之前用 pi install 装过老版本,要怎么升级?**
 A: 直接 `npm i -g ugk-agent`,然后用 `ugk` 代替 `pi` 即可。老的 ~/.pi/agent/ 配置和 auth 仍然有效(ugk 复用同一目录)。
+
+**Q: 启动时看到 pi 更新提示怎么办?**
+A: 正常使用 `ugk` 不应该看到 pi 更新提示。UGK 会在启动入口禁用 pi 自身的版本检查和安装遥测,并固定内部 pi runtime 版本。以后底层 runtime 是否升级,只由 UGK 新版本决定;用户只需要更新 UGK,不要单独执行 `pi update`。

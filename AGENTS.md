@@ -62,6 +62,8 @@
 - `subagent-guide` — 子代理委派指南(@mention/三模式/自定义)
 - `cron-guide` — 定时任务指南(服务启动/crontab 速查/安全说明)
 - `chrome-cdp-guide` — 本地登录态 Chrome/CDP 使用边界与安全流程
+- `skill-creator` — 创建、改进和评测 agent skill(来自 Anthropic skills)
+- `docx` — 创建、读取、编辑 Word `.docx` 文档(来自 Anthropic skills)
 
 ### 权限门
 拦截 `rm -rf` / `sudo` / `chmod 777`,交互模式弹确认,非交互直接拦截。
@@ -71,3 +73,4 @@
 - **bash 工具走 Git Bash**(`D:\Git\bin\bash.exe`),命令用 Linux 语法,Windows 路径用正斜杠
 - **subagent 的 agent 定义** 在仓库 `agents/*.md`(版本管理),需复制到 `~/.pi/agent/agents/` 才生效(见 subagent-guide skill)
 - **模型**:全局默认 `deepseek-v4-pro`;预设 agent 在各自 .md 的 frontmatter 配置(scout=flash,其余=pro)
+- **运行时发行策略**:pi 是 UGK 的内部 runtime,每个 UGK 版本必须固定一个明确的 pi 版本。不要让用户看到或执行 `pi update`;pi 升级只能通过 UGK 项目主动升级依赖、完成兼容验证并发布新的 UGK 版本。

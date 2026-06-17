@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "cron:start": "node cron/service.ts",
-    "test": "node --test tests/subagent-runtime.test.ts tests/subagent-rendering.test.ts tests/device-env.test.ts tests/scrcpy-tool.test.ts tests/cron-contract.test.ts tests/cron-agent-bin.test.ts tests/plan-mode-state.test.ts tests/plan-mode-utils.test.ts tests/deepseek-status.test.ts tests/ui-brand-utils.test.ts tests/ui-brand-extension.test.ts tests/ugk-theme.test.ts tests/ugk-startup-settings.test.ts tests/chrome-cdp-config.test.ts tests/chrome-cdp-client.test.ts tests/chrome-cdp-extension.test.ts tests/chrome-cdp-launcher.test.ts tests/bundled-skills.test.ts"
+    "test": "node --test tests/subagent-runtime.test.ts tests/subagent-rendering.test.ts tests/device-env.test.ts tests/scrcpy-tool.test.ts tests/cron-contract.test.ts tests/cron-agent-bin.test.ts tests/plan-mode-state.test.ts tests/plan-mode-utils.test.ts tests/deepseek-status.test.ts tests/ui-brand-utils.test.ts tests/ui-brand-extension.test.ts tests/ugk-theme.test.ts tests/ugk-startup-settings.test.ts tests/chrome-cdp-config.test.ts tests/chrome-cdp-client.test.ts tests/chrome-cdp-extension.test.ts tests/chrome-cdp-launcher.test.ts tests/bundled-skills.test.ts tests/runtime-policy.test.ts"
   },
   "pi": {
     "extensions": [
@@ -31,10 +31,10 @@
     ]
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.79.4",
-    "@earendil-works/pi-ai": "^0.79.4",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "^0.79.4",
+    "@earendil-works/pi-agent-core": "0.79.4",
+    "@earendil-works/pi-ai": "0.79.4",
+    "@earendil-works/pi-coding-agent": "0.79.4",
+    "@earendil-works/pi-tui": "0.79.4",
     "node-cron": "^4.2.1"
   }
 }

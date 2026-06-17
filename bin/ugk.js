@@ -14,7 +14,10 @@ process.env.PI_CODING_AGENT = "true";
 
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { applyUgkRuntimePolicy } from "./ugk-runtime-policy.js";
 import { ensureUgkQuietStartupDefault } from "./ugk-startup-settings.js";
+
+applyUgkRuntimePolicy();
 
 const { main } = await import("@earendil-works/pi-coding-agent");
 

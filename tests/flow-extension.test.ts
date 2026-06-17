@@ -1,15 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { registerFlow } from "../extensions/flow/index.ts";
 
 function makePi() {
 	const commands = new Map<string, any>();
 	const handlers = new Map<string, Function[]>();
 	const sentMessages: Array<{ message: any; options?: any }> = [];
+	const entries: Array<{ type: "custom"; customType: string; data: unknown }> = [];
 	return {
 		commands,
 		handlers,
 		sentMessages,
+		entries,
 		pi: {
 			registerCommand(name: string, options: any) {
 				commands.set(name, options);
@@ -20,25 +25,92 @@ function makePi() {
 			sendMessage(message: any, options?: any) {
 				sentMessages.push({ message, options });
 			},
+			appendEntry(customType: string, data: unknown) {
+				entries.push({ type: "custom", customType, data });
+			},
 		},
 	};
 }
 
-function makeCtx() {
+function makeCtx(cwd = process.cwd()) {
 	const notifications: Array<{ message: string; type?: string }> = [];
+	const status = new Map<string, string | undefined>();
+	const widgets = new Map<string, unknown>();
+	const statusCalls: Array<{ key: string; value: string | undefined }> = [];
+	const widgetCalls: Array<{ key: string; value: unknown }> = [];
 	return {
 		notifications,
+		status,
+		widgets,
+		statusCalls,
+		widgetCalls,
 		ctx: {
+			cwd,
 			isIdle() {
 				return true;
+			},
+			sessionManager: {
+				getEntries() {
+					return [];
+				},
 			},
 			ui: {
 				notify(message: string, type?: string) {
 					notifications.push({ message, type });
 				},
+				select(_title: string, options: string[]) {
+					return options[0];
+				},
+				setStatus(key: string, value: string | undefined) {
+					status.set(key, value);
+					statusCalls.push({ key, value });
+				},
+				setWidget(key: string, value: unknown) {
+					widgets.set(key, value);
+					widgetCalls.push({ key, value });
+				},
+				theme: {
+					fg(_name: string, text: string) {
+						return text;
+					},
+				},
 			},
 		},
 	};
+}
+
+function makeTempFlowProject(
+	drivers: Array<{
+		taskId: string;
+		runId: string;
+		status: string;
+		step?: string;
+		summary?: string;
+		updatedAt?: string;
+	}>,
+) {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-extension-"));
+	for (const driver of drivers) {
+		const runDir = path.join(cwd, ".flow", "tasks", driver.taskId, "runs", driver.runId);
+		fs.mkdirSync(runDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(runDir, "status.json"),
+			`${JSON.stringify(
+				{
+					taskId: driver.taskId,
+					runId: driver.runId,
+					status: driver.status,
+					step: driver.step,
+					summary: driver.summary,
+					updatedAt: driver.updatedAt ?? "2026-06-17T00:00:00.000Z",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		fs.writeFileSync(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
+	}
+	return cwd;
 }
 
 test("registerFlow registers /flow command", () => {
@@ -168,10 +240,169 @@ test("/flow status queues a status request", async () => {
 	assert.match(sentMessages[0].message.content, /\[FLOW STATUS\]/);
 });
 
-test("parsed driver commands queue string prompts and notifications", async () => {
+test("/flow attach with no args opens picker and focuses selected driver", async () => {
+	const cwd = makeTempFlowProject([
+		{
+			taskId: "task-a",
+			runId: "run-001",
+			status: "running",
+			step: "step 1",
+			updatedAt: "2026-06-17T00:00:01.000Z",
+		},
+		{
+			taskId: "task-b",
+			runId: "run-004",
+			status: "waiting",
+			step: "step 4",
+			updatedAt: "2026-06-17T00:00:02.000Z",
+		},
+	]);
+	const { pi, commands, sentMessages, entries } = makePi();
+	const { ctx, notifications, status } = makeCtx(cwd);
+	ctx.ui.select = async (_title: string, options: string[]) => options[1];
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach", ctx);
+
+	assert.equal(notifications.at(-1)?.type, "info");
+	assert.match(notifications.at(-1)?.message ?? "", /Flow driver attached/);
+	assert.match(notifications.at(-1)?.message ?? "", /run-004/);
+	assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "task-b", runId: "run-004" });
+	assert.equal(status.get("flow-driver"), "driver:run-004");
+	assert.equal(sentMessages.length, 0);
+});
+
+test("/flow attach <run-id> direct attach", async () => {
+	const cwd = makeTempFlowProject([
+		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },
+	]);
+	const { pi, commands, sentMessages } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach run-001", ctx);
+
+	assert.equal(notifications.at(-1)?.type, "info");
+	assert.match(notifications.at(-1)?.message ?? "", /Flow driver attached/);
+	assert.match(notifications.at(-1)?.message ?? "", /run-001/);
+	assert.equal(sentMessages.length, 0);
+});
+
+test("/flow attach missing warns", async () => {
+	const cwd = makeTempFlowProject([
+		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },
+	]);
+	const { pi, commands, sentMessages } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach run-missing", ctx);
+
+	assert.equal(notifications.at(-1)?.type, "warning");
+	assert.match(notifications.at(-1)?.message ?? "", /run-missing/);
+	assert.equal(sentMessages.length, 0);
+});
+
+test("/flow detach clears focused driver", async () => {
+	const cwd = makeTempFlowProject([
+		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },
+	]);
+	const { pi, commands, sentMessages, entries } = makePi();
+	const { ctx, notifications, status, widgets } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach run-001", ctx);
+	await commands.get("flow").handler("detach", ctx);
+
+	assert.match(notifications.at(-1)?.message ?? "", /Flow driver detached/);
+	assert.deepEqual(entries.at(-1)?.data, { focus: "main" });
+	assert.equal(status.get("flow-driver"), undefined);
+	assert.equal(widgets.get("flow-driver-view"), undefined);
+	assert.equal(sentMessages.length, 0);
+});
+
+test("/flow driver status lists drivers", async () => {
+	const cwd = makeTempFlowProject([
+		{
+			taskId: "task-a",
+			runId: "run-001",
+			status: "running",
+			step: "step 1",
+			summary: "loading",
+			updatedAt: "2026-06-17T00:00:01.000Z",
+		},
+		{
+			taskId: "task-b",
+			runId: "run-004",
+			status: "waiting",
+			step: "step 4",
+			summary: "needs input",
+			updatedAt: "2026-06-17T00:00:02.000Z",
+		},
+	]);
+	const { pi, commands, sentMessages } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("driver status", ctx);
+
+	assert.equal(notifications.at(-1)?.type, "info");
+	assert.match(notifications.at(-1)?.message ?? "", /run-001/);
+	assert.match(notifications.at(-1)?.message ?? "", /run-004/);
+	assert.equal(sentMessages.length, 0);
+});
+
+test("driver focus input is handled instead of reaching main", async () => {
+	const cwd = makeTempFlowProject([
+		{
+			taskId: "task-a",
+			runId: "run-001",
+			status: "running",
+			step: "首屏加载",
+			updatedAt: "2026-06-17T00:00:01.000Z",
+		},
+	]);
+	const { pi, commands, handlers } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach run-001", ctx);
+	const result = await handlers.get("input")![0]({ text: "停，先等首屏加载", source: "interactive" }, ctx);
+
+	const feedback = fs.readFileSync(
+		path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001", "feedback.md"),
+		"utf8",
+	);
+	assert.deepEqual(result, { action: "handled" });
+	assert.match(feedback, /停，先等首屏加载/);
+	assert.match(feedback, /affected step: 首屏加载/);
+	assert.match(notifications.at(-1)?.message ?? "", /Sent to Flow driver run-001/);
+});
+
+test("slash input while focused returns continue and does not append feedback", async () => {
+	const cwd = makeTempFlowProject([
+		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },
+	]);
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach run-001", ctx);
+	const result = await handlers.get("input")![0]({ text: "/flow status", source: "interactive" }, ctx);
+
+	const feedback = fs.readFileSync(
+		path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001", "feedback.md"),
+		"utf8",
+	);
+	assert.deepEqual(result, { action: "continue" });
+	assert.equal(feedback, "# User Feedback\n\n");
+});
+
+test("driver commands without drivers notify strings and do not queue hidden prompts", async () => {
 	for (const flowCommand of ["attach", "detach", "driver status"]) {
+		const cwd = makeTempFlowProject([]);
 		const { pi, commands, sentMessages } = makePi();
-		const { ctx, notifications } = makeCtx();
+		const { ctx, notifications } = makeCtx(cwd);
 		registerFlow(pi as any);
 
 		await commands.get("flow").handler(flowCommand, ctx);
@@ -179,9 +410,7 @@ test("parsed driver commands queue string prompts and notifications", async () =
 		assert.equal(notifications.length, 1);
 		assert.equal(typeof notifications[0].message, "string");
 		assert.doesNotMatch(notifications[0].message, /\[object Object\]/);
-		assert.equal(sentMessages.length, 1);
-		assert.equal(typeof sentMessages[0].message.content, "string");
-		assert.doesNotMatch(sentMessages[0].message.content, /\[object Object\]/);
+		assert.equal(sentMessages.length, 0);
 	}
 });
 

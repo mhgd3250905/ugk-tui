@@ -17,11 +17,11 @@ export function formatFlowQueued(request: FlowRequest): string {
 		case "status":
 			return "Flow 已排队: 查看状态";
 		case "attach":
-			return request.runId ? `Flow driver attach 已解析: ${request.runId}` : "Flow driver attach 已解析。";
+			return request.runId ? `Flow driver attach requested: ${request.runId}` : "Flow driver picker opened.";
 		case "detach":
-			return "Flow driver detach 已解析。";
+			return "Flow driver detached.";
 		case "driver-status":
-			return "Flow driver status 已解析。";
+			return "Flow driver status requested.";
 		case "help":
 			return "Flow 帮助已显示。";
 		case "error":

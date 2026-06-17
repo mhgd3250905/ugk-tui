@@ -35,6 +35,11 @@ export interface UgkUpdateDeps {
 	applyUpdate?: () => Promise<string>;
 }
 
+export interface UgkCommandSpec {
+	command: string;
+	args: string[];
+}
+
 function shortRef(ref: string): string {
 	return ref.slice(0, 7);
 }
@@ -135,8 +140,18 @@ export function readPackageVersion(packageRoot = defaultPackageRoot()): string {
 	}
 }
 
-export function getPackageManagerCommand(platform = process.platform): string {
-	return platform === "win32" ? "npm.cmd" : "npm";
+export function getPackageInstallCommand(platform = process.platform): UgkCommandSpec {
+	if (platform === "win32") {
+		return {
+			command: "cmd.exe",
+			args: ["/d", "/s", "/c", "npm", "install"],
+		};
+	}
+
+	return {
+		command: "npm",
+		args: ["install"],
+	};
 }
 
 export async function applyLocalGitUpdate(packageRoot = defaultPackageRoot()): Promise<string> {
@@ -146,7 +161,8 @@ export async function applyLocalGitUpdate(packageRoot = defaultPackageRoot()): P
 	}
 
 	await execFileAsync("git", ["-C", packageRoot, "pull", "--rebase", "origin", "main"]);
-	await execFileAsync(getPackageManagerCommand(), ["install"], { cwd: packageRoot });
+	const install = getPackageInstallCommand();
+	await execFileAsync(install.command, install.args, { cwd: packageRoot });
 	return "UGK 已更新完成。请重启 ugk 使用新版本。";
 }
 

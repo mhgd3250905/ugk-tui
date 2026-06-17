@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
 	detectUgkUpdate,
 	formatUgkUpdateNotice,
-	getPackageManagerCommand,
+	getPackageInstallCommand,
 	registerUgkUpdate,
 	shouldCheckForUgkUpdate,
 	shouldPromptForUgkUpdate,
@@ -89,10 +89,19 @@ test("formatUgkUpdateNotice presents UGK-only wording", () => {
 	assert.doesNotMatch(notice, /npm/i);
 });
 
-test("getPackageManagerCommand uses the Windows npm command shim", () => {
-	assert.equal(getPackageManagerCommand("win32"), "npm.cmd");
-	assert.equal(getPackageManagerCommand("linux"), "npm");
-	assert.equal(getPackageManagerCommand("darwin"), "npm");
+test("getPackageInstallCommand runs npm through cmd.exe on Windows", () => {
+	assert.deepEqual(getPackageInstallCommand("win32"), {
+		command: "cmd.exe",
+		args: ["/d", "/s", "/c", "npm", "install"],
+	});
+	assert.deepEqual(getPackageInstallCommand("linux"), {
+		command: "npm",
+		args: ["install"],
+	});
+	assert.deepEqual(getPackageInstallCommand("darwin"), {
+		command: "npm",
+		args: ["install"],
+	});
 });
 
 test("/update prompts and applies update when user selects now", async () => {

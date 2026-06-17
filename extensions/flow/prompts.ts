@@ -106,6 +106,27 @@ export function buildFlowRequestPrompt(request: FlowRequest): string {
 				"表格列必须包含：task id、status、version、最近 run、下一步建议。",
 				"如果 .flow/tasks 不存在，说明当前项目还没有 Flow Task，并提示：/flow task create \"目标\"。",
 			].join("\n");
+		case "attach":
+			return [
+				"[FLOW DRIVER ATTACH]",
+				"",
+				`driver command: attach${request.runId ? ` ${request.runId}` : ""}`,
+				"该 driver command 已完成解析；交互式 attach 处理将在后续集成中完成。",
+			].join("\n");
+		case "detach":
+			return [
+				"[FLOW DRIVER DETACH]",
+				"",
+				"driver command: detach",
+				"该 driver command 已完成解析；交互式 detach 处理将在后续集成中完成。",
+			].join("\n");
+		case "driver-status":
+			return [
+				"[FLOW DRIVER STATUS]",
+				"",
+				"driver command: driver status",
+				"该 driver command 已完成解析；driver status 展示将在后续集成中完成。",
+			].join("\n");
 		case "help":
 			return buildFlowHelpText();
 		case "error":

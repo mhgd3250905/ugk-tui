@@ -168,6 +168,23 @@ test("/flow status queues a status request", async () => {
 	assert.match(sentMessages[0].message.content, /\[FLOW STATUS\]/);
 });
 
+test("parsed driver commands queue string prompts and notifications", async () => {
+	for (const flowCommand of ["attach", "detach", "driver status"]) {
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx();
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler(flowCommand, ctx);
+
+		assert.equal(notifications.length, 1);
+		assert.equal(typeof notifications[0].message, "string");
+		assert.doesNotMatch(notifications[0].message, /\[object Object\]/);
+		assert.equal(sentMessages.length, 1);
+		assert.equal(typeof sentMessages[0].message.content, "string");
+		assert.doesNotMatch(sentMessages[0].message.content, /\[object Object\]/);
+	}
+});
+
 test("flow context filter removes stale flow task messages when no request is pending", async () => {
 	const { pi, handlers } = makePi();
 	registerFlow(pi as any);

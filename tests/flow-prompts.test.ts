@@ -97,6 +97,20 @@ test("builds status prompt", () => {
 	assert.match(prompt, /\/flow task create "目标"/);
 });
 
+test("builds placeholder prompts for parsed driver commands", () => {
+	const attachPrompt = buildFlowRequestPrompt({ kind: "attach" });
+	assert.equal(typeof attachPrompt, "string");
+	assert.match(attachPrompt, /attach/);
+
+	const detachPrompt = buildFlowRequestPrompt({ kind: "detach" });
+	assert.equal(typeof detachPrompt, "string");
+	assert.match(detachPrompt, /detach/);
+
+	const statusPrompt = buildFlowRequestPrompt({ kind: "driver-status" });
+	assert.equal(typeof statusPrompt, "string");
+	assert.match(statusPrompt, /driver status/);
+});
+
 test("builds flow help text", () => {
 	const help = buildFlowHelpText();
 

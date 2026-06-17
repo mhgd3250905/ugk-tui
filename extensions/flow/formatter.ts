@@ -16,6 +16,12 @@ export function formatFlowQueued(request: FlowRequest): string {
 			return `Flow 已排队: 复盘 Run ${request.runId}`;
 		case "status":
 			return "Flow 已排队: 查看状态";
+		case "attach":
+			return request.runId ? `Flow driver attach 已解析: ${request.runId}` : "Flow driver attach 已解析。";
+		case "detach":
+			return "Flow driver detach 已解析。";
+		case "driver-status":
+			return "Flow driver status 已解析。";
 		case "help":
 			return "Flow 帮助已显示。";
 		case "error":

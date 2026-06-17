@@ -102,4 +102,7 @@ test("builds flow help text", () => {
 
 	assert.match(help, /\/flow task create "目标"/);
 	assert.match(help, /\/flow task prove <task-id>/);
+	assert.match(help, /\/flow attach/);
+	assert.match(help, /\/flow detach/);
+	assert.match(help, /\/flow driver status/);
 });

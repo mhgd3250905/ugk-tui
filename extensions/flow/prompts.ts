@@ -9,6 +9,10 @@ export function buildFlowHelpText(): string {
 		"- /flow task prove <task-id> [--input <inline-input>] 使用 subagent worker 证明 Task 可运行",
 		"- /flow run <task-id> [--input <inline-input>] 运行已证明的 Task",
 		"- /flow task review <run-id> 由 main agent 主持复盘并等待用户确认",
+		"- /flow attach 选择一个正在运行或可恢复的 driver",
+		"- /flow attach <run-id> 直接进入指定 driver",
+		"- /flow detach 退出当前 driver focus",
+		"- /flow driver status 查看 driver focus 和活跃 run",
 		"- /flow status 查看 Flow 状态",
 	].join("\n");
 }

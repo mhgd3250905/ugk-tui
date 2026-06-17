@@ -53,3 +53,20 @@ test("returns help for empty or unsupported flow commands", () => {
 		message: "Usage: /flow task prove <task-id> [--input <inline-input>]",
 	});
 });
+
+test("parses interactive driver commands", () => {
+	assert.deepEqual(parseFlowCommand("attach"), {
+		kind: "attach",
+		runId: undefined,
+	});
+	assert.deepEqual(parseFlowCommand("attach run-001"), {
+		kind: "attach",
+		runId: "run-001",
+	});
+	assert.deepEqual(parseFlowCommand("detach"), {
+		kind: "detach",
+	});
+	assert.deepEqual(parseFlowCommand("driver status"), {
+		kind: "driver-status",
+	});
+});

@@ -20,6 +20,16 @@ export function parseFlowCommand(args: string): FlowRequest {
 	if (!text) return { kind: "help" };
 
 	if (text === "status") return { kind: "status" };
+	if (text === "detach") return { kind: "detach" };
+	if (text === "driver status") return { kind: "driver-status" };
+
+	const attachPrefix = "attach";
+	if (text === attachPrefix) return { kind: "attach", runId: undefined };
+	if (text.startsWith(`${attachPrefix} `)) {
+		const runId = text.slice(attachPrefix.length).trim();
+		if (!runId) return { kind: "attach", runId: undefined };
+		return { kind: "attach", runId };
+	}
 
 	const createPrefix = "task create";
 	if (text === createPrefix) {

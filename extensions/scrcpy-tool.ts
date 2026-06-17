@@ -2,9 +2,29 @@ import { spawn, execSync } from "node:child_process";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { ADB_PATH, findAdb, findScrcpy } from "./device-env.ts";
+import { renderTerminalTable } from "./terminal-table.ts";
 
 export function splitExtraArgs(extraArgs?: string): string[] {
 	return extraArgs ? extraArgs.trim().split(/\s+/).filter(Boolean) : [];
+}
+
+export function formatScrcpyVersion(version: string, adbPath: string): string {
+	return [
+		"📱 scrcpy version",
+		"",
+		renderTerminalTable(
+			["项目", "状态"],
+			[
+				["scrcpy", `✅ ${version}`],
+				["ADB", adbPath],
+			],
+		),
+	].join("\n");
+}
+
+export function formatScrcpyStatus(running: boolean, error = false): string {
+	const status = error ? "❌ 无法查询状态" : running ? "✅ 正在运行" : "⏸️ 未在运行";
+	return ["📱 scrcpy status", "", renderTerminalTable(["项目", "状态"], [["进程", status]])].join("\n");
 }
 
 export const scrcpyTool = defineTool({
@@ -46,7 +66,7 @@ export const scrcpyTool = defineTool({
 				const out = execSync(`"${scrcpyBin}" --version`, { encoding: "utf8", timeout: 10000 });
 				const first = out.split(/\r?\n/)[0] || "scrcpy installed";
 				return {
-					content: [{ type: "text", text: `✅ ${first}\nADB: ${ADB_PATH}` }],
+					content: [{ type: "text", text: formatScrcpyVersion(first, ADB_PATH) }],
 					details: { installed: true, version: first },
 				};
 			} catch {
@@ -70,12 +90,12 @@ export const scrcpyTool = defineTool({
 				});
 				const running = /scrcpy\.exe/i.test(out);
 				return {
-					content: [{ type: "text", text: running ? "scrcpy 正在运行" : "scrcpy 未在运行" }],
+					content: [{ type: "text", text: formatScrcpyStatus(running) }],
 					details: { running },
 				};
 			} catch {
 				return {
-					content: [{ type: "text", text: "无法查询 scrcpy 进程状态" }],
+					content: [{ type: "text", text: formatScrcpyStatus(false, true) }],
 					details: { running: false, error: true },
 				};
 			}

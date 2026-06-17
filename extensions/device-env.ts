@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
+import { renderTerminalTable } from "./terminal-table.ts";
 
 export const ADB_PATH = "E:\\platform-tools\\adb.exe";
 
@@ -86,6 +87,7 @@ export function findAdb(deps?: DeviceEnvDeps): string | null {
 export function checkEnv(deps?: DeviceEnvDeps): string {
 	const exec = getExec(deps);
 	const lines: string[] = ["🔍 ugk 环境自检", ""];
+	const rows: string[][] = [];
 
 	const adbBin = findAdb(deps);
 	if (adbBin) {
@@ -95,9 +97,9 @@ export function checkEnv(deps?: DeviceEnvDeps): string {
 		} catch {
 			// keep unknown version
 		}
-		lines.push(`✅ adb      ${ver}  [${adbBin}]`);
+		rows.push(["✅", "adb", `${ver}  [${adbBin}]`]);
 	} else {
-		lines.push("❌ adb      未找到");
+		rows.push(["❌", "adb", "未找到"]);
 	}
 
 	if (adbBin) {
@@ -109,18 +111,18 @@ export function checkEnv(deps?: DeviceEnvDeps): string {
 				.slice(1)
 				.filter((l) => l.trim());
 			if (devices.length === 0) {
-				lines.push("⚠️  设备     无设备连接(插线/开 USB 调试/点允许)");
+				rows.push(["⚠️", "设备", "无设备连接(插线/开 USB 调试/点允许)"]);
 			} else {
 				const ok = devices.filter((l) => /\bdevice\b/.test(l));
 				const bad = devices.filter((l) => !/\bdevice\b/.test(l));
-				lines.push(`✅ 设备     ${ok.length} 台在线` + (bad.length ? `  ·  ${bad.length} 台异常(offline/unauthorized)` : ""));
-				for (const d of devices) lines.push(`           ${d.trim()}`);
+				rows.push(["✅", "设备", `${ok.length} 台在线` + (bad.length ? `  ·  ${bad.length} 台异常(offline/unauthorized)` : "")]);
+				for (const d of devices) rows.push(["↳", "设备", d.trim()]);
 			}
 		} catch {
-			lines.push("❌ 设备     查询失败");
+			rows.push(["❌", "设备", "查询失败"]);
 		}
 	} else {
-		lines.push("⏭️  设备     跳过(adb 不可用)");
+		rows.push(["⏭️", "设备", "跳过(adb 不可用)"]);
 	}
 
 	const scrcpyBin = findScrcpy(deps);
@@ -131,10 +133,11 @@ export function checkEnv(deps?: DeviceEnvDeps): string {
 		} catch {
 			// keep unknown version
 		}
-		lines.push(`✅ scrcpy   ${ver}  [${scrcpyBin === "scrcpy" ? "PATH" : scrcpyBin}]`);
+		rows.push(["✅", "scrcpy", `${ver}  [${scrcpyBin === "scrcpy" ? "PATH" : scrcpyBin}]`]);
 	} else {
-		lines.push("❌ scrcpy   未找到");
+		rows.push(["❌", "scrcpy", "未找到"]);
 	}
+	lines.push(renderTerminalTable(["状态", "项目", "结果"], rows));
 
 	const missing: string[] = [];
 	if (!adbBin) missing.push("  winget install Google.PlatformTools  # adb");

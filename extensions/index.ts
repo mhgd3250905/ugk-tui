@@ -12,7 +12,6 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +29,7 @@ import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
+import { renderTerminalTable } from "./terminal-table.ts";
 
 // ---- 自定义工具(照搬 hello.ts 模式)----
 const greetTool = defineTool({
@@ -48,18 +48,6 @@ const greetTool = defineTool({
 	},
 });
 
-function padEndVisible(text: string, width: number): string {
-	return `${text}${" ".repeat(Math.max(0, width - visibleWidth(text)))}`;
-}
-
-function tableRule(left: string, middle: string, right: string, labelWidth: number, valueWidth: number): string {
-	return `${left}${"─".repeat(labelWidth + 2)}${middle}${"─".repeat(valueWidth + 2)}${right}`;
-}
-
-function tableRow(label: string, value: string, labelWidth: number, valueWidth: number): string {
-	return `│ ${padEndVisible(label, labelWidth)} │ ${padEndVisible(value, valueWidth)} │`;
-}
-
 function formatUgkStatusTable(deepseekStatus: string): string {
 	const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
 	const apiSummary = deepseekStatus.replace(/^deepseek:\s*/, "DeepSeek ");
@@ -70,18 +58,11 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		["🛡️ Guard", "dangerous bash gate enabled"],
 	] as const;
-	const header = ["模块", "状态"] as const;
-	const labelWidth = Math.max(visibleWidth(header[0]), ...rows.map(([label]) => visibleWidth(label)));
-	const valueWidth = Math.max(visibleWidth(header[1]), ...rows.map(([, value]) => visibleWidth(value)));
 
 	return [
 		"🟢 UGK active",
 		"",
-		tableRule("┌", "┬", "┐", labelWidth, valueWidth),
-		tableRow(header[0], header[1], labelWidth, valueWidth),
-		tableRule("├", "┼", "┤", labelWidth, valueWidth),
-		...rows.map(([label, value]) => tableRow(label, value, labelWidth, valueWidth)),
-		tableRule("└", "┴", "┘", labelWidth, valueWidth),
+		renderTerminalTable(["模块", "状态"], rows),
 	].join("\n");
 }
 

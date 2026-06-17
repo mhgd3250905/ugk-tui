@@ -17,13 +17,15 @@ test("defines cron HTTP paths in one place", () => {
 });
 
 test("formats cron health, job list, created job, and history text", () => {
-	assert.equal(formatCronHealth({ jobs: 2, scheduled: 1, port: 17741 }, "http://127.0.0.1:17741"), "⏱️ Cron service\n✅ online\n📋 jobs: 2 (scheduled 1)\n📍 http://127.0.0.1:17741");
-	assert.equal(formatCronJobList([]), "📭 没有定时任务。用 action=add 新增(schedule + prompt)。");
+	assert.match(formatCronHealth({ jobs: 2, scheduled: 1, port: 17741 }, "http://127.0.0.1:17741"), /^⏱️ Cron service/);
+	assert.match(formatCronHealth({ jobs: 2, scheduled: 1, port: 17741 }, "http://127.0.0.1:17741"), /│\s*服务\s*│\s*✅ online\s*│/);
+	assert.match(formatCronHealth({ jobs: 2, scheduled: 1, port: 17741 }, "http://127.0.0.1:17741"), /│\s*jobs\s*│\s*2\s*│/);
+	assert.match(formatCronJobList([]), /│\s*📭\s*│\s*没有定时任务。用 action=add 新增\(schedule \+ prompt\)。\s*│/);
 	assert.match(
 		formatCronJobList([
 			{ id: "job_1", name: "daily", schedule: "0 9 * * *", prompt: "日报", enabled: true, createdAt: "2026-06-16T00:00:00.000Z" },
 		]),
-		/^📋 定时任务\(1 个\):/,
+		/│\s*✅\s*│\s*daily\s*│\s*0 9 \* \* \*\s*│\s*日报\s*│\s*job_1\s*│/,
 	);
 	assert.equal(
 		formatCronJobCreated({
@@ -37,7 +39,7 @@ test("formats cron health, job list, created job, and history text", () => {
 		}),
 		"✅ 已新增任务: daily\n⏰ 调度: 0 9 * * *\n🧾 任务: 日报\n🤖 模型: deepseek-v4-pro\n🆔 id: job_1\n\n到点会自动执行,结果在 ~/.pi/agent/cron-output/",
 	);
-	assert.equal(formatCronRunHistory([]), "📭 没有执行历史(任务还没到点触发过)。");
+	assert.match(formatCronRunHistory([]), /│\s*📭\s*│\s*没有执行历史\(任务还没到点触发过\)。\s*│/);
 	assert.match(
 		formatCronRunHistory([
 			{
@@ -50,7 +52,7 @@ test("formats cron health, job list, created job, and history text", () => {
 				outputFile: "out.txt",
 			},
 		]),
-		/^📜 执行历史\(最近 1 条\):/,
+		/│\s*✅\s*│\s*daily\s*│\s*2026-06-16T00:00:00.000Z\s*│\s*exit=0\s*│\s*out.txt\s*│/,
 	);
 });
 
@@ -68,6 +70,6 @@ test("formatCronRunHistory includes stderr snippets for failed runs", () => {
 		},
 	]);
 
-	assert.match(text, /❌ daily → exit=1/);
-	assert.match(text, /💥 错误: missing API key/);
+	assert.match(text, /│\s*❌\s*│\s*daily\s*│\s*2026-06-16T00:00:00.000Z\s*│\s*exit=1\s*│\s*out.txt\s*│/);
+	assert.match(text, /│\s*↳\s*│\s*daily\s*│\s*错误\s*│\s*💥 missing API key\s*│/);
 });

@@ -76,15 +76,16 @@ test("listChromeTabs returns only page targets from local CDP", async () => {
 test("formatChromeTabs summarizes useful tab details", () => {
 	const output = formatChromeTabs([sampleTabs[0]]);
 
-	assert.match(output, /tab-1/);
-	assert.match(output, /Dashboard/);
-	assert.match(output, /private\.example\.com/);
+	assert.match(output, /^🌐 Chrome tabs/);
+	assert.match(output, /┌─+┬─+┬─+┬─+┐/);
+	assert.match(output, /│\s*#\s*│\s*ID\s*│\s*Title\s*│\s*URL\s*│/);
+	assert.match(output, /│\s*1\s*│\s*tab-1\s*│\s*Dashboard\s*│\s*https:\/\/private\.example\.com\/dashboard\s*│/);
 });
 
 test("formatChromeCdpStatus reports online and offline states", () => {
-	assert.match(formatChromeCdpStatus({ online: true, port: 9222, tabs: [sampleTabs[0]] }), /✅ 127\.0\.0\.1:9222 online/);
-	assert.match(formatChromeCdpStatus({ online: false, port: 9444, error: "ECONNREFUSED" }), /9444/);
-	assert.match(formatChromeCdpStatus({ online: false, port: 9444, error: "ECONNREFUSED" }), /⚠️ 127\.0\.0\.1:9444 not reachable/);
+	assert.match(formatChromeCdpStatus({ online: true, port: 9222, tabs: [sampleTabs[0]] }), /│\s*✅\s*│\s*127\.0\.0\.1:9222\s*│\s*online\s*│\s*1\s*│/);
+	assert.match(formatChromeCdpStatus({ online: false, port: 9444, error: "ECONNREFUSED" }), /│\s*⚠️\s*│\s*127\.0\.0\.1:9444\s*│\s*not reachable\s*│\s*0\s*│/);
+	assert.match(formatChromeCdpStatus({ online: false, port: 9444, error: "ECONNREFUSED" }), /│\s*↳\s*│\s*error\s*│\s*ECONNREFUSED\s*│/);
 });
 
 test("navigateChromeTab sends Page.navigate to the matched tab", async () => {

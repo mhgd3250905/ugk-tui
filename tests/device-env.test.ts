@@ -42,8 +42,11 @@ test("checkEnv reports missing adb and scrcpy install commands", () => {
 		exists: () => false,
 	});
 
-	assert.match(output, /adb\s+未找到/);
-	assert.match(output, /scrcpy\s+未找到/);
+	assert.match(output, /┌─+┬─+┬─+┐/);
+	assert.match(output, /│\s*状态\s*│\s*项目\s*│\s*结果\s*│/);
+	assert.match(output, /│\s*❌\s*│\s*adb\s*│\s*未找到\s*│/);
+	assert.match(output, /│\s*⏭️\s*│\s*设备\s*│\s*跳过\(adb 不可用\)\s*│/);
+	assert.match(output, /│\s*❌\s*│\s*scrcpy\s*│\s*未找到\s*│/);
 	assert.match(output, /winget install Google\.PlatformTools/);
 	assert.match(output, /winget install Genymobile\.scrcpy/);
 });

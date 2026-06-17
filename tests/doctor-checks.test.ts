@@ -6,16 +6,18 @@ import {
 	checkChromeCdp,
 	checkDeepSeekApi,
 	createCoreDoctorChecks,
+	resolveBashCommand,
 } from "../extensions/doctor/checks.ts";
 
 test("checkBash passes when bash returns ok", async () => {
-	const result = await checkBash({ exec: async () => ({ stdout: "ok\n" }) });
+	const result = await checkBash({ resolveBash: () => ({ command: "bash", source: "PATH" }), exec: async () => ({ stdout: "ok\n" }) });
 	assert.equal(result.status, "pass");
 	assert.match(result.summary, /bash available/);
 });
 
 test("checkBash fails when bash cannot execute", async () => {
 	const result = await checkBash({
+		resolveBash: () => ({ command: "bash", source: "PATH" }),
 		exec: async () => {
 			throw new Error("spawn bash ENOENT");
 		},
@@ -23,6 +25,30 @@ test("checkBash fails when bash cannot execute", async () => {
 	assert.equal(result.status, "fail");
 	assert.match(result.summary, /bash unavailable/);
 	assert.deepEqual(result.nextSteps, ["Check PATH or install a bash-compatible shell."]);
+});
+
+test("resolveBashCommand prefers Windows shellPath from settings", () => {
+	const shellPath = "E:\\Application\\Git\\usr\\bin\\bash.exe";
+	const result = resolveBashCommand({
+		platform: "win32",
+		agentDir: "C:\\Users\\tester\\.pi\\agent",
+		exists: (candidate) => candidate === shellPath,
+		readFile: () => JSON.stringify({ shellPath }),
+	});
+
+	assert.deepEqual(result, { command: shellPath, source: "settings.json shellPath" });
+});
+
+test("resolveBashCommand falls back to common Windows Git Bash locations", () => {
+	const shellPath = "D:\\Git\\bin\\bash.exe";
+	const result = resolveBashCommand({
+		platform: "win32",
+		agentDir: "C:\\Users\\tester\\.pi\\agent",
+		exists: (candidate) => candidate === shellPath,
+		readFile: () => "{}",
+	});
+
+	assert.deepEqual(result, { command: shellPath, source: "common Git Bash location" });
 });
 
 test("checkDeepSeekApi passes and fails using existing status text", async () => {

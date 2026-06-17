@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 import { createChromeCdpClient, getChromeCdpStatus, type ChromeCdpStatus } from "../chrome-cdp/client.ts";
 import { createChromeCdpState, resolveChromeCdpPort } from "../chrome-cdp/config.ts";
@@ -10,6 +13,16 @@ const execFileAsync = promisify(execFile);
 
 export interface BashCheckDeps {
 	exec?: (command: string, args: string[], options: { timeout: number }) => Promise<{ stdout: string | Buffer }>;
+	resolveBash?: () => BashResolution;
+	platform?: NodeJS.Platform;
+	agentDir?: string;
+	exists?: (candidate: string) => boolean;
+	readFile?: (filePath: string) => string;
+}
+
+export interface BashResolution {
+	command: string;
+	source: string;
 }
 
 export interface ChromeBinaryCheckDeps {
@@ -24,6 +37,44 @@ export interface ChromeCdpCheckDeps {
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function defaultAgentDir(): string {
+	return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+}
+
+function readShellPathFromSettings(agentDir: string, readFile: (filePath: string) => string): string | undefined {
+	try {
+		const settings = JSON.parse(readFile(path.join(agentDir, "settings.json")));
+		return typeof settings.shellPath === "string" && settings.shellPath.trim() ? settings.shellPath : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function resolveBashCommand(deps: BashCheckDeps = {}): BashResolution {
+	const platform = deps.platform ?? process.platform;
+	if (platform !== "win32") return { command: "bash", source: "PATH" };
+
+	const exists = deps.exists ?? fs.existsSync;
+	const readFile = deps.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
+	const shellPath = readShellPathFromSettings(deps.agentDir ?? defaultAgentDir(), readFile);
+	if (shellPath && exists(shellPath)) {
+		return { command: shellPath, source: "settings.json shellPath" };
+	}
+
+	const candidates = [
+		"D:\\Git\\bin\\bash.exe",
+		"D:\\Git\\usr\\bin\\bash.exe",
+		"E:\\Application\\Git\\bin\\bash.exe",
+		"E:\\Application\\Git\\usr\\bin\\bash.exe",
+		"C:\\Program Files\\Git\\bin\\bash.exe",
+		"C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+	];
+	const candidate = candidates.find((item) => exists(item));
+	if (candidate) return { command: candidate, source: "common Git Bash location" };
+
+	return { command: "bash", source: "PATH" };
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -42,10 +93,11 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
 
 export async function checkBash(deps: BashCheckDeps = {}): Promise<DoctorResult> {
 	const exec = deps.exec ?? execFileAsync;
+	const bash = (deps.resolveBash ?? (() => resolveBashCommand(deps)))();
 	try {
-		const result = await exec("bash", ["-lc", "echo ok"], { timeout: 3000 });
+		const result = await exec(bash.command, ["-lc", "echo ok"], { timeout: 3000 });
 		if (String(result.stdout).includes("ok")) {
-			return { status: "pass", summary: "bash available" };
+			return { status: "pass", summary: `bash available (${bash.source}: ${bash.command})` };
 		}
 		return {
 			status: "fail",

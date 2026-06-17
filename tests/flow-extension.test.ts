@@ -115,7 +115,7 @@ test("context filter preserves current injected flow context and removes stale c
 	assert.deepEqual(result.messages, [current, { role: "user", content: "正常用户消息" }]);
 });
 
-test("context filter keeps current flow context through turn_end and removes it after agent_end", async () => {
+test("context filter keeps current flow context through agent_end and removes it on the next idle input", async () => {
 	const { pi, commands, handlers, sentMessages } = makePi();
 	const { ctx } = makeCtx();
 	registerFlow(pi as any);
@@ -128,11 +128,31 @@ test("context filter keeps current flow context through turn_end and removes it 
 	}
 	const afterTurnEnd = await handlers.get("context")![0]({ messages: [current] });
 
-	await handlers.get("agent_end")![0]();
+	for (const handler of handlers.get("agent_end") ?? []) {
+		await handler();
+	}
 	const afterAgentEnd = await handlers.get("context")![0]({ messages: [current] });
 
+	await handlers.get("input")![0]({ text: "下一条普通消息", source: "interactive" });
+	const afterNextInput = await handlers.get("context")![0]({ messages: [current] });
+
 	assert.deepEqual(afterTurnEnd.messages, [current]);
-	assert.deepEqual(afterAgentEnd.messages, []);
+	assert.deepEqual(afterAgentEnd.messages, [current]);
+	assert.deepEqual(afterNextInput.messages, []);
+});
+
+test("context filter keeps current flow context for streaming follow-up input", async () => {
+	const { pi, commands, handlers, sentMessages } = makePi();
+	const { ctx } = makeCtx();
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("status", ctx);
+	const current = sentMessages[0].message;
+
+	await handlers.get("input")![0]({ text: "补充说明", source: "interactive", streamingBehavior: "followUp" });
+	const result = await handlers.get("context")![0]({ messages: [current] });
+
+	assert.deepEqual(result.messages, [current]);
 });
 
 test("/flow status queues a status request", async () => {

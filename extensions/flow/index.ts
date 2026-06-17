@@ -95,8 +95,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 		};
 	});
 
-	pi.on("agent_end", async () => {
-		activeContextId = undefined;
+	pi.on("input", async (event) => {
+		if (!event.streamingBehavior) {
+			activeContextId = undefined;
+		}
 	});
 }
 

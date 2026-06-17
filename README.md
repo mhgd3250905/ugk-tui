@@ -114,6 +114,27 @@ ugk --model deepseek-reasoner
 
 ---
 
+## 🔄 更新 UGK
+
+UGK 会在 TUI 启动时限频检查 GitHub `main` 是否有新版本。发现更新时只显示 UGK 自己的选择:
+
+```text
+UGK 有新版本可用
+
+> 现在更新
+  跳过本次
+```
+
+选择“现在更新”后,UGK 会自动执行本地更新流程;选择“跳过本次”后,同一个远端版本不会反复打扰。也可以在会话中手动输入:
+
+```text
+/update
+```
+
+UGK 不暴露 pi 更新。pi 是内部 runtime,版本只随 UGK 发布策略变化。
+
+---
+
 ## 包含的能力(v1.0.0)
 
 ### 自定义工具
@@ -161,6 +182,7 @@ UGK_CLEAR_STARTUP=0 ugk
 | `/ugk` | 看 agent 状态 |
 | `/welcome` | 欢迎模板 |
 | `/check-env` | 一键自检 adb/scrcpy/设备连接 |
+| `/update` | 检查并更新 UGK |
 | `/cdp` | 管理本地 Chrome CDP 访问模式、端口、启动和标签页 |
 | `/ugk-ui` | 开关 ugk 品牌 UI |
 | `/plan` | 切换 plan-mode 只读探索模式(或 Ctrl+Alt+P) |

@@ -1,0 +1,157 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+	detectUgkUpdate,
+	formatUgkUpdateNotice,
+	registerUgkUpdate,
+	shouldCheckForUgkUpdate,
+	shouldPromptForUgkUpdate,
+	type UgkUpdateState,
+} from "../extensions/update-check.ts";
+
+const CURRENT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const LATEST = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+test("detectUgkUpdate reports a GitHub main update when refs differ", async () => {
+	const update = await detectUgkUpdate({
+		getCurrentRef: async () => CURRENT,
+		getLatestRef: async () => LATEST,
+		getCurrentVersion: () => "1.0.0",
+	});
+
+	assert.deepEqual(update, {
+		currentRef: CURRENT,
+		latestRef: LATEST,
+		currentVersion: "1.0.0",
+		source: "github-main",
+	});
+});
+
+test("detectUgkUpdate returns undefined when refs match or cannot be read", async () => {
+	assert.equal(
+		await detectUgkUpdate({
+			getCurrentRef: async () => CURRENT,
+			getLatestRef: async () => CURRENT,
+			getCurrentVersion: () => "1.0.0",
+		}),
+		undefined,
+	);
+
+	assert.equal(
+		await detectUgkUpdate({
+			getCurrentRef: async () => undefined,
+			getLatestRef: async () => LATEST,
+			getCurrentVersion: () => "1.0.0",
+		}),
+		undefined,
+	);
+});
+
+test("shouldCheckForUgkUpdate limits automatic checks to once per day", () => {
+	const now = new Date("2026-06-17T00:00:00.000Z");
+
+	assert.equal(shouldCheckForUgkUpdate({}, now), true);
+	assert.equal(shouldCheckForUgkUpdate({ lastCheckedAt: "2026-06-16T23:00:00.000Z" }, now), false);
+	assert.equal(shouldCheckForUgkUpdate({ lastCheckedAt: "2026-06-15T23:00:00.000Z" }, now), true);
+	assert.equal(shouldCheckForUgkUpdate({ lastCheckedAt: "2026-06-16T23:00:00.000Z" }, now, true), true);
+});
+
+test("shouldPromptForUgkUpdate suppresses a skipped ref only", () => {
+	const info = { currentRef: CURRENT, latestRef: LATEST, currentVersion: "1.0.0", source: "github-main" as const };
+
+	assert.equal(shouldPromptForUgkUpdate({}, info), true);
+	assert.equal(shouldPromptForUgkUpdate({ skippedRef: LATEST }, info), false);
+	assert.equal(shouldPromptForUgkUpdate({ skippedRef: CURRENT }, info), true);
+});
+
+test("formatUgkUpdateNotice presents UGK-only wording", () => {
+	const notice = formatUgkUpdateNotice({
+		currentRef: CURRENT,
+		latestRef: LATEST,
+		currentVersion: "1.0.0",
+		source: "github-main",
+	});
+
+	assert.match(notice, /UGK 有新版本可用/);
+	assert.match(notice, /当前版本: 1\.0\.0 \(aaaaaaa\)/);
+	assert.match(notice, /最新版本: bbbbbbb/);
+	assert.doesNotMatch(notice, /pi/i);
+	assert.doesNotMatch(notice, /github/i);
+	assert.doesNotMatch(notice, /npm/i);
+});
+
+test("/update prompts and applies update when user selects now", async () => {
+	const commands = new Map<string, { handler: Function }>();
+	const pi = {
+		registerCommand(name: string, options: { handler: Function }) {
+			commands.set(name, options);
+		},
+		on() {},
+	};
+	const notifications: string[] = [];
+	let applied = false;
+	let state: UgkUpdateState = {};
+
+	registerUgkUpdate(pi as any, {
+		now: () => new Date("2026-06-17T00:00:00.000Z"),
+		getCurrentRef: async () => CURRENT,
+		getLatestRef: async () => LATEST,
+		getCurrentVersion: () => "1.0.0",
+		readState: () => state,
+		writeState: (next) => {
+			state = next;
+		},
+		applyUpdate: async () => {
+			applied = true;
+			return "UGK 已更新完成。请重启 ugk 使用新版本。";
+		},
+	});
+
+	await commands.get("update")!.handler("", {
+		hasUI: true,
+		ui: {
+			select: async () => "现在更新",
+			notify: (message: string) => notifications.push(message),
+		},
+	});
+
+	assert.equal(applied, true);
+	assert.match(notifications.join("\n"), /正在更新 UGK/);
+	assert.match(notifications.join("\n"), /UGK 已更新完成/);
+});
+
+test("/update records skipped ref when user skips", async () => {
+	const commands = new Map<string, { handler: Function }>();
+	const pi = {
+		registerCommand(name: string, options: { handler: Function }) {
+			commands.set(name, options);
+		},
+		on() {},
+	};
+	let state: UgkUpdateState = {};
+
+	registerUgkUpdate(pi as any, {
+		now: () => new Date("2026-06-17T00:00:00.000Z"),
+		getCurrentRef: async () => CURRENT,
+		getLatestRef: async () => LATEST,
+		getCurrentVersion: () => "1.0.0",
+		readState: () => state,
+		writeState: (next) => {
+			state = next;
+		},
+		applyUpdate: async () => {
+			throw new Error("must not update");
+		},
+	});
+
+	await commands.get("update")!.handler("", {
+		hasUI: true,
+		ui: {
+			select: async () => "跳过本次",
+			notify: () => {},
+		},
+	});
+
+	assert.equal(state.skippedRef, LATEST);
+	assert.equal(state.lastCheckedAt, "2026-06-17T00:00:00.000Z");
+});

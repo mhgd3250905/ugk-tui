@@ -42,6 +42,7 @@
 - `/ugk` — 看 agent 状态
 - `/welcome` — 欢迎模板
 - `/check-env` — 一键自检 adb/scrcpy/设备连接,缺失项给 winget 安装命令
+- `/update` — 检查 GitHub main 并用 UGK 语境提示“现在更新/跳过本次”
 - `/cdp` — 管理本地 Chrome CDP 访问模式、端口、启动和标签页
 - `/ugk-ui` — 开关 ugk 品牌 UI
 - `/implement` `/scout-and-plan` `/implement-and-review` — subagent 流水线
@@ -74,3 +75,4 @@
 - **subagent 的 agent 定义** 在仓库 `agents/*.md`(版本管理),需复制到 `~/.pi/agent/agents/` 才生效(见 subagent-guide skill)
 - **模型**:全局默认 `deepseek-v4-pro`;预设 agent 在各自 .md 的 frontmatter 配置(scout=flash,其余=pro)
 - **运行时发行策略**:pi 是 UGK 的内部 runtime,每个 UGK 版本必须固定一个明确的 pi 版本。不要让用户看到或执行 `pi update`;pi 升级只能通过 UGK 项目主动升级依赖、完成兼容验证并发布新的 UGK 版本。
+- **UGK 更新策略**:当前未正式 npm release 阶段,更新探知以 GitHub `main` 最新 commit 为准。TUI 启动时限频检查,用户只看到“UGK 有新版本可用 / 现在更新 / 跳过本次”;手动入口是 `/update`。更新失败时才解释本地原因。

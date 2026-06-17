@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
 	advanceTrustPromptSelection,
+	buildTrustPromptRerenderSequence,
 	ensureWorkspaceTrusted,
 	findWorkspaceRoot,
 	isWorkspaceTrusted,
@@ -125,4 +126,10 @@ test("advanceTrustPromptSelection wraps with arrow keys and cancels on escape", 
 	state = advanceTrustPromptSelection(state, "\u001b");
 	assert.equal(state.done, true);
 	assert.equal(state.approved, false);
+});
+
+test("buildTrustPromptRerenderSequence clears the previous block without moving above it", () => {
+	assert.equal(buildTrustPromptRerenderSequence(0), "");
+	assert.equal(buildTrustPromptRerenderSequence(1), "\r\u001b[J");
+	assert.equal(buildTrustPromptRerenderSequence(10), "\r\u001b[9A\u001b[J");
 });

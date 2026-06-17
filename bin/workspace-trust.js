@@ -106,6 +106,12 @@ function renderTrustPrompt(workspaceRoot, selected) {
 	].join("\n");
 }
 
+export function buildTrustPromptRerenderSequence(linesRendered) {
+	if (linesRendered <= 0) return "";
+	const previousRowsAboveCursor = Math.max(0, linesRendered - 1);
+	return previousRowsAboveCursor === 0 ? "\r\u001b[J" : `\r\u001b[${previousRowsAboveCursor}A\u001b[J`;
+}
+
 async function promptWorkspaceTrustLine(workspaceRoot, input, output) {
 	output.write(`${workspaceTrustHeader(workspaceRoot)}  1. ${TRUST_OPTIONS[0]}\n  2. ${TRUST_OPTIONS[1]}\n\n`);
 	const rl = readline.createInterface({ input, output });
@@ -121,7 +127,7 @@ async function promptWorkspaceTrustTui(workspaceRoot, input, output) {
 	let state = { selected: 0 };
 	let linesRendered = 0;
 	const render = () => {
-		if (linesRendered > 0) output.write(`\u001b[${linesRendered}A\u001b[J`);
+		output.write(buildTrustPromptRerenderSequence(linesRendered));
 		const text = renderTrustPrompt(workspaceRoot, state.selected);
 		linesRendered = text.split("\n").length;
 		output.write(text);

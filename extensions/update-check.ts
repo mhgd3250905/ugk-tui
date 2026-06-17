@@ -135,6 +135,10 @@ export function readPackageVersion(packageRoot = defaultPackageRoot()): string {
 	}
 }
 
+export function getPackageManagerCommand(platform = process.platform): string {
+	return platform === "win32" ? "npm.cmd" : "npm";
+}
+
 export async function applyLocalGitUpdate(packageRoot = defaultPackageRoot()): Promise<string> {
 	const status = await execFileAsync("git", ["-C", packageRoot, "status", "--porcelain", "--untracked-files=no"]);
 	if (status.stdout.trim()) {
@@ -142,7 +146,7 @@ export async function applyLocalGitUpdate(packageRoot = defaultPackageRoot()): P
 	}
 
 	await execFileAsync("git", ["-C", packageRoot, "pull", "--rebase", "origin", "main"]);
-	await execFileAsync("npm", ["install"], { cwd: packageRoot });
+	await execFileAsync(getPackageManagerCommand(), ["install"], { cwd: packageRoot });
 	return "UGK 已更新完成。请重启 ugk 使用新版本。";
 }
 

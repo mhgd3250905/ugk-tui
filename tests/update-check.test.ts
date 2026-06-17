@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
 	detectUgkUpdate,
 	formatUgkUpdateNotice,
+	getPackageManagerCommand,
 	registerUgkUpdate,
 	shouldCheckForUgkUpdate,
 	shouldPromptForUgkUpdate,
@@ -86,6 +87,12 @@ test("formatUgkUpdateNotice presents UGK-only wording", () => {
 	assert.doesNotMatch(notice, /pi/i);
 	assert.doesNotMatch(notice, /github/i);
 	assert.doesNotMatch(notice, /npm/i);
+});
+
+test("getPackageManagerCommand uses the Windows npm command shim", () => {
+	assert.equal(getPackageManagerCommand("win32"), "npm.cmd");
+	assert.equal(getPackageManagerCommand("linux"), "npm");
+	assert.equal(getPackageManagerCommand("darwin"), "npm");
 });
 
 test("/update prompts and applies update when user selects now", async () => {

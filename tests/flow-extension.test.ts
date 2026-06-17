@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { registerFlow, setFlowDriverSessionFactoryForTests } from "../extensions/flow/index.ts";
-import { readDriverStatus } from "../extensions/flow/driver-store.ts";
+import { readDriverStatus, writeDriverStatus } from "../extensions/flow/driver-store.ts";
 
 function makePi() {
 	const commands = new Map<string, any>();
@@ -699,6 +699,8 @@ test("driver focus input is handled instead of reaching main", async () => {
 	assert.deepEqual(result, { action: "handled" });
 	assert.match(feedback, /停，先等首屏加载/);
 	assert.match(feedback, /affected step: 首屏加载/);
+	assert.doesNotMatch(feedback, /queued to driver/);
+	assert.match(feedback, /recorded; not delivered because driver is not live/);
 	assert.equal(notifications.at(-1)?.type, "warning");
 	assert.match(notifications.at(-1)?.message ?? "", /recoverable but not live/);
 });
@@ -835,7 +837,7 @@ test("live driver lookup disambiguates colliding run ids by task", async () => {
 	}
 });
 
-test("session_shutdown disposes live drivers with colliding run ids", async () => {
+test("session_shutdown pauses transient live drivers and disposes them", async () => {
 	const disposed: string[] = [];
 	setFlowDriverSessionFactoryForTests(async (options) => ({
 		taskId: options.taskId,
@@ -864,11 +866,68 @@ test("session_shutdown disposes live drivers with colliding run ids", async () =
 
 		await commands.get("flow").handler("task prove task-a --input a", ctx);
 		await commands.get("flow").handler("task prove task-b --input b", ctx);
+		const taskARunDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
+		const taskBRunDir = path.join(cwd, ".flow", "tasks", "task-b", "runs", "run-001");
+		assert.equal(readDriverStatus(taskARunDir)?.status, "running");
+		assert.equal(readDriverStatus(taskBRunDir)?.status, "running");
+
 		for (const handler of handlers.get("session_shutdown") ?? []) {
 			await handler();
 		}
 
 		assert.deepEqual(disposed.sort(), ["task-a", "task-b"]);
+		assert.equal(readDriverStatus(taskARunDir)?.status, "paused");
+		assert.match(readDriverStatus(taskARunDir)?.summary ?? "", /session shut down/);
+		assert.equal(readDriverStatus(taskBRunDir)?.status, "paused");
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("session_shutdown preserves terminal live driver status", async () => {
+	const disposed: string[] = [];
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		async start() {},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver"];
+		},
+		dispose() {
+			disposed.push(options.taskId);
+		},
+	}));
+	try {
+		const cwd = makeTempTaskProject("task-done");
+		const { pi, commands, handlers } = makePi();
+		const { ctx } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove task-done", ctx);
+		const runDir = path.join(cwd, ".flow", "tasks", "task-done", "runs", "run-001");
+		writeDriverStatus(runDir, {
+			taskId: "task-done",
+			runId: "run-001",
+			status: "done",
+			step: "complete",
+			summary: "completed before shutdown",
+			sessionFile: "driver.jsonl",
+		});
+
+		for (const handler of handlers.get("session_shutdown") ?? []) {
+			await handler();
+		}
+
+		const status = readDriverStatus(runDir);
+		assert.deepEqual(disposed, ["task-done"]);
+		assert.equal(status?.status, "done");
+		assert.equal(status?.summary, "completed before shutdown");
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}

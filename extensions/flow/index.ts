@@ -18,12 +18,13 @@ import {
 	createRunArtifacts,
 	listDriverSummaries,
 	nextRunId,
+	readDriverStatus,
 	writeDriverStatus,
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
 import { parseFlowCommand } from "./parser.ts";
 import { buildFlowHelpText, buildFlowRequestPrompt } from "./prompts.ts";
-import type { FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
+import type { FlowDriverStatus, FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
 
 const FLOW_CONTEXT_TYPE = "flow-task-context";
 const FLOW_CONTEXT_ID_PATTERN = /\[FLOW CONTEXT ID: ([^\]]+)\]/;
@@ -39,6 +40,13 @@ const FLOW_PROMPT_PREFIXES = [
 	"[FLOW DRIVER STATUS]",
 ];
 const REQUIRED_TASK_FILES = ["task.json", "SKILL.md", "todo.template.md", "validator.md"];
+const TRANSIENT_DRIVER_STATUSES: FlowDriverStatus[] = [
+	"starting",
+	"running",
+	"waiting",
+	"waiting-for-user",
+	"validating",
+];
 
 type ActionableFlowRequest = Exclude<FlowRequest, { kind: "help" } | { kind: "error"; message: string }>;
 type TaskGuardResult =
@@ -82,6 +90,10 @@ function getFlowContextId(message: { content?: unknown; customType?: string }): 
 
 function getDriverKey(taskId: string, runId: string): string {
 	return `${taskId}/${runId}`;
+}
+
+function isTransientDriverStatus(status: FlowDriverStatus): boolean {
+	return TRANSIENT_DRIVER_STATUSES.includes(status);
 }
 
 function readTaskMetadata(cwd: string, taskId: string): TaskGuardResult {
@@ -437,16 +449,21 @@ export function registerFlow(pi: ExtensionAPI): void {
 			return { action: "handled" };
 		}
 
+		const liveDriver = liveDrivers.get(getDriverKey(driver.taskId, driver.runId));
+		if (!liveDriver) {
+			appendDriverFeedback(driver.runDir, {
+				message: event.text,
+				driverResponse: "recorded; not delivered because driver is not live",
+				affectedStep: driver.step,
+			});
+			ctx.ui.notify(`Flow driver ${driver.runId} is recoverable but not live in this process. Feedback was recorded.`, "warning");
+			return { action: "handled" };
+		}
 		appendDriverFeedback(driver.runDir, {
 			message: event.text,
 			driverResponse: "queued to driver",
 			affectedStep: driver.step,
 		});
-		const liveDriver = liveDrivers.get(getDriverKey(driver.taskId, driver.runId));
-		if (!liveDriver) {
-			ctx.ui.notify(`Flow driver ${driver.runId} is recoverable but not live in this process. Feedback was recorded.`, "warning");
-			return { action: "handled" };
-		}
 		try {
 			await liveDriver.sendUserInput(event.text);
 		} catch (error) {
@@ -476,7 +493,20 @@ export function registerFlow(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", async () => {
-		for (const driver of liveDrivers.values()) driver.dispose();
+		for (const driver of liveDrivers.values()) {
+			const status = readDriverStatus(driver.runDir);
+			if (status && isTransientDriverStatus(status.status)) {
+				writeDriverStatus(driver.runDir, {
+					taskId: status.taskId,
+					runId: status.runId,
+					status: "paused",
+					step: status.step,
+					summary: "driver paused because session shut down",
+					sessionFile: status.sessionFile ?? driver.sessionFile,
+				});
+			}
+			driver.dispose();
+		}
 		liveDrivers.clear();
 	});
 }

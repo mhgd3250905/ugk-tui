@@ -88,6 +88,7 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	assert.match(header.render(80).join("\n"), /ugk v1\.0\.0/);
 	assert.match(footer.render(80).join("\n"), /feature\/ui-optimization/);
 	assert.match(footer.render(80).join("\n"), /第 1 轮完成/);
+	header.dispose?.();
 });
 
 test("ugk brand header renders active flow driver banner", async () => {
@@ -126,17 +127,23 @@ test("ugk brand header renders active flow driver banner", async () => {
 		fg: (_color: string, text: string) => text,
 		bold: (text: string) => text,
 	};
+	let header: { render(width: number): string[]; dispose?: () => void } | undefined;
 
 	try {
 		registerUgkBrandUi(pi as any);
 		await handlers.get("session_start")!({ reason: "startup" }, ctx);
 		setFlowDriverBanner({ taskId: "x-search-post-collector", runId: "run-001", status: "running" });
-		const header = headerFactory!({ requestRender() {} }, theme);
-		const text = header.render(100).join("\n");
+		header = headerFactory!({ requestRender() {} }, theme);
+		const lines = header.render(100);
+		const text = lines.join("\n");
+		const bannerIndex = lines.findIndex((line) => line.includes("FLOW DRIVER ACTIVE"));
 
 		assert.match(text, /FLOW DRIVER ACTIVE/);
 		assert.match(text, /x-search-post-collector\/run-001/);
+		assert.equal(lines[bannerIndex + 1], "");
+		assert.notEqual(lines[bannerIndex + 2], "");
 	} finally {
+		header?.dispose?.();
 		clearFlowDriverBanner();
 	}
 });
@@ -177,12 +184,13 @@ test("ugk brand header requests render while subscribed to flow driver banner ch
 		fg: (_color: string, text: string) => text,
 		bold: (text: string) => text,
 	};
+	let header: { dispose?: () => void } | undefined;
 
 	try {
 		registerUgkBrandUi(pi as any);
 		await handlers.get("session_start")!({ reason: "startup" }, ctx);
 		let renderRequests = 0;
-		const header = headerFactory!(
+		header = headerFactory!(
 			{
 				requestRender() {
 					renderRequests += 1;
@@ -198,6 +206,7 @@ test("ugk brand header requests render while subscribed to flow driver banner ch
 		clearFlowDriverBanner();
 		assert.equal(renderRequests, 1);
 	} finally {
+		header?.dispose?.();
 		clearFlowDriverBanner();
 	}
 });

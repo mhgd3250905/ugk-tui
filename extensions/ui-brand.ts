@@ -158,7 +158,7 @@ class UgkHeader implements Component {
 		const rendered = ["", ...lines.map((line, i) => colorHeaderLine(line, i, this.theme)), ""];
 		const banner = getFlowDriverBanner();
 		if (!banner) return rendered;
-		return ["", this.theme.bold(this.theme.fg("warning", formatFlowDriverBannerText(banner))), "", ...rendered];
+		return ["", this.theme.bold(this.theme.fg("warning", formatFlowDriverBannerText(banner))), ...rendered];
 	}
 }
 

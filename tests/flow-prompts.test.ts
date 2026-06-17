@@ -24,7 +24,7 @@ test("builds task create prompt with draft task instructions", () => {
 	assert.match(prompt, /\/flow task prove <task-id>/);
 });
 
-test("builds task prove prompt with worker run instructions", () => {
+test("builds task prove prompt with driver run instructions", () => {
 	const prompt = buildFlowRequestPrompt({
 		kind: "task-prove",
 		taskId: "x-search-post-collector",
@@ -35,9 +35,7 @@ test("builds task prove prompt with worker run instructions", () => {
 	assert.match(prompt, /x-search-post-collector/);
 	assert.match(prompt, /keyword=Medtrum/);
 	assert.match(prompt, /runs\/run-/);
-	assert.match(prompt, /subagent/);
-	assert.match(prompt, /worker/);
-	assert.match(prompt, /main agent 使用现有 `subagent` 工具启动 `worker`/);
+	assert.match(prompt, /interactive driver|driver/);
 	assert.match(prompt, /读取当前 Task 的 `SKILL\.md`/);
 	assert.match(prompt, /更新为 proving/);
 	assert.match(prompt, /input\.json/);
@@ -62,7 +60,7 @@ test("builds task run prompt with status guards", () => {
 	assert.match(prompt, /\/flow task prove x-search-post-collector/);
 	assert.match(prompt, /status 是 needs-human/);
 	assert.match(prompt, /verified\/active/);
-	assert.match(prompt, /main agent 使用现有 `subagent` 工具启动 `worker`/);
+	assert.match(prompt, /interactive driver|driver/);
 });
 
 test("builds task review prompt with main-agent review gate", () => {
@@ -116,7 +114,9 @@ test("builds flow help text", () => {
 
 	assert.match(help, /\/flow task create "目标"/);
 	assert.match(help, /\/flow task prove <task-id>/);
+	assert.match(help, /interactive driver|driver/);
 	assert.match(help, /\/flow attach/);
+	assert.match(help, /\/flow attach <task-id>\/<run-id>/);
 	assert.match(help, /\/flow detach/);
 	assert.match(help, /\/flow driver status/);
 });

@@ -9,7 +9,15 @@ import {
 	restoreFlowFocus,
 } from "./driver-focus.ts";
 import { getDriverPickerOptions, parseDriverPickerSelection } from "./driver-picker.ts";
-import { appendDriverFeedback, listDriverSummaries } from "./driver-store.ts";
+import { createFlowDriverSession, type FlowDriverSession } from "./driver-session.ts";
+import {
+	appendDriverFeedback,
+	buildDriverInitialPrompt,
+	createRunArtifacts,
+	listDriverSummaries,
+	nextRunId,
+	writeDriverStatus,
+} from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
 import { parseFlowCommand } from "./parser.ts";
 import { buildFlowHelpText, buildFlowRequestPrompt } from "./prompts.ts";
@@ -58,10 +66,19 @@ function getFlowContextId(message: { content?: unknown; customType?: string }): 
 	return message.content.match(FLOW_CONTEXT_ID_PATTERN)?.[1];
 }
 
+let driverSessionFactoryForTests:
+	| ((options: Parameters<typeof createFlowDriverSession>[0]) => Promise<FlowDriverSession>)
+	| undefined;
+
+export function setFlowDriverSessionFactoryForTests(factory: typeof driverSessionFactoryForTests): void {
+	driverSessionFactoryForTests = factory;
+}
+
 export function registerFlow(pi: ExtensionAPI): void {
 	let nextContextId = 0;
 	let activeContextId: string | undefined;
 	let focusState: FlowFocusState = { focus: "main" };
+	const liveDrivers = new Map<string, FlowDriverSession>();
 
 	function persistFocus(state: FlowFocusState): void {
 		pi.appendEntry(FLOW_FOCUS_ENTRY_TYPE, state);
@@ -94,6 +111,47 @@ export function registerFlow(pi: ExtensionAPI): void {
 		persistFocus(focusState);
 		renderFocus(ctx, driver);
 		ctx.ui.notify(`Flow driver attached: ${driver.taskId}/${driver.runId}`, "info");
+	}
+
+	async function startDriverForTask(
+		kind: "prove" | "run",
+		taskId: string,
+		input: string | undefined,
+		ctx: ExtensionContext,
+	): Promise<void> {
+		const cwd = getCwd(ctx);
+		const runId = nextRunId(cwd, taskId);
+		const artifacts = createRunArtifacts(cwd, taskId, input, runId);
+		const initialPrompt = buildDriverInitialPrompt(artifacts);
+		const createDriver = driverSessionFactoryForTests ?? createFlowDriverSession;
+		const driver = await createDriver({
+			cwd,
+			taskId,
+			runId,
+			runDir: artifacts.runDir,
+			initialPrompt,
+		});
+		liveDrivers.set(runId, driver);
+		writeDriverStatus(artifacts.runDir, {
+			taskId,
+			runId,
+			status: "running",
+			step: "starting",
+			summary: `${kind} driver running`,
+			sessionFile: driver.sessionFile,
+		});
+		ctx.ui.setWidget?.("flow-driver-view", driver.getWidgetLines(), { placement: "aboveEditor" });
+		void driver.start().catch((error) => {
+			writeDriverStatus(artifacts.runDir, {
+				taskId,
+				runId,
+				status: "failed",
+				step: "driver start",
+				summary: error instanceof Error ? error.message : String(error),
+				sessionFile: driver.sessionFile,
+			});
+		});
+		ctx.ui.notify(`Flow driver running: ${taskId}/${runId}\nAttach: /flow attach ${runId}`, "info");
 	}
 
 	function findDriverForAttach(ctx: ExtensionContext, target: string): FlowDriverSummary | undefined {
@@ -207,6 +265,15 @@ export function registerFlow(pi: ExtensionAPI): void {
 				return;
 			}
 
+			if (request.kind === "task-prove") {
+				await startDriverForTask("prove", request.taskId, request.input, ctx);
+				return;
+			}
+			if (request.kind === "task-run") {
+				await startDriverForTask("run", request.taskId, request.input, ctx);
+				return;
+			}
+
 			const contextId = `flow-${++nextContextId}`;
 			activeContextId = contextId;
 			pi.sendMessage(
@@ -279,8 +346,20 @@ export function registerFlow(pi: ExtensionAPI): void {
 			driverResponse: "queued to driver",
 			affectedStep: driver.step,
 		});
+		const liveDriver = liveDrivers.get(driver.runId);
+		if (!liveDriver) {
+			ctx.ui.notify(`Flow driver ${driver.runId} is recoverable but not live in this process. Feedback was recorded.`, "warning");
+			return { action: "handled" };
+		}
+		await liveDriver.sendUserInput(event.text);
+		ctx.ui.setWidget?.("flow-driver-view", liveDriver.getWidgetLines(), { placement: "aboveEditor" });
 		ctx.ui.notify(`Sent to Flow driver ${driver.runId}`, "info");
 		return { action: "handled" };
+	});
+
+	pi.on("session_shutdown", async () => {
+		for (const driver of liveDrivers.values()) driver.dispose();
+		liveDrivers.clear();
 	});
 }
 

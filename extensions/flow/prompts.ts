@@ -6,11 +6,11 @@ export function buildFlowHelpText(): string {
 		"",
 		"可用命令:",
 		'- /flow task create "目标" 生成一个 draft Task 草案',
-		"- /flow task prove <task-id> [--input <inline-input>] 使用 subagent worker 证明 Task 可运行",
-		"- /flow run <task-id> [--input <inline-input>] 运行已证明的 Task",
+		"- /flow task prove <task-id> [--input <inline-input>] 启动 interactive driver 证明 Task 可运行",
+		"- /flow run <task-id> [--input <inline-input>] 启动 interactive driver 运行已证明的 Task",
 		"- /flow task review <run-id> 由 main agent 主持复盘并等待用户确认",
 		"- /flow attach 选择一个正在运行或可恢复的 driver",
-		"- /flow attach <run-id> 直接进入指定 driver",
+		"- /flow attach <run-id> 或 /flow attach <task-id>/<run-id> 直接进入指定 driver",
 		"- /flow detach 退出当前 driver focus",
 		"- /flow driver status 查看 driver focus 和活跃 run",
 		"- /flow status 查看 Flow 状态",
@@ -29,8 +29,8 @@ function buildTaskExecutionPrompt(kind: "task-prove" | "task-run", taskId: strin
 			? [
 					`- 读取 ${taskPath}；如果 status 是 draft，将本次尝试的任务状态更新为 proving。`,
 					"- 创建 `runs/run-<timestamp-or-id>/`，写入 `input.json`，并从 `todo.template.md` 复制生成本次 `todo.md`。",
-					"- main agent 使用现有 `subagent` 工具启动 `worker`，让隔离 worker 执行任务主体；main agent 只负责派发和复核。",
-					"- worker 必须读取当前 Task 的 `SKILL.md`、`todo.md` 和 `validator.md`，按最优路径逐项执行并填写证据。",
+					"- 启动 interactive driver session 执行任务主体；main agent 只负责创建 run、记录状态和转发 driver focus 输入。",
+					"- driver 必须读取当前 Task 的 `SKILL.md`、`todo.md` 和 `validator.md`，按最优路径逐项执行并填写证据。",
 					"- 执行后写入输出、日志、证据、`validation.md` 和 `status.json`。",
 					"- 只有 `validator.md` 的验收通过且证据完整，才可把 Task 推进为 verified；否则标记 failed 或 needs-human。",
 				]
@@ -39,8 +39,8 @@ function buildTaskExecutionPrompt(kind: "task-prove" | "task-run", taskId: strin
 					"- 如果 status 是 needs-human，停止执行并说明需要用户先完成复盘或补充指导。",
 					"- 只有 status 是 verified/active 时，才允许创建新的 `runs/run-<timestamp-or-id>/`。",
 					"- 为本次 run 写入 `input.json`，并从 `todo.template.md` 复制生成本次 `todo.md`。",
-					"- main agent 使用现有 `subagent` 工具启动 `worker`，让隔离 worker 执行任务主体；main agent 只负责派发和复核。",
-					"- worker 必须读取当前 Task 的 `SKILL.md`、`todo.md` 和 `validator.md`，按最优路径逐项执行并填写证据。",
+					"- 启动 interactive driver session 执行任务主体；main agent 只负责创建 run、记录状态和转发 driver focus 输入。",
+					"- driver 必须读取当前 Task 的 `SKILL.md`、`todo.md` 和 `validator.md`，按最优路径逐项执行并填写证据。",
 					"- 执行后写入输出、日志、证据、`validation.md` 和 `status.json`。",
 				];
 	return [
@@ -53,7 +53,7 @@ function buildTaskExecutionPrompt(kind: "task-prove" | "task-run", taskId: strin
 		...statusPolicy,
 		"- 填写 `todo.md` 时必须记录原计划、实际执行、偏离旧方案、解决过程、证据和复盘候选，不能只写结论。",
 		"- 如果结果是 failed 或 needs-human 且问题未解决，不能写回 skill 或把经验固化为成功流程。",
-		"- prove/run 完成后交回 main agent 复核；worker 不负责复盘。",
+		"- prove/run 完成后交回 main agent 复核；driver 不负责复盘。",
 	].join("\n");
 }
 

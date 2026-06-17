@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { registerFlow } from "../extensions/flow/index.ts";
+import { registerFlow, setFlowDriverSessionFactoryForTests } from "../extensions/flow/index.ts";
 
 function makePi() {
 	const commands = new Map<string, any>();
@@ -110,6 +110,21 @@ function makeTempFlowProject(
 		);
 		fs.writeFileSync(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
 	}
+	return cwd;
+}
+
+function makeTempTaskProject(taskId: string): string {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
+	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
+	fs.mkdirSync(taskDir, { recursive: true });
+	fs.writeFileSync(
+		path.join(taskDir, "task.json"),
+		`${JSON.stringify({ id: taskId, status: "draft", version: 1 }, null, 2)}\n`,
+		"utf8",
+	);
+	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n\n## 最优路径\n\nA. Prepare\n", "utf8");
+	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Run Todo\n", "utf8");
+	fs.writeFileSync(path.join(taskDir, "validator.md"), "# Validator\n", "utf8");
 	return cwd;
 }
 
@@ -242,6 +257,51 @@ test("/flow status queues a status request", async () => {
 	assert.equal(notifications[0].type, "info");
 	assert.match(notifications[0].message, /查看状态/);
 	assert.match(sentMessages[0].message.content, /\[FLOW STATUS\]/);
+});
+
+test("/flow task prove creates a run and starts a driver session", async () => {
+	const started: string[] = [];
+	let initialPrompt = "";
+	let runDir = "";
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: "x",
+		runId: "run-001",
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		async start() {
+			initialPrompt = options.initialPrompt;
+			runDir = options.runDir;
+			started.push("started");
+		},
+		async sendUserInput(text: string) {
+			started.push(text);
+		},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx();
+		ctx.cwd = makeTempTaskProject("x");
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x --input keyword=Medtrum", ctx);
+
+		assert.deepEqual(started, ["started"]);
+		assert.match(initialPrompt, /\[FLOW INTERACTIVE DRIVER\]/);
+		assert.match(initialPrompt, /SKILL\.md/);
+		assert.match(initialPrompt, /validator\.md/);
+		assert.equal(fs.existsSync(path.join(runDir, "input.json")), true);
+		assert.equal(sentMessages.length, 0);
+		assert.match(notifications.at(-1)!.message, /Flow driver running/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
 });
 
 test("/flow attach with no args opens picker and focuses selected driver", async () => {
@@ -429,7 +489,47 @@ test("driver focus input is handled instead of reaching main", async () => {
 	assert.deepEqual(result, { action: "handled" });
 	assert.match(feedback, /停，先等首屏加载/);
 	assert.match(feedback, /affected step: 首屏加载/);
-	assert.match(notifications.at(-1)?.message ?? "", /Sent to Flow driver run-001/);
+	assert.equal(notifications.at(-1)?.type, "warning");
+	assert.match(notifications.at(-1)?.message ?? "", /recoverable but not live/);
+});
+
+test("driver focus input is forwarded to live driver sessions", async () => {
+	const started: string[] = [];
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		async start() {
+			started.push("started");
+		},
+		async sendUserInput(text: string) {
+			started.push(text);
+		},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver updated"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands, handlers } = makePi();
+		const { ctx, notifications, widgets } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x --input keyword=Medtrum", ctx);
+		await commands.get("flow").handler("attach run-001", ctx);
+		const result = await handlers.get("input")![0]({ text: "先暂停", source: "interactive" }, ctx);
+
+		assert.deepEqual(result, { action: "handled" });
+		assert.deepEqual(started, ["started", "先暂停"]);
+		assert.deepEqual(widgets.get("flow-driver-view"), ["driver updated"]);
+		assert.match(notifications.at(-1)?.message ?? "", /Sent to Flow driver run-001/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
 });
 
 test("driver focus input writes feedback to the focused task when run ids collide", async () => {

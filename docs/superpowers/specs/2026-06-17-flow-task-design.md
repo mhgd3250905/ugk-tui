@@ -482,3 +482,7 @@ Task skill 是精确任务类型的执行方法，只在对应 Task 的 driver s
 - 多模型、多 driver 类型选择。
 - 独立外部门禁 agent。
 - 可视化 Flow UI。
+
+## Implementation Plan
+
+Implementation plan: `docs/superpowers/plans/2026-06-17-flow-task.md`

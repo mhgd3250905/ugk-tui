@@ -13,6 +13,7 @@ const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export interface UgkUpdateState {
 	lastCheckedAt?: string;
 	skippedRef?: string;
+	skippedAt?: string;
 }
 
 export interface UgkUpdateInfo {
@@ -65,14 +66,15 @@ export function writeUgkUpdateState(state: UgkUpdateState, agentDir = defaultAge
 
 export function shouldCheckForUgkUpdate(state: UgkUpdateState, now: Date, force = false): boolean {
 	if (force) return true;
-	if (!state.lastCheckedAt) return true;
-	const lastChecked = Date.parse(state.lastCheckedAt);
-	if (!Number.isFinite(lastChecked)) return true;
-	return now.getTime() - lastChecked >= CHECK_INTERVAL_MS;
+	return true;
 }
 
-export function shouldPromptForUgkUpdate(state: UgkUpdateState, info: UgkUpdateInfo): boolean {
-	return state.skippedRef !== info.latestRef;
+export function shouldPromptForUgkUpdate(state: UgkUpdateState, info: UgkUpdateInfo, now = new Date()): boolean {
+	if (state.skippedRef !== info.latestRef) return true;
+	if (!state.skippedAt) return true;
+	const skippedAt = Date.parse(state.skippedAt);
+	if (!Number.isFinite(skippedAt)) return true;
+	return now.getTime() - skippedAt >= CHECK_INTERVAL_MS;
 }
 
 export function formatUgkUpdateNotice(info: UgkUpdateInfo): string {
@@ -154,8 +156,8 @@ async function promptAndMaybeUpdate(ctx: any, info: UgkUpdateInfo, deps: UgkUpda
 	if (choice !== "现在更新") {
 		(deps.writeState || ((next) => writeUgkUpdateState(next, deps.agentDir)))({
 			...state,
-			lastCheckedAt: (deps.now || (() => new Date()))().toISOString(),
 			skippedRef: info.latestRef,
+			skippedAt: (deps.now || (() => new Date()))().toISOString(),
 		});
 		ctx.ui.notify("已跳过本次 UGK 更新提示。", "info");
 		return;
@@ -184,7 +186,7 @@ async function checkAndPrompt(ctx: any, deps: UgkUpdateDeps = {}, force = false)
 		if (force) ctx.ui.notify("UGK 已是最新版本。", "info");
 		return;
 	}
-	if (!force && !shouldPromptForUgkUpdate(state, info)) return;
+	if (!force && !shouldPromptForUgkUpdate(state, info, now)) return;
 
 	await promptAndMaybeUpdate(ctx, info, deps, state);
 }

@@ -47,21 +47,29 @@ test("detectUgkUpdate returns undefined when refs match or cannot be read", asyn
 	);
 });
 
-test("shouldCheckForUgkUpdate limits automatic checks to once per day", () => {
+test("shouldCheckForUgkUpdate always allows startup checks unless force rules apply elsewhere", () => {
 	const now = new Date("2026-06-17T00:00:00.000Z");
 
 	assert.equal(shouldCheckForUgkUpdate({}, now), true);
-	assert.equal(shouldCheckForUgkUpdate({ lastCheckedAt: "2026-06-16T23:00:00.000Z" }, now), false);
+	assert.equal(shouldCheckForUgkUpdate({ lastCheckedAt: "2026-06-16T23:00:00.000Z" }, now), true);
 	assert.equal(shouldCheckForUgkUpdate({ lastCheckedAt: "2026-06-15T23:00:00.000Z" }, now), true);
 	assert.equal(shouldCheckForUgkUpdate({ lastCheckedAt: "2026-06-16T23:00:00.000Z" }, now, true), true);
 });
 
-test("shouldPromptForUgkUpdate suppresses a skipped ref only", () => {
+test("shouldPromptForUgkUpdate suppresses a skipped ref for one day only", () => {
+	const now = new Date("2026-06-17T00:00:00.000Z");
 	const info = { currentRef: CURRENT, latestRef: LATEST, currentVersion: "1.0.0", source: "github-main" as const };
 
-	assert.equal(shouldPromptForUgkUpdate({}, info), true);
-	assert.equal(shouldPromptForUgkUpdate({ skippedRef: LATEST }, info), false);
-	assert.equal(shouldPromptForUgkUpdate({ skippedRef: CURRENT }, info), true);
+	assert.equal(shouldPromptForUgkUpdate({}, info, now), true);
+	assert.equal(
+		shouldPromptForUgkUpdate({ skippedRef: LATEST, skippedAt: "2026-06-16T23:00:00.000Z" }, info, now),
+		false,
+	);
+	assert.equal(
+		shouldPromptForUgkUpdate({ skippedRef: LATEST, skippedAt: "2026-06-15T23:00:00.000Z" }, info, now),
+		true,
+	);
+	assert.equal(shouldPromptForUgkUpdate({ skippedRef: CURRENT, skippedAt: now.toISOString() }, info, now), true);
 });
 
 test("formatUgkUpdateNotice presents UGK-only wording", () => {
@@ -153,5 +161,5 @@ test("/update records skipped ref when user skips", async () => {
 	});
 
 	assert.equal(state.skippedRef, LATEST);
-	assert.equal(state.lastCheckedAt, "2026-06-17T00:00:00.000Z");
+	assert.equal(state.skippedAt, "2026-06-17T00:00:00.000Z");
 });

@@ -96,6 +96,26 @@ export function registerFlow(pi: ExtensionAPI): void {
 		ctx.ui.notify(`Flow driver attached: ${driver.taskId}/${driver.runId}`, "info");
 	}
 
+	function findDriverForAttach(ctx: ExtensionContext, target: string): FlowDriverSummary | undefined {
+		const drivers = listDriverSummaries(getCwd(ctx));
+		const matches = target.includes("/")
+			? drivers.filter((driver) => `${driver.taskId}/${driver.runId}` === target)
+			: drivers.filter((driver) => driver.runId === target);
+
+		if (matches.length === 0) {
+			ctx.ui.notify(`Flow driver not found: ${target}`, "warning");
+			return undefined;
+		}
+		if (matches.length > 1) {
+			ctx.ui.notify(
+				`Flow driver run id is ambiguous: ${target}. Use /flow attach and select a driver.`,
+				"warning",
+			);
+			return undefined;
+		}
+		return matches[0];
+	}
+
 	pi.registerCommand("flow", {
 		description: "Queue Flow task workflow requests",
 		handler: async (args, ctx) => {
@@ -112,9 +132,8 @@ export function registerFlow(pi: ExtensionAPI): void {
 
 			if (request.kind === "attach") {
 				if (request.runId) {
-					const driver = findDriverSummary(getCwd(ctx), request.runId);
+					const driver = findDriverForAttach(ctx, request.runId);
 					if (!driver) {
-						ctx.ui.notify(`Flow driver not found: ${request.runId}`, "warning");
 						return;
 					}
 					attachDriverBySummary(driver, ctx);
@@ -127,9 +146,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 					return;
 				}
 
-				const options = getDriverPickerOptions(drivers);
+				const now = new Date();
+				const options = getDriverPickerOptions(drivers, now);
 				const selection = await ctx.ui.select("Select Flow driver", options);
-				const driver = parseDriverPickerSelection(selection, drivers);
+				const driver = parseDriverPickerSelection(selection, drivers, now);
 				if (!driver) {
 					ctx.ui.notify("Flow driver attach cancelled.", "info");
 					return;
@@ -208,6 +228,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 				renderFocus(ctx, driver);
 				return;
 			}
+			focusState = { focus: "main" };
+			persistFocus(focusState);
+			renderFocus(ctx);
+			return;
 		}
 		focusState = { focus: "main" };
 		renderFocus(ctx);

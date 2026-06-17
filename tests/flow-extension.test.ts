@@ -113,6 +113,10 @@ function makeTempFlowProject(
 	return cwd;
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 test("registerFlow registers /flow command", () => {
 	const { pi, commands } = makePi();
 
@@ -241,27 +245,28 @@ test("/flow status queues a status request", async () => {
 });
 
 test("/flow attach with no args opens picker and focuses selected driver", async () => {
+	const updatedAt = new Date().toISOString();
 	const cwd = makeTempFlowProject([
 		{
 			taskId: "task-a",
 			runId: "run-001",
 			status: "running",
 			step: "step 1",
-			updatedAt: "2026-06-17T00:00:01.000Z",
+			updatedAt,
 		},
 		{
 			taskId: "task-b",
 			runId: "run-004",
 			status: "waiting",
 			step: "step 4",
-			updatedAt: "2026-06-17T00:00:02.000Z",
+			updatedAt,
 		},
 		{
 			taskId: "task-done",
 			runId: "run-009",
 			status: "done",
 			step: "complete",
-			updatedAt: "2026-06-17T00:00:03.000Z",
+			updatedAt,
 		},
 	]);
 	const { pi, commands, sentMessages, entries } = makePi();
@@ -269,6 +274,7 @@ test("/flow attach with no args opens picker and focuses selected driver", async
 	let pickerOptions: string[] = [];
 	ctx.ui.select = async (_title: string, options: string[]) => {
 		pickerOptions = options;
+		await sleep(1100);
 		return options[1];
 	};
 	registerFlow(pi as any);
@@ -281,6 +287,41 @@ test("/flow attach with no args opens picker and focuses selected driver", async
 	assert.ok(pickerOptions.some((option) => option.includes("done") && option.includes("run-009")));
 	assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "task-b", runId: "run-004" });
 	assert.equal(status.get("flow-driver"), "driver:run-004");
+	assert.equal(sentMessages.length, 0);
+});
+
+test("/flow attach <run-id> warns when run id is ambiguous", async () => {
+	const cwd = makeTempFlowProject([
+		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },
+		{ taskId: "task-b", runId: "run-001", status: "waiting", updatedAt: "2026-06-17T00:00:02.000Z" },
+	]);
+	const { pi, commands, sentMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach run-001", ctx);
+
+	assert.equal(notifications.at(-1)?.type, "warning");
+	assert.match(notifications.at(-1)?.message ?? "", /ambiguous/);
+	assert.match(notifications.at(-1)?.message ?? "", /run-001/);
+	assert.equal(sentMessages.length, 0);
+	assert.equal(entries.length, 0);
+});
+
+test("/flow attach <task-id>/<run-id> directly attaches an exact driver", async () => {
+	const cwd = makeTempFlowProject([
+		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },
+		{ taskId: "task-b", runId: "run-001", status: "waiting", updatedAt: "2026-06-17T00:00:02.000Z" },
+	]);
+	const { pi, commands, sentMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach task-b/run-001", ctx);
+
+	assert.equal(notifications.at(-1)?.type, "info");
+	assert.match(notifications.at(-1)?.message ?? "", /task-b\/run-001/);
+	assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "task-b", runId: "run-001" });
 	assert.equal(sentMessages.length, 0);
 });
 
@@ -408,6 +449,26 @@ test("slash input while focused returns continue and does not append feedback", 
 	);
 	assert.deepEqual(result, { action: "continue" });
 	assert.equal(feedback, "# User Feedback\n\n");
+});
+
+test("session_start clears and persists stale focused driver", async () => {
+	const cwd = makeTempFlowProject([]);
+	const { pi, handlers, entries } = makePi();
+	const { ctx, status, widgets } = makeCtx(cwd);
+	ctx.sessionManager.getEntries = () => [
+		{
+			type: "custom",
+			customType: "flow-focus",
+			data: { focus: "driver", taskId: "task-stale", runId: "run-stale" },
+		},
+	];
+	registerFlow(pi as any);
+
+	await handlers.get("session_start")![0]({ reason: "startup" }, ctx);
+
+	assert.deepEqual(entries.at(-1)?.data, { focus: "main" });
+	assert.equal(status.get("flow-driver"), undefined);
+	assert.equal(widgets.get("flow-driver-view"), undefined);
 });
 
 test("driver commands without drivers notify strings and do not queue hidden prompts", async () => {

@@ -12,7 +12,7 @@ test("formatDoctorReport renders passing checks and success footer", () => {
 				category: "shell",
 				run: async () => ({ status: "pass", summary: "bash available" }),
 			},
-			result: { status: "pass", summary: "bash available" },
+			result: { status: "pass", summary: "bash available", details: ["settings.json shellPath: D:\\Git\\bin\\bash.exe"] },
 		},
 		{
 			check: {
@@ -28,7 +28,10 @@ test("formatDoctorReport renders passing checks and success footer", () => {
 	const text = formatDoctorReport(runs);
 
 	assert.match(text, /^🧪 UGK Doctor/);
-	assert.match(text, /✅ Shell\s+bash available/);
+	assert.match(text, /┌─+┬─+┬─+┐/);
+	assert.match(text, /│\s*状态\s*│\s*检查\s*│\s*结果\s*│/);
+	assert.match(text, /│\s*✅\s*│\s*Shell\s*│\s*bash available\s*│/);
+	assert.match(text, /│\s*↳\s*│\s*Shell\s*│\s*settings\.json shellPath: D:\\Git\\bin\\bash\.exe\s*│/);
 	assert.match(text, /✨ All core checks passed\./);
 });
 
@@ -64,7 +67,7 @@ test("formatDoctorReport de-duplicates next steps from warning and failure check
 
 	const text = formatDoctorReport(runs);
 
-	assert.match(text, /⚠️ Chrome\s+Chrome found, but CDP not reachable/);
+	assert.match(text, /│\s*⚠️\s*│\s*Chrome\s*│\s*Chrome found, but CDP not reachable\s*│/);
 	assert.match(text, /👉 Next steps:\n  \/cdp launch\n  \/cdp status/);
 	assert.equal((text.match(/\/cdp launch/g) ?? []).length, 1);
 });

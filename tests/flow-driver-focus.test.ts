@@ -40,3 +40,12 @@ test("restoreFlowFocus skips invalid focus data and falls back to main", () => {
 
 	assert.deepEqual(restoreFlowFocus(entries), { focus: "main" });
 });
+
+test("restoreFlowFocus treats the latest flow-focus entry as authoritative when invalid", () => {
+	const entries = [
+		{ type: "custom", customType: FLOW_FOCUS_ENTRY_TYPE, data: { focus: "driver", taskId: "old", runId: "run-000" } },
+		{ type: "custom", customType: FLOW_FOCUS_ENTRY_TYPE, data: { focus: "driver", taskId: "x" } },
+	] as any[];
+
+	assert.deepEqual(restoreFlowFocus(entries), { focus: "main" });
+});

@@ -47,10 +47,7 @@ export function restoreFlowFocus(entries: SessionEntry[]): FlowFocusState {
 			continue;
 		}
 
-		const state = toFlowFocusState(entry.data);
-		if (state) {
-			return state;
-		}
+		return toFlowFocusState(entry.data) ?? { focus: "main" };
 	}
 
 	return { focus: "main" };

@@ -293,17 +293,24 @@ driver 状态和 focus 状态独立：driver 可以继续 running，而用户 fo
 
 ## UI 表示
 
-TUI 不需要新窗口。第一版只需要清晰标识 focus：
+TUI 不需要新窗口。第一版需要清晰标识 focus：
 
 ```text
 Flow: main
 ```
 
-或：
+main focus 可以低调显示。driver focus 必须在顶部/header/status strip 位置常驻一个高亮 Banner，而不是只在滚动日志里打印一次：
 
 ```text
-Flow: driver x-search-post-collector/run-001
+FLOW DRIVER ACTIVE  x-search-post-collector/run-001  /flow detach 返回 main
 ```
+
+要求：
+
+- Banner 固定在终端顶部或等价的 TUI 状态区，不随消息滚走。
+- Banner 只表达当前交互状态，不写入 conversation/history，避免污染 main 或 driver 的上下文。
+- `/flow detach` 后 Banner 消失，恢复普通 main header/status。
+- 如果 attach 到已结束但可恢复的 run，Banner 需要带状态，例如 `done`、`failed`、`paused`，避免用户误判它仍在运行。
 
 driver focus 下的滚动内容显示：
 
@@ -326,6 +333,9 @@ Driver is running a tool. Your message will be delivered next.
 - driver focus 下普通 input 不触发 main Flow prompt，而是路由到 driver。
 - `/flow detach` 把 focus 恢复为 main。
 - driver focus 下 `/flow task review run-001` 被拒绝并提示先 detach。
+- attach 后顶部出现高亮 Driver Focus Banner。
+- detach 后 Driver Focus Banner 消失。
+- Driver Focus Banner 不进入 conversation/history，只作为 TUI 状态存在。
 - 用户插嘴会写入 `feedback.md`。
 - driver progress update 会写入 `progress.md`。
 - main review prompt 要求读取 `feedback.md` 和 `progress.md`。
@@ -342,7 +352,9 @@ Driver is running a tool. Your message will be delivered next.
 
 - 用户可以在同一个 TUI 中 `/flow attach <run-id>` 进入 driver focus。
 - attach 后滚动展示 driver 内容。
+- attach 后 TUI 顶部常驻高亮显示当前 driver。
 - attach 后普通输入发给 driver。
+- `/flow detach` 后顶部高亮提示消失。
 - `/flow detach` 后普通输入回到 main。
 - 用户在 driver 中的输入被记录到 `feedback.md`。
 - driver 进度被记录到 `progress.md`。

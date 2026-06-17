@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import {
+	advanceCliUpdatePromptSelection,
+	buildCliUpdatePromptRerenderSequence,
 	formatCliUpdatePrompt,
+	promptCliUpdateChoice,
 	runUgkUpdatePreflight,
 	shouldRunCliUpdatePreflight,
 	type CliUpdateChoice,
@@ -53,6 +57,76 @@ test("formatCliUpdatePrompt mirrors codex-style numbered update choices", () => 
 	assert.match(prompt, /1\. Update now \(runs `npm install -g ugk-agent`\)/);
 	assert.match(prompt, /2\. Skip/);
 	assert.match(prompt, /3\. Skip until next version/);
+	assert.match(prompt, /Use Up\/Down to choose, Enter to confirm, Esc to cancel/);
+});
+
+test("advanceCliUpdatePromptSelection supports arrow navigation and enter selection", () => {
+	let state = { selected: 0 };
+
+	state = advanceCliUpdatePromptSelection(state, "\u001b[B");
+	assert.equal(state.selected, 1);
+
+	state = advanceCliUpdatePromptSelection(state, "\u001b[B");
+	assert.equal(state.selected, 2);
+
+	state = advanceCliUpdatePromptSelection(state, "\r");
+	assert.equal(state.done, true);
+	assert.equal(state.choice, "skip-until-next");
+});
+
+test("advanceCliUpdatePromptSelection wraps, cancels, and supports numeric shortcuts", () => {
+	let state = { selected: 0 };
+
+	state = advanceCliUpdatePromptSelection(state, "\u001b[A");
+	assert.equal(state.selected, 2);
+
+	state = advanceCliUpdatePromptSelection(state, "2");
+	assert.equal(state.done, true);
+	assert.equal(state.choice, "skip");
+
+	state = advanceCliUpdatePromptSelection({ selected: 1 }, "\u001b");
+	assert.equal(state.done, true);
+	assert.equal(state.choice, "skip");
+});
+
+test("buildCliUpdatePromptRerenderSequence clears the previous update prompt", () => {
+	assert.equal(buildCliUpdatePromptRerenderSequence(0), "");
+	assert.equal(buildCliUpdatePromptRerenderSequence(1), "\r\u001b[J");
+	assert.equal(buildCliUpdatePromptRerenderSequence(10), "\r\u001b[9A\u001b[J");
+});
+
+test("promptCliUpdateChoice uses raw TTY arrow navigation", async () => {
+	const input = new EventEmitter() as EventEmitter & {
+		isTTY: boolean;
+		setRawMode: (value: boolean) => void;
+		resume: () => void;
+	};
+	const output = ttyStream();
+	const rawModes: boolean[] = [];
+	let resumed = false;
+	input.isTTY = true;
+	input.setRawMode = (value) => {
+		rawModes.push(value);
+	};
+	input.resume = () => {
+		resumed = true;
+	};
+
+	const choice = promptCliUpdateChoice(
+		input as any,
+		output as any,
+		{ currentRef: CURRENT, latestRef: LATEST, currentVersion: "1.0.0", source: "github-main" },
+		"npm install -g ugk-agent",
+	);
+	queueMicrotask(() => {
+		input.emit("data", Buffer.from("\u001b[B"));
+		input.emit("data", Buffer.from("\r"));
+	});
+
+	assert.equal(await choice, "skip");
+	assert.equal(resumed, true);
+	assert.deepEqual(rawModes, [true, false]);
+	assert.match(output.text(), /› 2\. Skip/);
 });
 
 test("runUgkUpdatePreflight continues when no update is available", async () => {
@@ -143,4 +217,3 @@ test("runUgkUpdatePreflight updates and asks caller to exit before pi starts", a
 	assert.match(output.text(), /Updating UGK via `npm install -g ugk-agent`/);
 	assert.match(output.text(), /🎉 Update ran successfully! Please restart UGK\./);
 });
-

@@ -14,6 +14,7 @@ import {
 	type UgkFooterUsage,
 } from "./ui-brand-utils.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
+import { formatFlowDriverBannerText, getFlowDriverBanner, subscribeFlowDriverBanner } from "./flow/driver-banner.ts";
 
 const VERSION = "1.0.0";
 const ENABLED_ENV_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -121,12 +122,20 @@ function colorFooterStatusLine(statuses: string[], fallback: string, theme: any)
 }
 
 class UgkHeader implements Component {
+	private unsubscribe?: () => void;
 	private readonly ctx: ExtensionContext;
 	private readonly theme: any;
+	private readonly tui?: { requestRender(): void };
 
-	constructor(ctx: ExtensionContext, theme: any) {
+	constructor(ctx: ExtensionContext, theme: any, tui?: { requestRender(): void }) {
 		this.ctx = ctx;
 		this.theme = theme;
+		this.tui = tui;
+		this.unsubscribe = subscribeFlowDriverBanner(() => this.tui?.requestRender());
+	}
+
+	dispose(): void {
+		this.unsubscribe?.();
 	}
 
 	invalidate(): void {}
@@ -146,7 +155,10 @@ class UgkHeader implements Component {
 					...options,
 					rows: process.stdout.rows || 24,
 				});
-		return ["", ...lines.map((line, i) => colorHeaderLine(line, i, this.theme)), ""];
+		const rendered = ["", ...lines.map((line, i) => colorHeaderLine(line, i, this.theme)), ""];
+		const banner = getFlowDriverBanner();
+		if (!banner) return rendered;
+		return ["", this.theme.bold(this.theme.fg("warning", formatFlowDriverBannerText(banner))), "", ...rendered];
 	}
 }
 
@@ -224,7 +236,7 @@ class UgkFooter implements Component {
 }
 
 function applyBrandUi(pi: ExtensionAPI, ctx: ExtensionContext): void {
-	ctx.ui.setHeader((_tui, theme) => new UgkHeader(ctx, theme));
+	ctx.ui.setHeader((tui, theme) => new UgkHeader(ctx, theme, tui));
 	ctx.ui.setFooter((tui, theme, footerData) => new UgkFooter(ctx, theme, footerData, tui));
 	ctx.ui.setTitle(formatTitle(pi, ctx.sessionManager?.getCwd?.() ?? ctx.cwd ?? process.cwd()));
 }

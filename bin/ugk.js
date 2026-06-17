@@ -13,7 +13,8 @@
 process.env.PI_CODING_AGENT = "true";
 
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, resolve } from "node:path";
+import { buildUgkCliArgs } from "./ugk-cli-args.js";
 import { applyUgkRuntimePolicy } from "./ugk-runtime-policy.js";
 import { ensureUgkQuietStartupDefault } from "./ugk-startup-settings.js";
 import { ensureWorkspaceTrusted } from "./workspace-trust.js";
@@ -30,9 +31,9 @@ const { main } = await import("@earendil-works/pi-coding-agent");
 
 // 扩展文件绝对路径(与 cwd 无关,基于本文件位置定位)
 const here = dirname(fileURLToPath(import.meta.url));
-const extPath = join(here, "..", "extensions", "index.ts");
+const packageRoot = resolve(here, "..");
 
 ensureUgkQuietStartupDefault();
 
 // 透传用户参数,追加 -e 注入我们的扩展
-await main([...process.argv.slice(2), "-e", extPath]);
+await main(buildUgkCliArgs(process.argv.slice(2), packageRoot));

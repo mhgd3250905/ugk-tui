@@ -7,6 +7,14 @@ import { buildFlowHelpText, buildFlowRequestPrompt } from "./prompts.ts";
 import type { FlowRequest } from "./types.ts";
 
 const FLOW_CONTEXT_TYPE = "flow-task-context";
+const FLOW_PROMPT_PREFIXES = [
+	"[FLOW TASK CREATE]",
+	"[FLOW TASK PROVE]",
+	"[FLOW TASK RUN]",
+	"[FLOW TASK REVIEW]",
+	"[FLOW STATUS]",
+	"[FLOW HELP]",
+];
 
 type ActionableFlowRequest = Exclude<FlowRequest, { kind: "help" } | { kind: "error"; message: string }>;
 
@@ -14,15 +22,20 @@ function isActionableFlowRequest(request: FlowRequest): request is ActionableFlo
 	return request.kind !== "help" && request.kind !== "error";
 }
 
-function hasFlowTaskMarker(message: AgentMessage): boolean {
+function isFlowPromptText(text: string): boolean {
+	const trimmed = text.trimStart();
+	return FLOW_PROMPT_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
+function hasFlowPromptMarker(message: AgentMessage): boolean {
 	if (message.role !== "user") return false;
 
 	const content = message.content;
 	if (typeof content === "string") {
-		return content.includes("[FLOW TASK");
+		return isFlowPromptText(content);
 	}
 	if (Array.isArray(content)) {
-		return content.some((block) => block.type === "text" && (block as TextContent).text?.includes("[FLOW TASK"));
+		return content.some((block) => block.type === "text" && isFlowPromptText((block as TextContent).text ?? ""));
 	}
 	return false;
 }
@@ -56,7 +69,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 			messages: event.messages.filter((message) => {
 				const msg = message as AgentMessage & { customType?: string };
 				if (msg.customType === FLOW_CONTEXT_TYPE) return false;
-				return !hasFlowTaskMarker(msg);
+				return !hasFlowPromptMarker(msg);
 			}),
 		};
 	});

@@ -94,13 +94,21 @@ test("flow context filter removes stale flow task messages when no request is pe
 	const { pi, handlers } = makePi();
 	registerFlow(pi as any);
 
+	const normalMessage = { role: "user", content: "正常用户消息" };
+	const plainMentionMessage = { role: "user", content: "普通用户消息提到 [FLOW TASK RUN] 但不是旧 prompt" };
+	const arrayMentionMessage = { role: "user", content: [{ type: "text", text: "说明文字 [FLOW TASK REVIEW]" }] };
+
 	const result = await handlers.get("context")![0]({
 		messages: [
 			{ customType: "flow-task-context", content: "[FLOW TASK CREATE]", display: false },
 			{ role: "user", content: "[FLOW TASK RUN]\nold" },
-			{ role: "user", content: "正常用户消息" },
+			{ role: "user", content: "  [FLOW STATUS]\nold status" },
+			{ role: "user", content: [{ type: "text", text: "\n[FLOW TASK PROVE]\nold prove" }] },
+			normalMessage,
+			plainMentionMessage,
+			arrayMentionMessage,
 		],
 	});
 
-	assert.deepEqual(result.messages, [{ role: "user", content: "正常用户消息" }]);
+	assert.deepEqual(result.messages, [normalMessage, plainMentionMessage, arrayMentionMessage]);
 });

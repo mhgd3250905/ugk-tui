@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import registerUgkBrandUi from "../extensions/ui-brand.ts";
+
+function tempAgentDir(): string {
+	return fs.mkdtempSync(path.join(os.tmpdir(), "ugk-ui-brand-"));
+}
 
 test("ugk brand extension installs through safe extension UI hooks", async () => {
 	const handlers = new Map<string, Function>();
@@ -80,4 +87,62 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	assert.match(header.render(80).join("\n"), /ugk v1\.0\.0/);
 	assert.match(footer.render(80).join("\n"), /feature\/ui-optimization/);
 	assert.match(footer.render(80).join("\n"), /第 1 轮完成/);
+});
+
+test("ugk brand footer hides DeepSeek model when API credentials are missing", async () => {
+	const previousApiKey = process.env.DEEPSEEK_API_KEY;
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	delete process.env.DEEPSEEK_API_KEY;
+	process.env.PI_CODING_AGENT_DIR = tempAgentDir();
+	try {
+		const handlers = new Map<string, Function>();
+		const pi = {
+			on(event: string, handler: Function) {
+				handlers.set(event, handler);
+			},
+			registerCommand() {},
+			registerFlag() {},
+			getFlag() {
+				return undefined;
+			},
+			getSessionName() {
+				return "demo";
+			},
+		};
+		let footerFactory: Function | undefined;
+		const ctx = {
+			cwd: "/Users/shengkai/projects/ugk-tui",
+			model: { id: "deepseek-v4-pro" },
+			sessionManager: {
+				getCwd: () => "/Users/shengkai/projects/ugk-tui",
+				getEntries: () => [],
+				getBranch: () => [],
+			},
+			getContextUsage: () => ({ percent: 0, contextWindow: 1000000 }),
+			ui: {
+				setHeader: () => {},
+				setFooter: (factory: unknown) => {
+					footerFactory = factory as Function;
+				},
+				setTitle: () => {},
+			},
+		};
+
+		registerUgkBrandUi(pi as any);
+		await handlers.get("session_start")!({ reason: "startup" }, ctx);
+		const footer = footerFactory!({ requestRender() {} }, { fg: (_color: string, text: string) => text }, {
+			getGitBranch: () => null,
+			getExtensionStatuses: () => new Map(),
+			onBranchChange: () => () => {},
+		});
+		const text = footer.render(100).join("\n");
+
+		assert.doesNotMatch(text, /deepseek-v4-pro/);
+		assert.match(text, /api not configured/);
+	} finally {
+		if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+		else process.env.DEEPSEEK_API_KEY = previousApiKey;
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
 });

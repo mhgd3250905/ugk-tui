@@ -6,6 +6,7 @@ import {
 	buildUgkHeaderLines,
 	buildUgkLogoLines,
 	buildUgkStartupScreenLines,
+	resolveUgkDisplayModelId,
 	UGK_BRAND_COLORS,
 } from "../extensions/ui-brand-utils.ts";
 
@@ -130,6 +131,13 @@ test("buildUgkFooterLines keeps useful session status and truncates to width", (
 	assert.match(lines[1], /deepseek-v4-pro/);
 	assert.match(lines[1], /high/);
 	assert.match(lines[2], /第 3 轮完成/);
+});
+
+test("resolveUgkDisplayModelId hides DeepSeek model when API credentials are missing", () => {
+	assert.equal(resolveUgkDisplayModelId("deepseek-v4-pro", "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)"), "api not configured");
+	assert.equal(resolveUgkDisplayModelId("deepseek-v4-pro", "deepseek: 已配置(DEEPSEEK_API_KEY, deepseek-chat/默认模型可用)"), "deepseek-v4-pro");
+	assert.equal(resolveUgkDisplayModelId("gpt-4o", "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)"), "gpt-4o");
+	assert.equal(resolveUgkDisplayModelId(undefined, "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)"), undefined);
 });
 
 test("UGK brand palette prefers subdued neon green over blue purple", () => {

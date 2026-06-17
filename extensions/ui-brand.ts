@@ -9,8 +9,10 @@ import {
 	buildUgkFooterLines,
 	buildUgkHeaderLines,
 	buildUgkStartupScreenLines,
+	resolveUgkDisplayModelId,
 	type UgkFooterUsage,
 } from "./ui-brand-utils.ts";
+import { getDeepSeekStatus } from "./deepseek-status.ts";
 
 const VERSION = "1.0.0";
 const ENABLED_ENV_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -107,10 +109,11 @@ class UgkHeader implements Component {
 
 	render(width: number): string[] {
 		const cwd = this.ctx.sessionManager?.getCwd?.() ?? this.ctx.cwd ?? process.cwd();
+		const modelId = resolveUgkDisplayModelId(this.ctx.model?.id, getDeepSeekStatus());
 		const options = {
 			version: VERSION,
 			cwdName: path.basename(cwd),
-			modelId: this.ctx.model?.id,
+			modelId,
 			width,
 		};
 		const lines = hasSessionMessages(this.ctx)
@@ -178,7 +181,7 @@ class UgkFooter implements Component {
 		const lines = buildUgkFooterLines({
 			cwd,
 			branch: this.footerData.getGitBranch?.() ?? null,
-			modelId: this.ctx.model?.id || "no-model",
+			modelId: resolveUgkDisplayModelId(this.ctx.model?.id, getDeepSeekStatus()) || "no-model",
 			thinkingLevel: (this.ctx as any).session?.state?.thinkingLevel,
 			statuses,
 			usage: collectUsage(this.ctx),

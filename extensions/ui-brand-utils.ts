@@ -43,6 +43,13 @@ export interface UgkFooterOptions {
 	width: number;
 }
 
+export function resolveUgkDisplayModelId(modelId: string | undefined, deepSeekStatus: string): string | undefined {
+	if (!modelId) return undefined;
+	const isDeepSeekModel = modelId.toLowerCase().startsWith("deepseek");
+	if (isDeepSeekModel && /未配置/.test(deepSeekStatus)) return "api not configured";
+	return modelId;
+}
+
 const UGK_BLOCK_LOGO = [
 	"██  ██  █████  ██  ██",
 	"██  ██ ██      ██ ██ ",

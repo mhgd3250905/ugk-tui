@@ -1,6 +1,8 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { clearFlowDriverBanner, setFlowDriverBanner } from "./driver-banner.ts";
 import {
 	attachFlowDriver,
@@ -36,11 +38,23 @@ const FLOW_PROMPT_PREFIXES = [
 	"[FLOW DRIVER DETACH]",
 	"[FLOW DRIVER STATUS]",
 ];
+const REQUIRED_TASK_FILES = ["task.json", "SKILL.md", "todo.template.md", "validator.md"];
 
 type ActionableFlowRequest = Exclude<FlowRequest, { kind: "help" } | { kind: "error"; message: string }>;
+type TaskGuardResult =
+	| { ok: true; taskDir: string; status: string | undefined }
+	| { ok: false; message: string; type: "warning" | "error" };
 
 function isActionableFlowRequest(request: FlowRequest): request is ActionableFlowRequest {
 	return request.kind !== "help" && request.kind !== "error";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 function isFlowPromptText(text: string): boolean {
@@ -68,6 +82,59 @@ function getFlowContextId(message: { content?: unknown; customType?: string }): 
 
 function getDriverKey(taskId: string, runId: string): string {
 	return `${taskId}/${runId}`;
+}
+
+function readTaskMetadata(cwd: string, taskId: string): TaskGuardResult {
+	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
+	const taskJsonPath = path.join(taskDir, "task.json");
+	if (!existsSync(taskJsonPath)) {
+		return { ok: false, message: `Flow task not found: ${taskId}`, type: "error" };
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(taskJsonPath, "utf8"));
+	} catch (error) {
+		return {
+			ok: false,
+			message: `Flow task metadata is invalid: ${taskJsonPath}\n${errorMessage(error)}`,
+			type: "error",
+		};
+	}
+
+	return {
+		ok: true,
+		taskDir,
+		status: isRecord(parsed) && typeof parsed.status === "string" ? parsed.status : undefined,
+	};
+}
+
+function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId: string): TaskGuardResult {
+	const task = readTaskMetadata(cwd, taskId);
+	if (!task.ok) {
+		return task;
+	}
+
+	if (kind === "prove") {
+		const missingFiles = REQUIRED_TASK_FILES.filter((file) => !existsSync(path.join(task.taskDir, file)));
+		if (missingFiles.length > 0) {
+			return {
+				ok: false,
+				message: `Flow task ${taskId} is incomplete. Missing required file(s): ${missingFiles.join(", ")}`,
+				type: "error",
+			};
+		}
+		return task;
+	}
+
+	if (task.status !== "verified" && task.status !== "active") {
+		return {
+			ok: false,
+			message: `Flow task ${taskId} status is ${task.status ?? "unknown"}; /flow run requires verified/active.`,
+			type: "warning",
+		};
+	}
+	return task;
 }
 
 let driverSessionFactoryForTests:
@@ -124,18 +191,38 @@ export function registerFlow(pi: ExtensionAPI): void {
 		ctx: ExtensionContext,
 	): Promise<void> {
 		const cwd = getCwd(ctx);
+		const guard = validateTaskForDriver(kind, cwd, taskId);
+		if (!guard.ok) {
+			ctx.ui.notify(guard.message, guard.type);
+			return;
+		}
+
 		const runId = nextRunId(cwd, taskId);
 		const artifacts = createRunArtifacts(cwd, taskId, input, runId);
 		const initialPrompt = buildDriverInitialPrompt(artifacts);
 		const createDriver = driverSessionFactoryForTests ?? createFlowDriverSession;
-		const driver = await createDriver({
-			cwd,
-			taskId,
-			runId,
-			runDir: artifacts.runDir,
-			initialPrompt,
-		});
 		const driverKey = getDriverKey(taskId, runId);
+		let driver: FlowDriverSession;
+		try {
+			driver = await createDriver({
+				cwd,
+				taskId,
+				runId,
+				runDir: artifacts.runDir,
+				initialPrompt,
+			});
+		} catch (error) {
+			const summary = errorMessage(error);
+			writeDriverStatus(artifacts.runDir, {
+				taskId,
+				runId,
+				status: "failed",
+				step: "driver session",
+				summary,
+			});
+			ctx.ui.notify(`Flow driver failed: ${driverKey}\n${summary}`, "error");
+			return;
+		}
 		liveDrivers.set(driverKey, driver);
 		writeDriverStatus(artifacts.runDir, {
 			taskId,
@@ -147,14 +234,18 @@ export function registerFlow(pi: ExtensionAPI): void {
 		});
 		ctx.ui.setWidget?.("flow-driver-view", driver.getWidgetLines(), { placement: "aboveEditor" });
 		void driver.start().catch((error) => {
+			const summary = errorMessage(error);
 			writeDriverStatus(artifacts.runDir, {
 				taskId,
 				runId,
 				status: "failed",
 				step: "driver start",
-				summary: error instanceof Error ? error.message : String(error),
+				summary,
 				sessionFile: driver.sessionFile,
 			});
+			liveDrivers.delete(driverKey);
+			driver.dispose();
+			ctx.ui.notify(`Flow driver failed: ${driverKey}\n${summary}`, "error");
 		});
 		ctx.ui.notify(`Flow driver running: ${driverKey}\nAttach: /flow attach ${driverKey}`, "info");
 	}
@@ -356,7 +447,29 @@ export function registerFlow(pi: ExtensionAPI): void {
 			ctx.ui.notify(`Flow driver ${driver.runId} is recoverable but not live in this process. Feedback was recorded.`, "warning");
 			return { action: "handled" };
 		}
-		await liveDriver.sendUserInput(event.text);
+		try {
+			await liveDriver.sendUserInput(event.text);
+		} catch (error) {
+			const summary = errorMessage(error);
+			appendDriverFeedback(driver.runDir, {
+				message: event.text,
+				driverResponse: `delivery failed: ${summary}`,
+				affectedStep: driver.step,
+			});
+			writeDriverStatus(driver.runDir, {
+				taskId: driver.taskId,
+				runId: driver.runId,
+				status: "failed",
+				step: driver.step ?? "input delivery",
+				summary,
+				sessionFile: liveDriver.sessionFile,
+			});
+			liveDrivers.delete(getDriverKey(driver.taskId, driver.runId));
+			liveDriver.dispose();
+			renderFocus(ctx, { ...driver, status: "failed", summary });
+			ctx.ui.notify(`Flow driver input delivery failed: ${driver.taskId}/${driver.runId}\n${summary}`, "warning");
+			return { action: "handled" };
+		}
 		ctx.ui.setWidget?.("flow-driver-view", liveDriver.getWidgetLines(), { placement: "aboveEditor" });
 		ctx.ui.notify(`Sent to Flow driver ${driver.runId}`, "info");
 		return { action: "handled" };

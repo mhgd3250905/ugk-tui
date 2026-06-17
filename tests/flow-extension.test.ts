@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { registerFlow, setFlowDriverSessionFactoryForTests } from "../extensions/flow/index.ts";
+import { readDriverStatus } from "../extensions/flow/driver-store.ts";
 
 function makePi() {
 	const commands = new Map<string, any>();
@@ -113,12 +114,12 @@ function makeTempFlowProject(
 	return cwd;
 }
 
-function writeTempTask(cwd: string, taskId: string): void {
+function writeTempTask(cwd: string, taskId: string, status = "draft"): void {
 	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
 	fs.mkdirSync(taskDir, { recursive: true });
 	fs.writeFileSync(
 		path.join(taskDir, "task.json"),
-		`${JSON.stringify({ id: taskId, status: "draft", version: 1 }, null, 2)}\n`,
+		`${JSON.stringify({ id: taskId, status, version: 1 }, null, 2)}\n`,
 		"utf8",
 	);
 	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n\n## 最优路径\n\nA. Prepare\n", "utf8");
@@ -304,6 +305,210 @@ test("/flow task prove creates a run and starts a driver session", async () => {
 		assert.equal(sentMessages.length, 0);
 		assert.match(notifications.at(-1)!.message, /Flow driver running/);
 		assert.match(notifications.at(-1)!.message, /\/flow attach x\/run-001/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow run missing task is blocked before creating a driver run", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async () => {
+		factoryCalls += 1;
+		throw new Error("factory should not run");
+	});
+	try {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run missing-task --input x", ctx);
+
+		assert.equal(factoryCalls, 0);
+		assert.equal(sentMessages.length, 0);
+		assert.equal(fs.existsSync(path.join(cwd, ".flow", "tasks", "missing-task", "runs")), false);
+		assert.equal(notifications.at(-1)?.type, "error");
+		assert.match(notifications.at(-1)?.message ?? "", /missing-task/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow run draft task is blocked before creating a driver run", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async () => {
+		factoryCalls += 1;
+		throw new Error("factory should not run");
+	});
+	try {
+		const cwd = makeTempTaskProject("draft-task");
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run draft-task", ctx);
+
+		assert.equal(factoryCalls, 0);
+		assert.equal(sentMessages.length, 0);
+		assert.equal(fs.existsSync(path.join(cwd, ".flow", "tasks", "draft-task", "runs")), false);
+		assert.equal(notifications.at(-1)?.type, "warning");
+		assert.match(notifications.at(-1)?.message ?? "", /draft/);
+		assert.match(notifications.at(-1)?.message ?? "", /verified\/active/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow run needs-human task is blocked before creating a driver run", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async () => {
+		factoryCalls += 1;
+		throw new Error("factory should not run");
+	});
+	try {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
+		writeTempTask(cwd, "human-task", "needs-human");
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run human-task", ctx);
+
+		assert.equal(factoryCalls, 0);
+		assert.equal(sentMessages.length, 0);
+		assert.equal(fs.existsSync(path.join(cwd, ".flow", "tasks", "human-task", "runs")), false);
+		assert.equal(notifications.at(-1)?.type, "warning");
+		assert.match(notifications.at(-1)?.message ?? "", /needs-human/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow task prove missing task is blocked before creating a driver run", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async () => {
+		factoryCalls += 1;
+		throw new Error("factory should not run");
+	});
+	try {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove missing-task", ctx);
+
+		assert.equal(factoryCalls, 0);
+		assert.equal(sentMessages.length, 0);
+		assert.equal(fs.existsSync(path.join(cwd, ".flow", "tasks", "missing-task", "runs")), false);
+		assert.equal(notifications.at(-1)?.type, "error");
+		assert.match(notifications.at(-1)?.message ?? "", /missing-task/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow task prove missing required task files is blocked before creating a driver run", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async () => {
+		factoryCalls += 1;
+		throw new Error("factory should not run");
+	});
+	try {
+		const cwd = makeTempTaskProject("incomplete-task");
+		fs.unlinkSync(path.join(cwd, ".flow", "tasks", "incomplete-task", "validator.md"));
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove incomplete-task", ctx);
+
+		assert.equal(factoryCalls, 0);
+		assert.equal(sentMessages.length, 0);
+		assert.equal(fs.existsSync(path.join(cwd, ".flow", "tasks", "incomplete-task", "runs")), false);
+		assert.equal(notifications.at(-1)?.type, "error");
+		assert.match(notifications.at(-1)?.message ?? "", /validator\.md/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("driver factory failure marks the run failed without registering a live driver", async () => {
+	setFlowDriverSessionFactoryForTests(async () => {
+		throw new Error("session create failed");
+	});
+	try {
+		const cwd = makeTempTaskProject("x");
+		const { pi, commands, handlers } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x --input keyword=Medtrum", ctx);
+
+		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
+		const status = readDriverStatus(runDir);
+		assert.equal(status?.status, "failed");
+		assert.match(status?.summary ?? "", /session create failed/);
+		assert.equal(notifications.at(-1)?.type, "error");
+		assert.match(notifications.at(-1)?.message ?? "", /session create failed/);
+
+		await commands.get("flow").handler("attach x/run-001", ctx);
+		const result = await handlers.get("input")![0]({ text: "继续", source: "interactive" }, ctx);
+
+		assert.deepEqual(result, { action: "handled" });
+		assert.equal(notifications.at(-1)?.type, "warning");
+		assert.match(notifications.at(-1)?.message ?? "", /not live/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("driver start failure disposes and removes the live driver", async () => {
+	let disposed = false;
+	let sendCalls = 0;
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		async start() {
+			throw new Error("driver start failed");
+		},
+		async sendUserInput() {
+			sendCalls += 1;
+		},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver"];
+		},
+		dispose() {
+			disposed = true;
+		},
+	}));
+	try {
+		const cwd = makeTempTaskProject("x");
+		const { pi, commands, handlers } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		await sleep(10);
+
+		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
+		const status = readDriverStatus(runDir);
+		assert.equal(status?.status, "failed");
+		assert.match(status?.summary ?? "", /driver start failed/);
+		assert.equal(disposed, true);
+
+		await commands.get("flow").handler("attach x/run-001", ctx);
+		const result = await handlers.get("input")![0]({ text: "继续", source: "interactive" }, ctx);
+
+		assert.deepEqual(result, { action: "handled" });
+		assert.equal(sendCalls, 0);
+		assert.equal(notifications.at(-1)?.type, "warning");
+		assert.match(notifications.at(-1)?.message ?? "", /not live/);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -532,6 +737,60 @@ test("driver focus input is forwarded to live driver sessions", async () => {
 		assert.deepEqual(started, ["started", "先暂停"]);
 		assert.deepEqual(widgets.get("flow-driver-view"), ["driver updated"]);
 		assert.match(notifications.at(-1)?.message ?? "", /Sent to Flow driver run-001/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("driver focus input delivery failure is handled and marks the run failed", async () => {
+	let disposed = false;
+	let sendCalls = 0;
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		async start() {},
+		async sendUserInput() {
+			sendCalls += 1;
+			throw new Error("delivery failed");
+		},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver"];
+		},
+		dispose() {
+			disposed = true;
+		},
+	}));
+	try {
+		const cwd = makeTempTaskProject("x");
+		const { pi, commands, handlers } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		await commands.get("flow").handler("attach x/run-001", ctx);
+		let result: unknown;
+		await assert.doesNotReject(async () => {
+			result = await handlers.get("input")![0]({ text: "先暂停", source: "interactive" }, ctx);
+		});
+
+		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
+		const status = readDriverStatus(runDir);
+		const feedback = fs.readFileSync(path.join(runDir, "feedback.md"), "utf8");
+		assert.deepEqual(result, { action: "handled" });
+		assert.equal(status?.status, "failed");
+		assert.match(status?.summary ?? "", /delivery failed/);
+		assert.match(feedback, /delivery failed/);
+		assert.equal(disposed, true);
+		assert.equal(notifications.at(-1)?.type, "warning");
+		assert.match(notifications.at(-1)?.message ?? "", /delivery failed/);
+
+		await handlers.get("input")![0]({ text: "再试一次", source: "interactive" }, ctx);
+		assert.equal(sendCalls, 1);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}

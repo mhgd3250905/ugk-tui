@@ -108,28 +108,6 @@ export function buildFlowRequestPrompt(request: FlowRequest): string {
 				"- failed 或被 review reject 且问题未解决时不能写回 skill，也不能把 Task 推进为可复用状态。",
 				"- review 结论只能通过 `/flow task accept` 或 `/flow task reject` 改变 Task 生命周期；main 只负责更新 Task 设计资产。",
 			].join("\n");
-		case "task-accept":
-			return [
-				"[FLOW TASK REVIEW]",
-				"",
-				`Run ID: ${request.runId}`,
-				"Review accept command should be handled by Flow runtime.",
-			].join("\n");
-		case "task-reject":
-			return [
-				"[FLOW TASK REVIEW]",
-				"",
-				`Run ID: ${request.runId}`,
-				`Reason: ${request.reason ?? "-"}`,
-				"Review reject command should be handled by Flow runtime.",
-			].join("\n");
-		case "task-delete":
-			return [
-				"[FLOW TASK DELETE]",
-				"",
-				`Task ID: ${request.taskId}`,
-				"Task delete command should be handled by Flow runtime.",
-			].join("\n");
 		case "status":
 			return [
 				"[FLOW STATUS]",
@@ -138,34 +116,16 @@ export function buildFlowRequestPrompt(request: FlowRequest): string {
 				"表格列必须包含：task id、status、version、最近 run、下一步建议。",
 				"如果 .flow/tasks 不存在，说明当前项目还没有 Flow Task，并提示：/flow task create \"目标\"。",
 			].join("\n");
-		case "attach":
-			return [
-				"[FLOW DRIVER ATTACH]",
-				"",
-				`driver command: attach${request.runId ? ` ${request.runId}` : ""}`,
-				"该 driver command 已完成解析；交互式 attach 处理将在后续集成中完成。",
-			].join("\n");
-		case "detach":
-			return [
-				"[FLOW DRIVER DETACH]",
-				"",
-				"driver command: detach",
-				"该 driver command 已完成解析；交互式 detach 处理将在后续集成中完成。",
-			].join("\n");
-		case "driver-status":
-			return [
-				"[FLOW DRIVER STATUS]",
-				"",
-				"driver command: driver status",
-				"该 driver command 已完成解析；driver status 展示将在后续集成中完成。",
-			].join("\n");
 		case "help":
 			return buildFlowHelpText();
 		case "error":
 			return request.message;
 		default: {
-			const exhaustive: never = request;
-			return exhaustive;
+			// task-accept/task-reject/task-delete/attach/detach/driver-status 这些 kind
+			// 在 index.ts 命令路由里已被提前 return 处理,不会走到 prompt 队列。
+			// 若真到此分支,说明命令路由出了回归——显式抛错而非静默。
+			const kind = (request as { kind?: string }).kind ?? "unknown";
+			throw new Error(`buildFlowRequestPrompt received a runtime-handled kind: ${kind}`);
 		}
 	}
 }

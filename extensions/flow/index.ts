@@ -563,7 +563,6 @@ export function registerFlow(pi: ExtensionAPI): void {
 			(focusState.taskId === undefined || focusState.taskId === taskId);
 		const scheduleTranscriptWidgetRefresh = () => {
 			if (focusState.focus !== "driver") {
-				renderMainDriverActivity(ctx);
 				return;
 			}
 			if (!isCurrentFocusedDriver() || activeSessionViewDriverKey === driverKey || transcriptRefreshQueued) {

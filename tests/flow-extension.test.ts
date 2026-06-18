@@ -2368,6 +2368,47 @@ test("live driver transcript updates refresh the attached driver widget", async 
 	}
 });
 
+test("background driver transcript updates do not refresh the main activity widget", async () => {
+	let onTranscriptUpdate: (() => void) | undefined;
+	setFlowDriverSessionFactoryForTests(async (options) => {
+		onTranscriptUpdate = options.onTranscriptUpdate;
+		return {
+			taskId: options.taskId,
+			runId: options.runId,
+			runDir: options.runDir,
+			sessionFile: "driver.jsonl",
+			async start() {
+				await new Promise(() => {});
+			},
+			async sendUserInput() {},
+			getTranscriptText() {
+				return "background output";
+			},
+			getWidgetLines() {
+				return ["background output"];
+			},
+			dispose() {},
+		};
+	});
+	try {
+		const { pi, commands } = makePi();
+		const { ctx, widgetCalls } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		assert.equal(typeof onTranscriptUpdate, "function");
+		const before = widgetCalls.filter((call) => call.key === "flow-driver-view").length;
+
+		onTranscriptUpdate!();
+		await sleep(0);
+
+		const after = widgetCalls.filter((call) => call.key === "flow-driver-view").length;
+		assert.equal(after, before);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
 test("driver focus input delivery failure is handled and marks the run failed", async () => {
 	let disposed = false;
 	let sendCalls = 0;

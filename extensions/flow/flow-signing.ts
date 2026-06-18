@@ -1,0 +1,180 @@
+import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import path from "node:path";
+import { homedir } from "node:os";
+
+/**
+ * Flow 判定记录签名基础设施。
+ *
+ * 设计目标:让 agent 伪造不了"已被 runtime 接受"这个事实。判定记录(task 状态、
+ * review、validation)的关键字段带 HMAC 签名;签名密钥从 ~/.flow-master-key 派生,
+ * 不在 .flow/ 里,agent 工作区碰不到。
+ *
+ * 安全要点(见 docs/design/2026-06-18-flow-signed-records-design.md):
+ * - 反馈绝不向 agent 暴露签名机制——验签结果用中性枚举(verified/broken),调用方
+ *   用中性措辞反馈("记录不可用"),不提签名/密钥/HMAC。
+ * - canonicalJSON 保证确定性:同字段值永远同签名,字段顺序无关。
+ *
+ * 本模块只管签名原语。哪些字段签、何时签、何时验、损坏怎么反馈,由调用方(task-state /
+ * review-store / run-validation)按设计文档执行。
+ */
+
+const MASTER_KEY_PATH = path.join(homedir(), ".flow-master-key");
+const SIGNING_INFO = "flow-task-signing";
+const KEY_LEN = 32;
+const MASTER_KEY_PERMS = 0o600;
+
+/**
+ * 判定记录的签名载荷。附在 JSON 文件里,字段名用 _sig——不加密、不隐藏,但 agent
+ * 没有密钥就算不出正确的 value。
+ */
+export interface RecordSignature {
+	alg: "hmac-sha256";
+	/** 被签名的字段名列表。验签时按此取字段,防"加了字段没签"的漏签。 */
+	covered: string[];
+	/** HMAC-SHA256(projectKey, canonicalJSON(coveredFields)) 的 base64。 */
+	value: string;
+	/** runtime 签名的时间(ISO),用于内部诊断,不暴露给 agent。 */
+	signedAt: string;
+}
+
+/**
+ * 验签结果。刻意用中性命名:verified = 可信;broken = 不可信(无论原因是被篡改、
+ * 无签名、还是格式错)。调用方对 broken 的反馈必须用中性措辞,不提签名机制。
+ */
+export type SignatureCheck = { verified: true } | { verified: false; reason: "no-signature" | "mismatch" | "malformed" };
+
+/** 项目上下文:master key 派生 project key 用。cwd 决定派生 salt。 */
+export interface ProjectSigningContext {
+	cwd: string;
+}
+
+// ---- 密钥管理 ----
+
+/**
+ * 读取或生成主密钥(~/.flow-master-key)。首次调用时生成,权限限当前用户。
+ * 主密钥丢失不可恢复(见设计第七节);用户需 /flow reset-signing 重新信任记录。
+ */
+export function getOrCreateMasterKey(): Buffer {
+	if (existsSync(MASTER_KEY_PATH)) {
+		return Buffer.from(readFileSync(MASTER_KEY_PATH, "utf8").trim(), "base64");
+	}
+	const key = randomBytes(KEY_LEN);
+	mkdirSync(path.dirname(MASTER_KEY_PATH), { recursive: true });
+	writeFileSync(MASTER_KEY_PATH, key.toString("base64"));
+	try {
+		chmodSync(MASTER_KEY_PATH, MASTER_KEY_PERMS);
+	} catch {
+		// Windows/某些文件系统 chmod 可能受限;尽力而为,不阻断。
+	}
+	return key;
+}
+
+/**
+ * 派生项目密钥。同主密钥 + 同 cwd → 同项目密钥(确定性)。cwd 变化 → 密钥变化 →
+ * 旧签名失效 → 触发首次重签(设计第八节)。
+ */
+export function deriveProjectKey(ctx: ProjectSigningContext, masterKey?: Buffer): Buffer {
+	const master = masterKey ?? getOrCreateMasterKey();
+	const cwdSalt = path.resolve(ctx.cwd);
+	const derived = hkdfSync("sha256", master, cwdSalt, SIGNING_INFO, KEY_LEN);
+	return Buffer.from(derived);
+}
+
+// ---- 签名与验签 ----
+
+/**
+ * canonical JSON:对象 key 按 ASCII 排序,确定性序列化。保证同字段值永远同签名。
+ * 嵌套对象递归排序;数组保持原序(数组是有序集合)。
+ */
+export function canonicalJson(value: unknown): string {
+	if (Array.isArray(value)) {
+		return `[${value.map(canonicalJson).join(",")}]`;
+	}
+	if (value === null || typeof value !== "object") {
+		return JSON.stringify(value);
+	}
+	const obj = value as Record<string, unknown>;
+	const keys = Object.keys(obj).sort();
+	return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(",")}}`;
+}
+
+/**
+ * 从记录里取出要签的字段,算签名值。
+ * covered 里列出的字段缺失时按 null 签(防"删字段绕过签名")。
+ */
+function extractCovered(record: Record<string, unknown>, covered: string[]): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const key of covered) {
+		out[key] = key in record ? record[key] : null;
+	}
+	return out;
+}
+
+function computeSignatureValue(projectKey: Buffer, covered: Record<string, unknown>): string {
+	return createHmac("sha256", projectKey).update(canonicalJson(covered)).digest("base64");
+}
+
+/**
+ * 为判定记录的关键字段生成签名。runtime 写判定记录时调用。
+ * 返回的 _sig 附进 JSON 文件一起落盘。
+ */
+export function signRecord(
+	projectKey: Buffer,
+	record: Record<string, unknown>,
+	covered: string[],
+	now = new Date(),
+): RecordSignature {
+	const coveredFields = extractCovered(record, covered);
+	return {
+		alg: "hmac-sha256",
+		covered,
+		value: computeSignatureValue(projectKey, coveredFields),
+		signedAt: now.toISOString(),
+	};
+}
+
+/**
+ * 验证判定记录的签名。runtime 每次读判定记录时调用。
+ *
+ * 返回中性结果:verified(可信)或 broken(不可信)。调用方对 broken 的反馈
+ * 必须遵守设计文档的反馈安全要求——中性措辞,不提签名/密钥。
+ */
+export function verifyRecord(
+	projectKey: Buffer,
+	record: Record<string, unknown>,
+): SignatureCheck {
+	const sig = record["_sig"];
+	if (!sig || typeof sig !== "object") {
+		return { verified: false, reason: "no-signature" };
+	}
+	const sigObj = sig as Partial<RecordSignature>;
+	if (!Array.isArray(sigObj.covered) || typeof sigObj.value !== "string") {
+		return { verified: false, reason: "malformed" };
+	}
+	const coveredFields = extractCovered(record, sigObj.covered);
+	const expected = computeSignatureValue(projectKey, coveredFields);
+	// 常量时间比较,防时序攻击(虽然威胁模型里 agent 不太可能,但密码学基本功)。
+	const expectedBuf = Buffer.from(expected);
+	const actualBuf = Buffer.from(sigObj.value);
+	if (expectedBuf.length !== actualBuf.length) {
+		return { verified: false, reason: "mismatch" };
+	}
+	if (!timingSafeEqual(expectedBuf, actualBuf)) {
+		return { verified: false, reason: "mismatch" };
+	}
+	return { verified: true };
+}
+
+/**
+ * 标准损坏反馈文案。调用方在 agent 可见的反馈里用这些,**不自己编**——
+ * 保证措辞统一、不泄露签名机制。每条都是中性"记录不可用"+ 安全恢复动作。
+ */
+export const CORRUPT_FEEDBACK = {
+	taskStatus: (taskId: string) =>
+		`Flow task ${taskId} 的状态记录不可用,建议从证明阶段重新开始(/flow task prove ${taskId})`,
+	review: (taskId: string) =>
+		`task ${taskId} 的复盘记录不可用;请告诉用户这次 run 需要重新复盘`,
+	validation: (runId: string) =>
+		`run ${runId} 的校验记录不可用,runtime 将重新校验产出`,
+} as const;

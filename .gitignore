@@ -8,6 +8,9 @@ package-lock.json
 .pi/
 *.log
 
+# Flow local artifacts (task runs, evidence, status — per-workspace, not shared)
+.flow/
+
 # Temp / editor
 .tmp_*
 .superpowers/

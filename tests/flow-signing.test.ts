@@ -40,6 +40,13 @@ test("canonicalJson preserves array order (arrays are ordered)", () => {
 	assert.equal(canonicalJson([1, 2, 3]), '[1,2,3]');
 });
 
+test("canonicalJson is deterministic for NaN and null edge cases", () => {
+	// JSON.stringify(NaN) = "null",确定
+	assert.equal(canonicalJson({ x: NaN }), canonicalJson({ x: null }));
+	// null 稳定
+	assert.equal(canonicalJson(null), "null");
+});
+
 // ---- 密钥派生 ----
 
 test("deriveProjectKey is deterministic for same cwd", () => {

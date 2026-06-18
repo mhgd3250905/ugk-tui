@@ -70,7 +70,7 @@ export function isInMigrationWindow(cwd: string): boolean {
 }
 
 /** 关闭迁移窗口:后续无 _sig 的记录不再被信任。runtime 首次签名写入后调用。 */
-function closeMigrationWindow(cwd: string): void {
+export function closeMigrationWindow(cwd: string): void {
 	const markerPath = migratedMarkerPath(cwd);
 	if (!existsSync(markerPath)) {
 		mkdirSync(MIGRATED_KEYS_DIR, { recursive: true });

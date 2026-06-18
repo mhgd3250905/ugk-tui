@@ -26,6 +26,8 @@ export function formatFlowQueued(request: FlowRequest): string {
 			return "Flow driver detached.";
 		case "driver-status":
 			return "Flow driver status requested.";
+		case "reset-signing":
+			return "Flow reset-signing requested.";
 		case "help":
 			return "Flow 帮助已显示。";
 		case "error":

@@ -16,9 +16,12 @@ export interface FlowConsoleOption {
 	command?: string;
 }
 
-// 单一真相在 task-store.ts;import 用于本模块,re-export 维持现有外部导入路径。
-import { isRunnableFlowTaskStatus } from "./task-store.ts";
-export { isRunnableFlowTaskStatus };
+// 可运行判定单一真相在 task-state.ts(legacy verified/active/approved 归一为 ready)。
+import { isRunnable, normalizeLegacyState } from "./task-state.ts";
+
+export function isRunnableFlowTaskStatus(status: string | undefined): boolean {
+	return isRunnable(normalizeLegacyState(status));
+}
 
 export type FlowStageGate =
 	| { phase: "create"; taskId: string }
@@ -56,7 +59,7 @@ export function buildFlowTaskActionOptions(state: {
 	drivers: FlowConsoleDriver[];
 }): FlowConsoleOption[] {
 	const options: FlowConsoleOption[] = [];
-	if (state.task.status === "draft" || state.task.status === "needs-human") {
+	if (state.task.status === "draft" || state.task.status === "needs-work") {
 		options.push({ label: `Prove ${state.task.id}`, command: `task prove ${state.task.id}` });
 	}
 	if (isRunnableFlowTaskStatus(state.task.status)) {

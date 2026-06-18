@@ -1,4 +1,4 @@
-import { isRunnableFlowTaskStatus } from "./task-store.ts";
+import { isRunnableFlowTaskStatus } from "./flow-console.ts";
 
 export interface FlowActivityViewModel {
 	taskId: string;

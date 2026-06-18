@@ -3,25 +3,25 @@ import path from "node:path";
 import { isRecord, readJsonStrict } from "./flow-fs.ts";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
 
+/**
+ * task.json 可能出现的所有 status 值。
+ *
+ * 产品层状态机见 task-state.ts(draft/proving/proved/reviewing/ready/needs-work)。
+ * 这里保留 verified/active/approved/needs-human 是为了**读取旧数据**——它们由
+ * task-state.normalizeLegacyState 归一为 ready/needs-work。新代码不应再写入这些值。
+ */
 export type FlowTaskStatus =
 	| "draft"
 	| "proving"
 	| "proved"
 	| "reviewing"
+	| "ready"
+	| "needs-work"
+	// 以下为已废弃的旧值,仅为读取旧数据保留;新写入一律用上面 6 个。
 	| "verified"
 	| "active"
 	| "approved"
 	| "needs-human";
-
-const RUNNABLE_FLOW_TASK_STATUSES: ReadonlySet<FlowTaskStatus> = new Set([
-	"verified",
-	"active",
-	"approved",
-]);
-
-export function isRunnableFlowTaskStatus(status: string | undefined): boolean {
-	return status !== undefined && (RUNNABLE_FLOW_TASK_STATUSES as Set<string>).has(status);
-}
 
 export interface FlowTaskMetadata {
 	id: string;

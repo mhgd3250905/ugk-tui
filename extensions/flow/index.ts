@@ -355,7 +355,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 				if (!driver || !isCurrentFocusedDriver()) {
 					return;
 				}
-				ctx.ui.setWidget?.("flow-driver-view", driver.getWidgetLines(), { placement: "aboveEditor" });
+				driverView.setWidget(ctx, driver.getWidgetLines());
 			});
 		};
 		try {
@@ -951,7 +951,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 			ctx.ui.notify(`Flow driver input delivery failed: ${driver.taskId}/${driver.runId}\n${summary}`, "warning");
 			return { action: "handled" };
 		}
-		ctx.ui.setWidget?.("flow-driver-view", liveDriver.getWidgetLines(), { placement: "aboveEditor" });
+		driverView.setWidget(ctx, liveDriver.getWidgetLines());
 		ctx.ui.notify(`Sent to Flow driver ${driver.runId}`, "info");
 		return { action: "handled" };
 	});

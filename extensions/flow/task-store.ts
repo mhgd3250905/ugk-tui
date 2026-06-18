@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { isRecord, readJsonStrict } from "./flow-fs.ts";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
 
 export type FlowTaskStatus =
@@ -11,6 +12,16 @@ export type FlowTaskStatus =
 	| "active"
 	| "approved"
 	| "needs-human";
+
+const RUNNABLE_FLOW_TASK_STATUSES: ReadonlySet<FlowTaskStatus> = new Set([
+	"verified",
+	"active",
+	"approved",
+]);
+
+export function isRunnableFlowTaskStatus(status: string | undefined): boolean {
+	return status !== undefined && (RUNNABLE_FLOW_TASK_STATUSES as Set<string>).has(status);
+}
 
 export interface FlowTaskMetadata {
 	id: string;
@@ -37,21 +48,13 @@ export function resolveFlowTaskDir(cwd: string, taskId: string): string {
 	return taskDir;
 }
 
-function readJsonFile(filePath: string): unknown {
-	return JSON.parse(readFileSync(filePath, "utf8"));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export function readFlowTask(cwd: string, taskId: string): FlowTaskMetadata | undefined {
 	const taskDir = resolveFlowTaskDir(cwd, taskId);
 	const taskJsonPath = path.join(taskDir, "task.json");
 	if (!existsSync(taskJsonPath)) {
 		return undefined;
 	}
-	const parsed = readJsonFile(taskJsonPath);
+	const parsed = readJsonStrict(taskJsonPath);
 	if (!isRecord(parsed)) {
 		throw new Error(`Flow task metadata must be an object: ${taskJsonPath}`);
 	}

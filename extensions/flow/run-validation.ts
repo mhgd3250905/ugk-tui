@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { isRecord, readJsonOptional, readJsonStrict } from "./flow-fs.ts";
 
 export type FlowValidationResult = "PASS" | "FAIL";
 
@@ -29,14 +30,6 @@ interface ValidateFlowRunArgs {
 	runDir: string;
 	phase: "prove" | "run";
 	now?: Date;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readJsonFile(filePath: string): unknown {
-	return JSON.parse(readFileSync(filePath, "utf8"));
 }
 
 function optionalSchemaIssues(value: unknown, schema: unknown, pathLabel = "result"): string[] {
@@ -155,7 +148,7 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 		issues.push("missing output/result.json");
 	} else {
 		try {
-			output = readJsonFile(resultJson);
+			output = readJsonStrict(resultJson);
 		} catch (error) {
 			issues.push(`output/result.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -163,7 +156,7 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 
 	if (output !== undefined && existsSync(schemaPath)) {
 		try {
-			issues.push(...optionalSchemaIssues(output, readJsonFile(schemaPath)));
+			issues.push(...optionalSchemaIssues(output, readJsonStrict(schemaPath)));
 		} catch (error) {
 			issues.push(`output.schema.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -203,10 +196,6 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 }
 
 export function readFlowRunValidation(runDir: string): FlowRunValidation | undefined {
-	try {
-		const parsed = readJsonFile(path.join(runDir, "validation.json"));
-		return isRecord(parsed) ? (parsed as unknown as FlowRunValidation) : undefined;
-	} catch {
-		return undefined;
-	}
+	const parsed = readJsonOptional(path.join(runDir, "validation.json"));
+	return isRecord(parsed) ? (parsed as unknown as FlowRunValidation) : undefined;
 }

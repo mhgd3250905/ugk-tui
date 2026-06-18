@@ -3,13 +3,13 @@ import {
 	copyFileSync,
 	existsSync,
 	mkdirSync,
-	readFileSync,
 	readdirSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
+import { isRecord, readJsonOptional } from "./flow-fs.ts";
+import { resolveFlowTaskDir } from "./task-store.ts";
 import type { FlowDriverStatus, FlowDriverSummary } from "./types.ts";
 
 export interface FlowDriverStatusFile {
@@ -55,10 +55,6 @@ const SUMMARY_STATUS_ORDER: FlowDriverStatus[] = [
 	"done",
 ];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function isDriverStatus(value: unknown): value is FlowDriverStatus {
 	return typeof value === "string" && DRIVER_STATUSES.includes(value as FlowDriverStatus);
 }
@@ -86,31 +82,8 @@ function optionalString(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
 
-function flowTasksDir(cwd: string): string {
-	return path.join(cwd, ".flow", "tasks");
-}
-
-function resolveTaskDir(cwd: string, taskId: string): string {
-	if (!isValidFlowTaskId(taskId)) {
-		throw new Error(invalidFlowTaskIdMessage(taskId));
-	}
-	const tasksDir = path.resolve(flowTasksDir(cwd));
-	const taskDir = path.resolve(tasksDir, taskId);
-	const relative = path.relative(tasksDir, taskDir);
-	if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
-		throw new Error(invalidFlowTaskIdMessage(taskId));
-	}
-	return taskDir;
-}
-
 export function readDriverStatus(runDir: string): FlowDriverStatusFile | undefined {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(readFileSync(path.join(runDir, "status.json"), "utf8"));
-	} catch {
-		return undefined;
-	}
-
+	const parsed = readJsonOptional(path.join(runDir, "status.json"));
 	if (!isRecord(parsed)) {
 		return undefined;
 	}
@@ -147,7 +120,7 @@ export function createRunArtifacts(
 	input: string | undefined,
 	runId: string,
 ): CreatedRunArtifacts {
-	const taskDir = resolveTaskDir(cwd, taskId);
+	const taskDir = resolveFlowTaskDir(cwd, taskId);
 	const runDir = path.join(taskDir, "runs", runId);
 	mkdirSync(path.join(runDir, "output"), { recursive: true });
 	mkdirSync(path.join(runDir, "evidence"), { recursive: true });
@@ -264,7 +237,7 @@ export function buildDriverInitialPrompt(args: { taskId: string; runId: string; 
 }
 
 export function nextRunId(cwd: string, taskId: string): string {
-	const runsDir = path.join(resolveTaskDir(cwd, taskId), "runs");
+	const runsDir = path.join(resolveFlowTaskDir(cwd, taskId), "runs");
 	if (!existsSync(runsDir)) return "run-001";
 	const max = readdirSync(runsDir)
 		.map((name) => name.match(/^run-(\d+)$/)?.[1])

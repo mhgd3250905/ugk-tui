@@ -16,9 +16,9 @@ export interface FlowConsoleOption {
 	command?: string;
 }
 
-export function isRunnableFlowTaskStatus(status: string | undefined): boolean {
-	return status === "verified" || status === "active" || status === "approved";
-}
+// 单一真相在 task-store.ts;import 用于本模块,re-export 维持现有外部导入路径。
+import { isRunnableFlowTaskStatus } from "./task-store.ts";
+export { isRunnableFlowTaskStatus };
 
 export type FlowStageGate =
 	| { phase: "create"; taskId: string }

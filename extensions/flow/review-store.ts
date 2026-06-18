@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { readJsonRecord } from "./flow-fs.ts";
 
 export type FlowReviewStatus = "in-review" | "accepted" | "rejected" | "needs-changes";
 export type FlowTaskDesignDecision = "updated" | "no-change";
@@ -39,14 +40,6 @@ interface RejectFlowReviewArgs {
 	runDir: string;
 	reason?: string;
 	now?: Date;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readJsonFile(filePath: string): unknown {
-	return JSON.parse(readFileSync(filePath, "utf8"));
 }
 
 function normalizeReview(value: Record<string, unknown>, runDir: string): FlowReviewRecord | undefined {
@@ -175,12 +168,8 @@ export function rejectFlowReview(args: RejectFlowReviewArgs): FlowReviewRecord {
 }
 
 export function readFlowReview(runDir: string): FlowReviewRecord | undefined {
-	try {
-		const parsed = readJsonFile(path.join(runDir, "review.json"));
-		return isRecord(parsed) ? normalizeReview(parsed, runDir) : undefined;
-	} catch {
-		return undefined;
-	}
+	const parsed = readJsonRecord(path.join(runDir, "review.json"));
+	return parsed ? normalizeReview(parsed, runDir) : undefined;
 }
 
 export function isFlowReviewAccepted(

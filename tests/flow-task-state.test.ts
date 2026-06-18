@@ -163,12 +163,18 @@ test("prove-pass from non-proving states is illegal", () => {
 	assertIllegal("ready", ev);
 });
 
-test("review-start from non-proved states is illegal (proving cannot skip to review)", () => {
+test("review-start from non-proved/ready states is illegal", () => {
 	const ev: FlowTaskEvent = { kind: "review-start", runId: "r", nextStep: "x" };
+	// proved 和 ready 合法(proved 首次复盘;ready 再次 run 后复盘)
+	for (const from of ["proved", "ready"] as FlowTaskState[]) {
+		const cwd = makeTempCwd();
+		seedTask(cwd, "t", from);
+		assert.equal(transition(cwd, "t", ev).ok, true, `${from} --review-start--> should be legal`);
+	}
+	// 非法:draft/proving/reviewing 不能直接 review
 	assertIllegal("draft", ev);
 	assertIllegal("proving", ev);
 	assertIllegal("reviewing", ev);
-	assertIllegal("ready", ev);
 });
 
 test("prove-start is allowed from draft/needs-work/ready/proved, not from proving/reviewing", () => {

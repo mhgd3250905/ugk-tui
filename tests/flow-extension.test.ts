@@ -643,13 +643,13 @@ test("/flow run draft task is blocked before creating a driver run", async () =>
 		assert.equal(fs.existsSync(path.join(cwd, ".flow", "tasks", "draft-task", "runs")), false);
 		assert.equal(notifications.at(-1)?.type, "warning");
 		assert.match(notifications.at(-1)?.message ?? "", /draft/);
-		assert.match(notifications.at(-1)?.message ?? "", /verified\/active/);
+		assert.match(notifications.at(-1)?.message ?? "", /requires ready/);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
 });
 
-test("/flow run needs-human task is blocked before creating a driver run", async () => {
+test("/flow run needs-work task is blocked before creating a driver run", async () => {
 	let factoryCalls = 0;
 	setFlowDriverSessionFactoryForTests(async () => {
 		factoryCalls += 1;
@@ -657,7 +657,7 @@ test("/flow run needs-human task is blocked before creating a driver run", async
 	});
 	try {
 		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
-		writeTempTask(cwd, "human-task", "needs-human");
+		writeTempTask(cwd, "human-task", "needs-work");
 		const { pi, commands, sentMessages } = makePi();
 		const { ctx, notifications } = makeCtx(cwd);
 		registerFlow(pi as any);
@@ -668,7 +668,7 @@ test("/flow run needs-human task is blocked before creating a driver run", async
 		assert.equal(sentMessages.length, 0);
 		assert.equal(fs.existsSync(path.join(cwd, ".flow", "tasks", "human-task", "runs")), false);
 		assert.equal(notifications.at(-1)?.type, "warning");
-		assert.match(notifications.at(-1)?.message ?? "", /needs-human/);
+		assert.match(notifications.at(-1)?.message ?? "", /requires ready/);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -1659,6 +1659,7 @@ test("/flow task review warns instead of queueing hidden prompt while focused on
 
 test("/flow task review opens a completed focused driver run and marks task reviewing", async () => {
 	const cwd = makeTempTaskProject("task-a");
+	writeTempTask(cwd, "task-a", "proved");
 	const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
 	writeDriverStatus(runDir, {
 		taskId: "task-a",
@@ -1668,6 +1669,7 @@ test("/flow task review opens a completed focused driver run and marks task revi
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
 	});
+	writePassingRunOutput(runDir, "ok");
 	writePassingValidation(runDir, "task-a", "run-001", "ok");
 	fs.writeFileSync(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
 	const { pi, commands, sentMessages, entries } = makePi();
@@ -1757,6 +1759,7 @@ test("/flow task accept marks a reviewed PASS prove as verified and unblocks run
 	});
 	try {
 		const cwd = makeTempTaskProject("task-a");
+		writeTempTask(cwd, "task-a", "proved");
 		const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
 		writeDriverStatus(runDir, {
 			taskId: "task-a",
@@ -1777,7 +1780,7 @@ test("/flow task accept marks a reviewed PASS prove as verified and unblocks run
 
 		const task = JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8"));
 		const review = JSON.parse(fs.readFileSync(path.join(runDir, "review.json"), "utf8"));
-		assert.equal(task.status, "verified");
+		assert.equal(task.status, "ready");
 		assert.equal(task.latest_review_run, "run-001");
 		assert.equal(review.status, "accepted");
 		assert.equal(review.userConfirmed, true);
@@ -1860,8 +1863,9 @@ test("/flow task reject blocks started review when validation is not PASS", asyn
 	assert.match(notifications.at(-1)?.message ?? "", /validation is not PASS/i);
 });
 
-test("/flow task reject marks task needs-human after started PASS review", async () => {
+test("/flow task reject marks task needs-work after started PASS review", async () => {
 	const cwd = makeTempTaskProject("task-a");
+	writeTempTask(cwd, "task-a", "proved");
 	const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
 	writeDriverStatus(runDir, {
 		taskId: "task-a",
@@ -1871,6 +1875,7 @@ test("/flow task reject marks task needs-human after started PASS review", async
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
 	});
+	writePassingRunOutput(runDir, "ok");
 	writePassingValidation(runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
@@ -1881,12 +1886,11 @@ test("/flow task reject marks task needs-human after started PASS review", async
 
 	const task = JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8"));
 	const review = JSON.parse(fs.readFileSync(path.join(runDir, "review.json"), "utf8"));
-	assert.equal(task.status, "needs-human");
-	assert.equal(task.latest_validation, "PASS");
+	assert.equal(task.status, "needs-work");
 	assert.equal(review.status, "needs-changes");
 	assert.equal(review.decisions[0], "证据不足");
 	assert.equal(notifications.at(-1)?.type, "warning");
-	assert.match(notifications.at(-1)?.message ?? "", /needs-human/);
+	assert.match(notifications.at(-1)?.message ?? "", /needs-work/);
 });
 
 test("/flow attach <run-id> shows summary-only notice for a non-live driver", async () => {

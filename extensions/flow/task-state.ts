@@ -28,7 +28,8 @@ import { readFlowTask, updateFlowTaskStatus, type FlowTaskMetadata } from "./tas
  *                          proving ────────────────────┘
  *
  * 注:needs-work 修复后必须重新 prove(不能直接跳回 proved),因为信任需要重新验证。
- * ready 可被 prove-start 再次触发(演进 task 后重新证明)。
+ * ready 可被 prove-start 再次触发(演进 task 后重新证明);
+ * ready 也可被 review-start 触发(再次 run 完成后复盘这次执行)。
  *
  * 信号分层(不串联):
  * - structural pass(prove 的结构 gate 通过)→ 只证明"能跑通",不等于可复用。
@@ -100,6 +101,7 @@ const TRANSITIONS: Record<FlowTaskState, Partial<Record<FlowTaskEvent["kind"], F
 	},
 	ready: {
 		"prove-start": "proving", // 再次 run(以 prove 形式重新执行/演进)
+		"review-start": "reviewing", // 再次 run 完成后复盘
 	},
 	"needs-work": {
 		"prove-start": "proving", // 修复后重新证明

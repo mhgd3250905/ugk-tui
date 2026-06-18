@@ -6,20 +6,21 @@ import {
 	startFlowReview,
 	type FlowReviewRecord,
 } from "./review-store.ts";
-import { readTaskMetadata, type TaskGuardResult } from "./lifecycle-gates.ts";
+import { normalizeLegacyState, transition } from "./task-state.ts";
+import { readFlowTask } from "./task-store.ts";
 import type { FlowDriverSummary } from "./types.ts";
 
 /**
- * Review 生命周期的纯决策模块。
+ * Review 生命周期的决策模块(状态机版)。
  *
- * 从 index.ts 抽出的第二块 deep module。startCompletedFlowReview /
- * acceptCompletedFlowReview / rejectCompletedFlowReview 三个函数原本把
- * "判断能不能做 + 改 review 记录 + 改 task 状态 + 通知用户 / 刷界面" 混在一起。
- * 这里只管前三步(纯领域逻辑,不碰 UI/进程表),返回一个决策结果;
- * index.ts 拿到结果后负责执行副作用(notify / focus 刷新 / stage gate 弹窗)。
+ * 从 index.ts 抽出的 deep module。startReview / acceptReview / rejectReview 三个
+ * 动作校验前置条件(driver 不在跑、validation 为 PASS、已有 review 记录)后,
+ * 通过中心状态机 transition() 推进 task 状态。task.json 的 status 写权独占在
+ * task-state;本模块只发起合法转换事件。
  *
- * 入参里 driverLive 是布尔——"这个 run 的 driver 是否仍在运行"由 index.ts 的进程表
- * 判断后传入,本模块不持有任何运行时进程状态。
+ * 副作用分工:本模块负责改 review 记录 + 推进 task 状态(纯文件操作);
+ * index.ts 负责按返回的 outcome 决定 UI(notify / focus / stage gate)。
+ * driverLive 由 index.ts 的进程表判断后传入——本模块不持有运行时进程状态。
  */
 
 export interface ReviewDriverContext {
@@ -27,18 +28,12 @@ export interface ReviewDriverContext {
 	driverLive: boolean;
 }
 
-/** task 状态变更意图:接受后 → verified,拒绝后 → needs-human。 */
-export interface TaskStatusTransition {
-	status: "verified" | "needs-human";
-	fields: Record<string, unknown>;
-}
-
 export type ReviewActionOutcome =
 	| { ok: false; reason: string; type: "warning" | "error" }
 	| ({ ok: true; review: FlowReviewRecord } & (
-			| { kind: "started"; taskNextStep: string }
-			| { kind: "accepted"; taskTransition: TaskStatusTransition }
-			| { kind: "rejected"; taskTransition: TaskStatusTransition }
+			| { kind: "started" }
+			| { kind: "accepted" }
+			| { kind: "rejected" }
 	  ));
 
 function fail(reason: string, type: "warning" | "error" = "warning"): ReviewActionOutcome {
@@ -74,7 +69,7 @@ function checkReviewPrerequisites(
 	return { ok: true, validation };
 }
 
-export function startReview(ctx: ReviewDriverContext): ReviewActionOutcome {
+export function startReview(ctx: ReviewDriverContext, cwd: string): ReviewActionOutcome {
 	const guard = checkReviewPrerequisites(ctx, { liveVerb: "start", validationPhase: "start" }, false);
 	if (!guard.ok) {
 		return guard;
@@ -85,12 +80,15 @@ export function startReview(ctx: ReviewDriverContext): ReviewActionOutcome {
 		runId: driver.runId,
 		runDir: driver.runDir,
 	});
-	return {
-		ok: true,
-		kind: "started",
-		review,
-		taskNextStep: `main reviewing ${driver.taskId}/${driver.runId}`,
-	};
+	const transitionResult = transition(cwd, driver.taskId, {
+		kind: "review-start",
+		runId: driver.runId,
+		nextStep: `main reviewing ${driver.taskId}/${driver.runId}`,
+	});
+	if (!transitionResult.ok) {
+		return fail(transitionResult.reason, "error");
+	}
+	return { ok: true, kind: "started", review };
 }
 
 export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActionOutcome {
@@ -99,9 +97,9 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 		return guard;
 	}
 	const { driver } = ctx;
-	const task = readTaskMetadata(cwd, driver.taskId);
-	if (!task.ok) {
-		return fail(task.message, task.type);
+	const task = readFlowTask(cwd, driver.taskId);
+	if (!task) {
+		return fail(`Flow task not found: ${driver.taskId}`, "error");
 	}
 	const review = acceptFlowReview({
 		taskId: driver.taskId,
@@ -109,23 +107,19 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 		runDir: driver.runDir,
 		taskVersion: task.version,
 	});
-	return {
-		ok: true,
-		kind: "accepted",
-		review,
-		taskTransition: {
-			status: "verified",
-			fields: {
-				latest_review_run: driver.runId,
-				latest_review_status: review.status,
-				latest_validation: guard.validation!.result,
-				next_step: `/flow run ${driver.taskId}`,
-			},
-		},
-	};
+	const transitionResult = transition(cwd, driver.taskId, {
+		kind: "review-accept",
+		runId: driver.runId,
+		origin: "local-proved",
+		nextStep: `/flow run ${driver.taskId}`,
+	});
+	if (!transitionResult.ok) {
+		return fail(transitionResult.reason, "error");
+	}
+	return { ok: true, kind: "accepted", review };
 }
 
-export function rejectReview(ctx: ReviewDriverContext, reason?: string): ReviewActionOutcome {
+export function rejectReview(ctx: ReviewDriverContext, cwd: string, reason?: string): ReviewActionOutcome {
 	const guard = checkReviewPrerequisites(ctx, { liveVerb: "change", validationPhase: "rejected" }, true);
 	if (!guard.ok) {
 		return guard;
@@ -137,18 +131,18 @@ export function rejectReview(ctx: ReviewDriverContext, reason?: string): ReviewA
 		runDir: driver.runDir,
 		reason,
 	});
-	return {
-		ok: true,
-		kind: "rejected",
-		review,
-		taskTransition: {
-			status: "needs-human",
-			fields: {
-				latest_review_run: driver.runId,
-				latest_review_status: review.status,
-				latest_validation: guard.validation!.result,
-				next_step: `fix ${driver.taskId}/${driver.runId} and run /flow task prove ${driver.taskId}`,
-			},
-		},
-	};
+	const transitionResult = transition(cwd, driver.taskId, {
+		kind: "review-reject",
+		runId: driver.runId,
+		nextStep: `fix ${driver.taskId}/${driver.runId} and run /flow task prove ${driver.taskId}`,
+	});
+	if (!transitionResult.ok) {
+		return fail(transitionResult.reason, "error");
+	}
+	return { ok: true, kind: "rejected", review };
+}
+
+/** 供 index.ts 读取当前归一状态(legacy verified/active/approved → ready)。 */
+export function getNormalizedState(rawStatus: string | undefined): string {
+	return normalizeLegacyState(rawStatus);
 }

@@ -777,7 +777,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 		}
 		const driverKey = getDriverKey(driver.taskId, driver.runId);
 		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
-		const outcome = startReview({ driver, driverLive });
+		const outcome = startReview({ driver, driverLive }, getCwd(ctx));
 		if (!outcome.ok) {
 			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
@@ -785,10 +785,6 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (focusState.focus === "driver") {
 			clearFocusedDriver(ctx);
 		}
-		updateFlowTaskStatus(getCwd(ctx), driver.taskId, "reviewing", {
-			latest_review_run: driver.runId,
-			next_step: outcome.taskNextStep,
-		});
 		queueFlowContextPrompt(buildFlowTaskReviewPrompt({ taskId: driver.taskId, runId: driver.runId }));
 		ctx.ui.notify(formatFlowQueued({ kind: "task-review", runId }), "info");
 	}
@@ -805,15 +801,13 @@ export function registerFlow(pi: ExtensionAPI): void {
 			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
-		const { taskTransition } = outcome;
-		updateFlowTaskStatus(getCwd(ctx), driver.taskId, taskTransition.status, taskTransition.fields);
 		if (focusState.focus === "driver") {
 			clearFocusedDriver(ctx);
 		} else {
 			renderMainDriverActivity(ctx);
 		}
 		updateSessionSwitcher(ctx);
-		ctx.ui.notify(`Flow review accepted: ${driver.taskId}/${driver.runId}\nTask status: verified\nNext: /flow run ${driver.taskId}`, "info");
+		ctx.ui.notify(`Flow review accepted: ${driver.taskId}/${driver.runId}\nTask status: ready\nNext: /flow run ${driver.taskId}`, "info");
 		await runStageGate(ctx, { phase: "review-accepted", taskId: driver.taskId, runId: driver.runId });
 	}
 
@@ -824,20 +818,18 @@ export function registerFlow(pi: ExtensionAPI): void {
 		}
 		const driverKey = getDriverKey(driver.taskId, driver.runId);
 		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
-		const outcome = rejectReview({ driver, driverLive }, reason);
+		const outcome = rejectReview({ driver, driverLive }, getCwd(ctx), reason);
 		if (!outcome.ok) {
 			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
-		const { taskTransition } = outcome;
-		updateFlowTaskStatus(getCwd(ctx), driver.taskId, taskTransition.status, taskTransition.fields);
 		if (focusState.focus === "driver") {
 			clearFocusedDriver(ctx);
 		} else {
 			renderMainDriverActivity(ctx);
 		}
 		updateSessionSwitcher(ctx);
-		ctx.ui.notify(`Flow review rejected: ${driver.taskId}/${driver.runId}\nTask status: needs-human`, "warning");
+		ctx.ui.notify(`Flow review rejected: ${driver.taskId}/${driver.runId}\nTask status: needs-work`, "warning");
 	}
 
 	async function deleteCompletedFlowTask(ctx: ExtensionContext, taskId: string): Promise<void> {

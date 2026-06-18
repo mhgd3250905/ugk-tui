@@ -129,7 +129,19 @@ test("validateTaskForDriver run rejects non-runnable status", () => {
 	writeFullTask(cwd, "demo-task", { status: "draft" });
 	const result = validateTaskForDriver("run", cwd, "demo-task");
 	assert.equal(result.ok, false);
-	assert.match((result as { message: string }).message, /requires verified\/active\/approved/);
+	assert.match((result as { message: string }).message, /requires ready/);
+});
+
+test("validateTaskForDriver run accepts legacy verified/active/approved as ready", () => {
+	const cwd = makeTempCwd();
+	// 旧状态名 verified 应被归一为 ready 并放行(只要 review 已接受)
+	const taskDir = writeFullTask(cwd, "demo-task", { status: "verified", latest_review_run: "run-001" });
+	writeAcceptedReview(taskDir, "run-001", 1);
+	const result = validateTaskForDriver("run", cwd, "demo-task") as Extract<
+		ReturnType<typeof validateTaskForDriver>,
+		{ ok: true }
+	>;
+	assert.equal(result.ok, true);
 });
 
 test("validateTaskForDriver run rejects runnable task without accepted review", () => {

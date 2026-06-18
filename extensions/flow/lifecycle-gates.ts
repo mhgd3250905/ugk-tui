@@ -3,8 +3,8 @@ import path from "node:path";
 import { isRecord, readJsonStrict } from "./flow-fs.ts";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
 import { acceptFlowReview, isFlowReviewAccepted, readFlowReview } from "./review-store.ts";
+import { isRunnable, normalizeLegacyState } from "./task-state.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
-import { isRunnableFlowTaskStatus } from "./task-store.ts";
 import type { FlowDriverStatus } from "./types.ts";
 
 /**
@@ -83,10 +83,11 @@ export function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId
 		return task;
 	}
 
-	if (!isRunnableFlowTaskStatus(task.status)) {
+	const normalizedStatus = normalizeLegacyState(task.status);
+	if (!isRunnable(normalizedStatus)) {
 		return {
 			ok: false,
-			message: `Flow task ${taskId} status is ${task.status ?? "unknown"}; /flow run requires verified/active/approved.`,
+			message: `Flow task ${taskId} status is ${task.status ?? "unknown"}; /flow run requires ready.`,
 			type: "warning",
 		};
 	}

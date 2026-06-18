@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { deleteFlowTask, readFlowTask, updateFlowTaskStatus } from "../extensions/flow/task-store.ts";
+import { deleteFlowTask, readFlowTask, updateFlowTaskStatus, writeFlowTask } from "../extensions/flow/task-store.ts";
 
 function makeTempCwd(): string {
 	return mkdtempSync(path.join(tmpdir(), "flow-task-store-"));
@@ -67,4 +67,79 @@ test("task store rejects invalid task ids", () => {
 	assert.throws(() => readFlowTask(cwd, "../../outside"), /Invalid task id/);
 	assert.throws(() => updateFlowTaskStatus(cwd, "../../outside", "proved"), /Invalid task id/);
 	assert.throws(() => deleteFlowTask(cwd, "../../outside"), /Invalid task id/);
+});
+
+// ---- 签名链:task.json 完整性 ----
+
+test("writeFlowTask signs task.json and closes the migration window", () => {
+	const cwd = makeTempCwd();
+	writeFlowTask(cwd, "signed-task", { id: "signed-task", version: 1, status: "draft" });
+	// 写入后 task.json 应带 _sig,迁移窗口应关闭
+	const onDisk = JSON.parse(readFileSync(path.join(cwd, ".flow", "tasks", "signed-task", "task.json"), "utf8"));
+	assert.ok(onDisk._sig, "task.json must carry a _sig after write");
+	assert.ok(Array.isArray(onDisk._sig.covered));
+	// 窗口关闭的行为验证:再手写一个无 _sig 的 task,应被标记损坏
+	const forgedDir = path.join(cwd, ".flow", "tasks", "forged-after-close");
+	mkdirSync(forgedDir, { recursive: true });
+	writeFileSync(
+		path.join(forgedDir, "task.json"),
+		`${JSON.stringify({ id: "forged-after-close", version: 1, status: "ready" }, null, "\t")}\n`,
+	);
+	assert.equal(readFlowTask(cwd, "forged-after-close")?._signatureBroken, true, "unsigned record after window close must be broken");
+	// 关键:删 .flow/.migrated 不能重开窗口(标记不在 .flow/ 里)
+	const dotFlow = path.join(cwd, ".flow");
+	// .flow/ 里不该有 .migrated
+	assert.equal(existsSync(path.join(dotFlow, ".migrated")), false, "marker must NOT live inside .flow/");
+});
+
+test("readFlowTask trusts signed records after the migration window closes", () => {
+	const cwd = makeTempCwd();
+	writeFlowTask(cwd, "ok-task", { id: "ok-task", version: 1, status: "draft" });
+	// writeFlowTask 已签名 + 关闭窗口;正常读不应标记损坏
+	const task = readFlowTask(cwd, "ok-task");
+	assert.equal(task?._signatureBroken, undefined);
+	assert.equal(task?.status, "draft");
+});
+
+test("readFlowTask flags a tampered status as broken after the window closes", () => {
+	const cwd = makeTempCwd();
+	writeFlowTask(cwd, "tampered-task", { id: "tampered-task", version: 1, status: "ready" });
+	// agent 直接改文件(绕过 runtime),改 status 但保留旧 _sig
+	const taskJsonPath = path.join(cwd, ".flow", "tasks", "tampered-task", "task.json");
+	const onDisk = JSON.parse(readFileSync(taskJsonPath, "utf8"));
+	onDisk.status = "needs-work"; // 篡改
+	writeFileSync(taskJsonPath, `${JSON.stringify(onDisk, null, "\t")}\n`);
+
+	const task = readFlowTask(cwd, "tampered-task");
+	assert.equal(task?._signatureBroken, true, "tampered record must be flagged broken");
+});
+
+test("readFlowTask flags a record with no _sig as broken once the window closed", () => {
+	const cwd = makeTempCwd();
+	writeFlowTask(cwd, "anchor-task", { id: "anchor-task", version: 1, status: "draft" }); // 触发窗口关闭
+	// 现在直接手写一个无 _sig 的 task(模拟 agent 伪造)
+	const fakeDir = path.join(cwd, ".flow", "tasks", "forged-task");
+	mkdirSync(fakeDir, { recursive: true });
+	writeFileSync(
+		path.join(fakeDir, "task.json"),
+		`${JSON.stringify({ id: "forged-task", version: 1, status: "ready" }, null, "\t")}\n`,
+	);
+
+	const task = readFlowTask(cwd, "forged-task");
+	assert.equal(task?._signatureBroken, true, "unsigned record after window close must be broken");
+});
+
+test("unsigned records are trusted inside the migration window (legacy data)", () => {
+	const cwd = makeTempCwd();
+	// 不触发 writeFlowTask(不关闭窗口),直接手写旧格式 task
+	const legacyDir = path.join(cwd, ".flow", "tasks", "legacy-task");
+	mkdirSync(legacyDir, { recursive: true });
+	writeFileSync(
+		path.join(legacyDir, "task.json"),
+		`${JSON.stringify({ id: "legacy-task", version: 1, status: "active" }, null, "\t")}\n`,
+	);
+
+	const task = readFlowTask(cwd, "legacy-task");
+	assert.equal(task?._signatureBroken, undefined, "legacy unsigned record trusted inside window");
+	assert.equal(task?.status, "active");
 });

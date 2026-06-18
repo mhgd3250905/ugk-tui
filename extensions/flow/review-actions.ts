@@ -1,7 +1,7 @@
-import { readFlowRunValidation } from "./run-validation.ts";
+import { readFlowRunValidationVerified } from "./run-validation.ts";
 import {
 	acceptFlowReview,
-	readFlowReview,
+	readFlowReviewVerified,
 	rejectFlowReview,
 	startFlowReview,
 	type FlowReviewRecord,
@@ -49,19 +49,20 @@ function fail(reason: string, type: "warning" | "error" = "warning"): ReviewActi
  */
 function checkReviewPrerequisites(
 	ctx: ReviewDriverContext,
+	cwd: string,
 	wording: { liveVerb: "start" | "change"; validationPhase: "start" | "accepted" | "rejected" },
 	requireExistingReview: boolean,
-): ReviewActionOutcome | { ok: true; validation: ReturnType<typeof readFlowRunValidation> } {
+): ReviewActionOutcome | { ok: true; validation: ReturnType<typeof readFlowRunValidationVerified> } {
 	const { driver, driverLive } = ctx;
 	if (driverLive) {
 		return fail(`Flow task review cannot ${wording.liveVerb} while the Flow driver is still running.`);
 	}
-	const validation = readFlowRunValidation(driver.runDir);
+	const validation = readFlowRunValidationVerified(driver.runDir, cwd);
 	if (!validation || validation.result !== "PASS") {
 		return fail(`Flow review cannot be ${wording.validationPhase} because validation is not PASS: ${driver.taskId}/${driver.runId}`);
 	}
 	if (requireExistingReview) {
-		const existingReview = readFlowReview(driver.runDir);
+		const existingReview = readFlowReviewVerified(driver.runDir, cwd);
 		if (!existingReview) {
 			return fail(`Flow review has not started for ${driver.taskId}/${driver.runId}. Run /flow task review ${driver.taskId}/${driver.runId} first.`);
 		}
@@ -70,7 +71,7 @@ function checkReviewPrerequisites(
 }
 
 export function startReview(ctx: ReviewDriverContext, cwd: string): ReviewActionOutcome {
-	const guard = checkReviewPrerequisites(ctx, { liveVerb: "start", validationPhase: "start" }, false);
+	const guard = checkReviewPrerequisites(ctx, cwd, { liveVerb: "start", validationPhase: "start" }, false);
 	if (!guard.ok) {
 		return guard;
 	}
@@ -85,6 +86,7 @@ export function startReview(ctx: ReviewDriverContext, cwd: string): ReviewAction
 		return fail(transitionResult.reason, "error");
 	}
 	const review = startFlowReview({
+		cwd,
 		taskId: driver.taskId,
 		runId: driver.runId,
 		runDir: driver.runDir,
@@ -93,7 +95,7 @@ export function startReview(ctx: ReviewDriverContext, cwd: string): ReviewAction
 }
 
 export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActionOutcome {
-	const guard = checkReviewPrerequisites(ctx, { liveVerb: "change", validationPhase: "accepted" }, true);
+	const guard = checkReviewPrerequisites(ctx, cwd, { liveVerb: "change", validationPhase: "accepted" }, true);
 	if (!guard.ok) {
 		return guard;
 	}
@@ -113,6 +115,7 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 		return fail(transitionResult.reason, "error");
 	}
 	const review = acceptFlowReview({
+		cwd,
 		taskId: driver.taskId,
 		runId: driver.runId,
 		runDir: driver.runDir,
@@ -122,7 +125,7 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 }
 
 export function rejectReview(ctx: ReviewDriverContext, cwd: string, reason?: string): ReviewActionOutcome {
-	const guard = checkReviewPrerequisites(ctx, { liveVerb: "change", validationPhase: "rejected" }, true);
+	const guard = checkReviewPrerequisites(ctx, cwd, { liveVerb: "change", validationPhase: "rejected" }, true);
 	if (!guard.ok) {
 		return guard;
 	}
@@ -137,6 +140,7 @@ export function rejectReview(ctx: ReviewDriverContext, cwd: string, reason?: str
 		return fail(transitionResult.reason, "error");
 	}
 	const review = rejectFlowReview({
+		cwd,
 		taskId: driver.taskId,
 		runId: driver.runId,
 		runDir: driver.runDir,

@@ -1,6 +1,11 @@
 import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isRecord, readJsonOptional, readJsonStrict } from "./flow-fs.ts";
+import { signRecord, verifyRecord } from "./flow-signing.ts";
+import { getProjectKey, isInMigrationWindow } from "./task-store.ts";
+
+/** validation.json 签名覆盖的关键字段:防 agent 把 FAIL 改成 PASS。 */
+const VALIDATION_SIGNED_FIELDS = ["taskId", "runId", "result", "scope", "createdAt"];
 
 export type FlowValidationResult = "PASS" | "FAIL";
 
@@ -33,6 +38,7 @@ export interface FlowRunValidation {
 }
 
 interface ValidateFlowRunArgs {
+	cwd: string;
 	taskId: string;
 	runId: string;
 	taskDir: string;
@@ -206,7 +212,10 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 		nextStep: `/flow task review ${args.taskId}/${args.runId}`,
 	};
 
-	writeFileSync(validationJson, `${JSON.stringify(validation, null, "\t")}\n`);
+	// 签名关键字段:防 agent 把 FAIL 改成 PASS。runtime 独占签名。
+	const sig = signRecord(getProjectKey(args.cwd), validation as unknown as Record<string, unknown>, VALIDATION_SIGNED_FIELDS);
+	const withSig = { ...validation, _sig: sig };
+	writeFileSync(validationJson, `${JSON.stringify(withSig, null, "\t")}\n`);
 	writeFileSync(validationMd, renderValidationMarkdown(validation));
 	return validation;
 }
@@ -217,5 +226,22 @@ export function readFlowRunValidation(runDir: string): FlowRunValidation | undef
 		return undefined;
 	}
 	// 旧 validation.json 没有 scope 字段,统一视为 structural。
+	return { ...(parsed as unknown as FlowRunValidation), scope: "structural" };
+}
+
+/**
+ * 读 validation.json 并验签(决策点用)。迁移窗口外,签名不符返回 undefined。
+ */
+export function readFlowRunValidationVerified(runDir: string, cwd: string): FlowRunValidation | undefined {
+	const parsed = readJsonOptional(path.join(runDir, "validation.json"));
+	if (!isRecord(parsed)) {
+		return undefined;
+	}
+	if (!isInMigrationWindow(cwd)) {
+		const check = verifyRecord(getProjectKey(cwd), parsed);
+		if (!check.verified) {
+			return undefined;
+		}
+	}
 	return { ...(parsed as unknown as FlowRunValidation), scope: "structural" };
 }

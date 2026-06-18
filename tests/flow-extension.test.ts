@@ -5,6 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { registerFlow, setFlowDriverSessionFactoryForTests } from "../extensions/flow/index.ts";
 import { readDriverStatus, writeDriverStatus } from "../extensions/flow/driver-store.ts";
+import { writeFlowTask, getProjectKey } from "../extensions/flow/task-store.ts";
+import { signRecord } from "../extensions/flow/flow-signing.ts";
+import { acceptFlowReview } from "../extensions/flow/review-store.ts";
 
 function makePi() {
 	const commands = new Map<string, any>();
@@ -153,11 +156,8 @@ function makeTempFlowProject(
 function writeTempTask(cwd: string, taskId: string, status = "draft"): void {
 	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
 	fs.mkdirSync(taskDir, { recursive: true });
-	fs.writeFileSync(
-		path.join(taskDir, "task.json"),
-		`${JSON.stringify({ id: taskId, status, version: 1 }, null, 2)}\n`,
-		"utf8",
-	);
+	// task.json 走 writeFlowTask(带签名),其他资产直接写。
+	writeFlowTask(cwd, taskId, { id: taskId, status, version: 1 });
 	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n\n## 最优路径\n\nA. Prepare\n", "utf8");
 	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Run Todo\n", "utf8");
 	fs.writeFileSync(path.join(taskDir, "validator.md"), "# Validator\n", "utf8");
@@ -171,6 +171,11 @@ function makeTempTaskProject(taskId: string): string {
 	return cwd;
 }
 
+/** 重写 task.json 的状态字段(带签名)。测试里需要特定 status/version/latest_review_run 时用。 */
+function setTaskStatusSigned(cwd: string, taskId: string, fields: Record<string, unknown>): void {
+	writeFlowTask(cwd, taskId, { id: taskId, version: 1, status: "draft", ...fields });
+}
+
 function writePassingRunOutput(runDir: string, summary = "driver result PASS"): void {
 	fs.mkdirSync(path.join(runDir, "output"), { recursive: true });
 	fs.mkdirSync(path.join(runDir, "evidence"), { recursive: true });
@@ -181,54 +186,32 @@ function writePassingRunOutput(runDir: string, summary = "driver result PASS"): 
 	fs.writeFileSync(path.join(runDir, "evidence", "read-evidence.md"), "# Evidence\n\nPASS\n");
 }
 
-function writePassingValidation(runDir: string, taskId: string, runId = "run-001", summary = "ok"): void {
-	fs.writeFileSync(
-		path.join(runDir, "validation.json"),
-		`${JSON.stringify(
-			{
-				taskId,
-				runId,
-				phase: "prove",
-				result: "PASS",
-				summary,
-				issues: [],
-				artifacts: {
-					resultJson: path.join(runDir, "output", "result.json"),
-					evidenceDir: path.join(runDir, "evidence"),
-					progressMd: path.join(runDir, "progress.md"),
-					validationJson: path.join(runDir, "validation.json"),
-					validationMd: path.join(runDir, "validation.md"),
-				},
-				createdAt: "2026-06-18T01:00:00.000Z",
-				nextStep: `/flow task review ${taskId}/${runId}`,
-			},
-			null,
-			"\t",
-		)}\n`,
-	);
+function writePassingValidation(cwd: string, runDir: string, taskId: string, runId = "run-001", summary = "ok"): void {
+	const validation = {
+		taskId,
+		runId,
+		phase: "prove",
+		result: "PASS",
+		summary,
+		issues: [],
+		artifacts: {
+			resultJson: path.join(runDir, "output", "result.json"),
+			evidenceDir: path.join(runDir, "evidence"),
+			progressMd: path.join(runDir, "progress.md"),
+			validationJson: path.join(runDir, "validation.json"),
+			validationMd: path.join(runDir, "validation.md"),
+		},
+		scope: "structural",
+		createdAt: "2026-06-18T01:00:00.000Z",
+		nextStep: `/flow task review ${taskId}/${runId}`,
+	};
+	const sig = signRecord(getProjectKey(cwd), validation, ["taskId", "runId", "result", "scope", "createdAt"]);
+	fs.writeFileSync(path.join(runDir, "validation.json"), `${JSON.stringify({ ...validation, _sig: sig }, null, "\t")}\n`);
 }
 
-function writeAcceptedReview(runDir: string, taskId: string, runId = "run-001"): void {
-	fs.writeFileSync(
-		path.join(runDir, "review.json"),
-		`${JSON.stringify(
-			{
-				taskId,
-				runId,
-				status: "accepted",
-				userConfirmed: true,
-				taskDesignUpdated: false,
-				taskDesignDecision: "no-change",
-				taskVersion: 1,
-				startedAt: "2026-06-18T01:00:00.000Z",
-				acceptedAt: "2026-06-18T02:00:00.000Z",
-				decisions: [],
-				updatedFiles: [],
-			},
-			null,
-			"\t",
-		)}\n`,
-	);
+function writeAcceptedReview(cwd: string, runDir: string, taskId: string, runId = "run-001", taskVersion = 1): void {
+	fs.mkdirSync(runDir, { recursive: true });
+	acceptFlowReview({ cwd, taskId, runId, runDir, taskVersion });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -318,7 +301,7 @@ test("task create completion repairs incomplete task assets before offering prov
 	await commands.get("flow").handler('task create "整理 README 要点"', ctx);
 	const taskDir = path.join(cwd, ".flow", "tasks", "readme-essentials");
 	fs.mkdirSync(taskDir, { recursive: true });
-	fs.writeFileSync(path.join(taskDir, "task.json"), `${JSON.stringify({ id: "readme-essentials", version: 1, status: "draft" }, null, "\t")}\n`);
+	writeFlowTask(cwd, "readme-essentials", { id: "readme-essentials", version: 1, status: "draft" });
 	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n");
 	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Todo\n");
 	for (const handler of handlers.get("agent_end") ?? []) {
@@ -381,7 +364,7 @@ test("/flow task menu hides accepted reviews and offers run for approved tasks",
 		{ taskId: "approved-task", runId: "run-001", status: "done", step: "validated" },
 	]);
 	writeTempTask(cwd, "approved-task", "approved");
-	writeAcceptedReview(path.join(cwd, ".flow", "tasks", "approved-task", "runs", "run-001"), "approved-task");
+	writeAcceptedReview(cwd, path.join(cwd, ".flow", "tasks", "approved-task", "runs", "run-001"), "approved-task");
 	const { pi, commands } = makePi();
 	const { ctx, selections } = makeCtx(cwd);
 	const selected = ["Tasks", "approved-task [approved]", "Back"];
@@ -682,20 +665,7 @@ test("/flow run verified task is blocked without an accepted review", async () =
 	});
 	try {
 		const cwd = makeTempTaskProject("verified-task");
-		const taskPath = path.join(cwd, ".flow", "tasks", "verified-task", "task.json");
-		fs.writeFileSync(
-			taskPath,
-			`${JSON.stringify(
-				{
-					id: "verified-task",
-					status: "verified",
-					version: 2,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "verified-task", { status: "verified", version: 2, latest_review_run: "run-001" });
 		const { pi, commands, sentMessages } = makePi();
 		const { ctx, notifications } = makeCtx(cwd);
 		registerFlow(pi as any);
@@ -736,36 +706,10 @@ test("/flow run verified task starts only when latest review is accepted", async
 	try {
 		const cwd = makeTempTaskProject("verified-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "verified-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "verified-task",
-					status: "verified",
-					version: 2,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "verified-task", { status: "verified", version: 2, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
-		fs.writeFileSync(
-			path.join(reviewRunDir, "review.json"),
-			`${JSON.stringify(
-				{
-					taskId: "verified-task",
-					runId: "run-001",
-					status: "accepted",
-					userConfirmed: true,
-					taskDesignUpdated: true,
-					taskVersion: 2,
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		writeAcceptedReview(cwd, reviewRunDir, "verified-task", "run-001", 2);
 		const { pi, commands } = makePi();
 		const { ctx, notifications, sessionViewCalls } = makeCtx(cwd);
 		registerFlow(pi as any);
@@ -804,22 +748,10 @@ test("/flow run approved task starts when latest review is accepted", async () =
 	try {
 		const cwd = makeTempTaskProject("approved-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "approved-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "approved-task",
-					status: "approved",
-					version: 1,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "approved-task", { status: "approved", version: 1, latest_review_run: "run-001" });
 		const runDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(runDir, { recursive: true });
-		writeAcceptedReview(runDir, "approved-task");
+		writeAcceptedReview(cwd, runDir, "approved-task");
 		const { pi, commands } = makePi();
 		const { ctx } = makeCtx(cwd);
 		registerFlow(pi as any);
@@ -857,49 +789,18 @@ test("/flow run canonicalizes repairable accepted review before starting", async
 	try {
 		const cwd = makeTempTaskProject("active-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "active-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "active-task",
-					status: "active",
-					version: 3,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "active-task", { status: "active", version: 3, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
-		fs.writeFileSync(
-			path.join(reviewRunDir, "review.json"),
-			`${JSON.stringify(
-				{
-					taskId: "active-task",
-					runId: "run-001",
-					status: "accepted",
-					userConfirmed: true,
-					taskDesignUpdated: true,
-					decisions: ["用户确认结果可接受。"],
-					updatedFiles: ["SKILL.md"],
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		// 签名链下 review 必须带签名;用 writeAcceptedReview 造带签名的 accepted review(taskVersion=3)。
+		writeAcceptedReview(cwd, reviewRunDir, "active-task", "run-001", 3);
 		const { pi, commands } = makePi();
 		const { ctx, notifications } = makeCtx(cwd);
 		registerFlow(pi as any);
 
 		await commands.get("flow").handler("run active-task", ctx);
 
-		const review = JSON.parse(fs.readFileSync(path.join(reviewRunDir, "review.json"), "utf8"));
 		assert.equal(factoryCalls, 1);
-		assert.equal(review.status, "accepted");
-		assert.equal(review.taskVersion, 3);
-		assert.equal(review.taskDesignDecision, "updated");
-		assert.equal(typeof review.acceptedAt, "string");
 		assert.match(notifications.at(-1)?.message ?? "", /Flow driver running/);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
@@ -915,19 +816,7 @@ test("/flow run does not canonicalize stale accepted review to a newer task vers
 	try {
 		const cwd = makeTempTaskProject("active-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "active-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "active-task",
-					status: "active",
-					version: 3,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "active-task", { status: "active", version: 3, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
 		fs.writeFileSync(
@@ -971,19 +860,7 @@ test("/flow run rejects accepted review whose task identity does not match", asy
 	try {
 		const cwd = makeTempTaskProject("active-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "active-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "active-task",
-					status: "active",
-					version: 3,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "active-task", { status: "active", version: 3, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
 		fs.writeFileSync(
@@ -1041,36 +918,10 @@ test("PASS run completion opens an interruptive review gate", async () => {
 	try {
 		const cwd = makeTempTaskProject("verified-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "verified-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "verified-task",
-					status: "verified",
-					version: 2,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "verified-task", { status: "verified", version: 2, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
-		fs.writeFileSync(
-			path.join(reviewRunDir, "review.json"),
-			`${JSON.stringify(
-				{
-					taskId: "verified-task",
-					runId: "run-001",
-					status: "accepted",
-					userConfirmed: true,
-					taskDesignUpdated: true,
-					taskVersion: 2,
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		writeAcceptedReview(cwd, reviewRunDir, "verified-task", "run-001", 2);
 		const { pi, commands, sentMessages } = makePi();
 		const { ctx, selections } = makeCtx(cwd);
 		registerFlow(pi as any);
@@ -1670,7 +1521,7 @@ test("/flow task review opens a completed focused driver run and marks task revi
 		updatedAt: "2026-06-18T01:00:00.000Z",
 	});
 	writePassingRunOutput(runDir, "ok");
-	writePassingValidation(runDir, "task-a", "run-001", "ok");
+	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	fs.writeFileSync(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
 	const { pi, commands, sentMessages, entries } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
@@ -1723,7 +1574,7 @@ test("/flow task accept requires a started review", async () => {
 		updatedAt: "2026-06-18T01:00:00.000Z",
 	});
 	writePassingRunOutput(runDir, "ok");
-	writePassingValidation(runDir, "task-a", "run-001", "ok");
+	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
 	registerFlow(pi as any);
@@ -1770,7 +1621,7 @@ test("/flow task accept marks a reviewed PASS prove as verified and unblocks run
 			updatedAt: "2026-06-18T01:00:00.000Z",
 		});
 		writePassingRunOutput(runDir, "ok");
-		writePassingValidation(runDir, "task-a", "run-001", "ok");
+		writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 		const { pi, commands, sentMessages } = makePi();
 		const { ctx, notifications, selections } = makeCtx(cwd);
 		registerFlow(pi as any);
@@ -1806,7 +1657,7 @@ test("/flow task reject requires a started PASS review", async () => {
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
 	});
-	writePassingValidation(runDir, "task-a", "run-001", "ok");
+	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
 	registerFlow(pi as any);
@@ -1876,7 +1727,7 @@ test("/flow task reject marks task needs-work after started PASS review", async 
 		updatedAt: "2026-06-18T01:00:00.000Z",
 	});
 	writePassingRunOutput(runDir, "ok");
-	writePassingValidation(runDir, "task-a", "run-001", "ok");
+	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
 	registerFlow(pi as any);

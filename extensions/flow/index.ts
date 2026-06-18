@@ -699,6 +699,18 @@ export function registerFlow(pi: ExtensionAPI): void {
 				}
 				updateSessionSwitcher(ctx);
 				if (validation.result !== "PASS" && attemptedContractRepair) {
+					// run 路径:ready task 连结构都过不了 → 复用链路断了,转 needs-work。
+					// prove 路径的 FAIL 已在上方 prove-fail transition 处理。
+					if (kind === "run") {
+						const runFail = transition(cwd, taskId, {
+							kind: "run-fail",
+							runId,
+							nextStep: `fix ${taskId}/${runId} and run /flow task prove ${taskId}`,
+						});
+						if (!runFail.ok) {
+							ctx.ui.notify(runFail.reason, "error");
+						}
+					}
 					ctx.ui.notify(
 						`Flow driver contract failed after automatic repair: ${driverKey}\n${validation.summary}`,
 						"error",

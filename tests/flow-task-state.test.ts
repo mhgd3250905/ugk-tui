@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -126,6 +126,28 @@ test("ready --prove-start--> proving (re-run / evolve allowed)", () => {
 	const r = transition(cwd, "t", { kind: "prove-start", runId: "run-005" });
 	assert.equal(r.ok, true);
 	assert.equal((r as { state: string }).state, "proving");
+});
+
+test("ready --run-fail--> needs-work (reuse chain broken, must re-prove)", () => {
+	const cwd = makeTempCwd();
+	// seed 一个带 ready_origin 的 ready task,确认 run-fail 会清掉它
+	writeFlowTask(cwd, "t", { id: "t", version: 1, status: "ready", ready_origin: "local-proved" });
+	const r = transition(cwd, "t", { kind: "run-fail", runId: "run-009", nextStep: "fix and re-prove" });
+	assert.equal(r.ok, true);
+	assert.equal((r as { state: string }).state, "needs-work");
+	// 验证落盘:ready_origin 应从 task.json 消失(undefined 字段被 JSON.stringify 省略)
+	const onDisk = JSON.parse(readFileSync(path.join(cwd, ".flow", "tasks", "t", "task.json"), "utf8"));
+	assert.equal(onDisk.status, "needs-work");
+	assert.equal("ready_origin" in onDisk, false, "ready_origin should be removed from disk");
+});
+
+test("run-fail from non-ready states is illegal", () => {
+	const ev: FlowTaskEvent = { kind: "run-fail", runId: "r", nextStep: "x" };
+	assertIllegal("draft", ev);
+	assertIllegal("proving", ev);
+	assertIllegal("proved", ev);
+	assertIllegal("reviewing", ev);
+	assertIllegal("needs-work", ev);
 });
 
 test("draft --remote-mark-ready--> ready (sync from remote)", () => {

@@ -29,7 +29,8 @@ import { readFlowTask, updateFlowTaskStatus, type FlowTaskMetadata } from "./tas
  *
  * 注:needs-work 修复后必须重新 prove(不能直接跳回 proved),因为信任需要重新验证。
  * ready 可被 prove-start 再次触发(演进 task 后重新证明);
- * ready 也可被 review-start 触发(再次 run 完成后复盘这次执行)。
+ * ready 也可被 review-start 触发(再次 run 完成后复盘这次执行);
+ * ready 的 run 若连结构 validation 都过不了(run-fail),复用链路已断 → 转 needs-work。
  *
  * 信号分层(不串联):
  * - structural pass(prove 的结构 gate 通过)→ 只证明"能跑通",不等于可复用。
@@ -48,6 +49,7 @@ export type FlowTaskEvent =
 	| { kind: "prove-start"; runId: string }
 	| { kind: "prove-pass"; runId: string; validatedAt: string; nextStep: string }
 	| { kind: "prove-fail"; runId: string; nextStep: string }
+	| { kind: "run-fail"; runId: string; nextStep: string }
 	| { kind: "review-start"; runId: string; nextStep: string }
 	| { kind: "review-accept"; runId: string; origin: ReadyOrigin; nextStep: string }
 	| { kind: "review-reject"; runId: string; nextStep: string }
@@ -102,6 +104,7 @@ const TRANSITIONS: Record<FlowTaskState, Partial<Record<FlowTaskEvent["kind"], F
 	ready: {
 		"prove-start": "proving", // 再次 run(以 prove 形式重新执行/演进)
 		"review-start": "reviewing", // 再次 run 完成后复盘
+		"run-fail": "needs-work", // 再次 run 连结构都过不了 → 复用链路断了,需重新证明
 	},
 	"needs-work": {
 		"prove-start": "proving", // 修复后重新证明
@@ -155,6 +158,8 @@ function buildTransitionFields(taskId: string, event: FlowTaskEvent): Record<str
 			};
 		case "prove-fail":
 			return { latest_prove_run: event.runId, latest_validation: "structural-fail", next_step: event.nextStep };
+		case "run-fail":
+			return { latest_validation: "structural-fail", ready_origin: undefined, next_step: event.nextStep };
 		case "review-start":
 			return { latest_review_run: event.runId, next_step: event.nextStep };
 		case "review-accept":

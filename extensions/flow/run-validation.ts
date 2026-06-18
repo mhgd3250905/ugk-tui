@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-export type FlowValidationResult = "PASS" | "FAIL" | "NEEDS-HUMAN";
+export type FlowValidationResult = "PASS" | "FAIL";
 
 export interface FlowRunValidation {
 	taskId: string;
@@ -176,7 +176,7 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 		issues.push("missing progress.md");
 	}
 
-	const result: FlowValidationResult = !existsSync(resultJson) ? "NEEDS-HUMAN" : issues.length === 0 ? "PASS" : "FAIL";
+	const result: FlowValidationResult = issues.length === 0 ? "PASS" : "FAIL";
 	const summary = result === "PASS" ? summarizeOutput(output) : issues[0] ?? "validation failed";
 	const validation: FlowRunValidation = {
 		taskId: args.taskId,

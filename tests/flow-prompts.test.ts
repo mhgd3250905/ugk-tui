@@ -45,8 +45,9 @@ test("builds task prove prompt with driver run instructions", () => {
 	assert.match(prompt, /validation\.json/);
 	assert.match(prompt, /validation\.md/);
 	assert.match(prompt, /status\.json/);
-	assert.match(prompt, /proved/);
-	assert.match(prompt, /needs-human/);
+	assert.match(prompt, /输出契约不合规/);
+	assert.match(prompt, /自动修复/);
+	assert.match(prompt, /进入 review/);
 });
 
 test("builds task run prompt with status guards", () => {
@@ -83,14 +84,21 @@ test("builds task review prompt with main-agent review gate", () => {
 	assert.match(prompt, /todo\.template\.md/);
 	assert.match(prompt, /validator\.md/);
 	assert.match(prompt, /version/);
-	assert.match(prompt, /按 A\/B\/C\/D/);
-	assert.match(prompt, /逐环节向用户核对/);
+	assert.match(prompt, /用户只判断业务结果和可复用偏好/);
+	assert.match(prompt, /用户说不懂/);
+	assert.match(prompt, /先解释/);
+	assert.match(prompt, /不要在给用户看的问题里出现/);
+	assert.match(prompt, /保存为以后复用的流程/);
+	assert.match(prompt, /回复“接受”/);
+	assert.match(prompt, /回复“拒绝/);
+	assert.match(prompt, /回复“调整/);
 	assert.match(prompt, /用户确认/);
 	assert.match(prompt, /\/flow task accept run-001/);
 	assert.match(prompt, /\/flow task reject run-001/);
 	assert.match(prompt, /确认无需修改 Task 资产/);
 	assert.match(prompt, /不要手工修改 `task\.json\.status`/);
 	assert.match(prompt, /只能通过 `\/flow task accept` 或 `\/flow task reject` 改变 Task 生命周期/);
+	assert.doesNotMatch(prompt, /逐环节向用户核对/);
 	assert.doesNotMatch(prompt, /更新 Task 状态/);
 });
 
@@ -105,11 +113,20 @@ test("builds concrete task review prompt with task and run path", () => {
 	assert.match(prompt, /validation\.md/);
 	assert.match(prompt, /review\.json/);
 	assert.match(prompt, /用户/);
+	assert.match(prompt, /用户只判断业务结果和可复用偏好/);
+	assert.match(prompt, /用户说不懂/);
+	assert.match(prompt, /先解释/);
+	assert.match(prompt, /不要在给用户看的问题里出现/);
+	assert.match(prompt, /保存为以后复用的流程/);
+	assert.match(prompt, /回复“接受”/);
+	assert.match(prompt, /回复“拒绝/);
+	assert.match(prompt, /回复“调整/);
 	assert.match(prompt, /review\.md/);
 	assert.match(prompt, /\/flow task accept run-001/);
 	assert.match(prompt, /\/flow task reject run-001/);
 	assert.match(prompt, /确认无需修改 Task 资产/);
 	assert.match(prompt, /verified/);
+	assert.doesNotMatch(prompt, /逐环节向用户核对/);
 });
 
 test("builds status prompt", () => {

@@ -36,6 +36,8 @@ function makePi() {
 function makeCtx(cwd = process.cwd()) {
 	const notifications: Array<{ message: string; type?: string }> = [];
 	const confirms: Array<{ title: string; message: string }> = [];
+	const inputs: Array<{ title: string; placeholder?: string }> = [];
+	const selections: Array<{ title: string; options: string[] }> = [];
 	const status = new Map<string, string | undefined>();
 	const widgets = new Map<string, unknown>();
 	const statusCalls: Array<{ key: string; value: string | undefined }> = [];
@@ -45,6 +47,8 @@ function makeCtx(cwd = process.cwd()) {
 	return {
 		notifications,
 		confirms,
+		inputs,
+		selections,
 		status,
 		widgets,
 		statusCalls,
@@ -71,8 +75,13 @@ function makeCtx(cwd = process.cwd()) {
 					confirms.push({ title, message });
 					return true;
 				},
-				select(_title: string, options: string[]) {
+				select(title: string, options: string[]) {
+					selections.push({ title, options });
 					return options[0];
+				},
+				input(title: string, placeholder?: string) {
+					inputs.push({ title, placeholder });
+					return "整理 README 要点";
 				},
 				setStatus(key: string, value: string | undefined) {
 					status.set(key, value);
@@ -149,6 +158,8 @@ function writeTempTask(cwd: string, taskId: string, status = "draft"): void {
 	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n\n## 最优路径\n\nA. Prepare\n", "utf8");
 	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Run Todo\n", "utf8");
 	fs.writeFileSync(path.join(taskDir, "validator.md"), "# Validator\n", "utf8");
+	fs.writeFileSync(path.join(taskDir, "input.schema.json"), '{"type":"object"}\n', "utf8");
+	fs.writeFileSync(path.join(taskDir, "output.schema.json"), '{"type":"object"}\n', "utf8");
 }
 
 function makeTempTaskProject(taskId: string): string {
@@ -228,17 +239,89 @@ test('/flow task create "..." queues request and injects hidden task context', a
 	assert.deepEqual(sentMessages[0].options, { triggerTurn: true });
 });
 
-test("/flow help only notifies and does not send request", async () => {
+test("task create completion opens an interruptive prove gate for the new task", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async (options) => {
+		factoryCalls += 1;
+		return {
+			taskId: options.taskId,
+			runId: options.runId,
+			runDir: options.runDir,
+			async start() {
+				await new Promise(() => {});
+			},
+			async sendUserInput() {},
+			getTranscriptText() {
+				return "";
+			},
+			getWidgetLines() {
+				return ["driver"];
+			},
+			dispose() {},
+		};
+	});
+	try {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-create-gate-"));
+		const { pi, commands, handlers } = makePi();
+		const { ctx, selections } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler('task create "整理 README 要点"', ctx);
+		writeTempTask(cwd, "readme-essentials");
+		for (const handler of handlers.get("agent_end") ?? []) {
+			await handler({}, ctx);
+		}
+
+		assert.ok(selections.some((selection) =>
+			selection.title === "Flow next step" &&
+			selection.options.includes("Continue: prove readme-essentials") &&
+			selection.options.includes("Stop here")
+		));
+		assert.equal(factoryCalls, 1);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("task create completion repairs incomplete task assets before offering prove", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-create-repair-"));
+	const { pi, commands, handlers, sentMessages } = makePi();
+	const { ctx, selections, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler('task create "整理 README 要点"', ctx);
+	const taskDir = path.join(cwd, ".flow", "tasks", "readme-essentials");
+	fs.mkdirSync(taskDir, { recursive: true });
+	fs.writeFileSync(path.join(taskDir, "task.json"), `${JSON.stringify({ id: "readme-essentials", version: 1, status: "draft" }, null, "\t")}\n`);
+	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n");
+	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Todo\n");
+	for (const handler of handlers.get("agent_end") ?? []) {
+		await handler({}, ctx);
+	}
+
+	assert.equal(selections.some((selection) => selection.title === "Flow next step"), false);
+	const repair = sentMessages.at(-1);
+	assert.match(repair?.message.content ?? "", /\[FLOW TASK CONTRACT REPAIR\]/);
+	assert.match(repair?.message.content ?? "", /validator\.md/);
+	assert.match(repair?.message.content ?? "", /input\.schema\.json/);
+	assert.match(repair?.message.content ?? "", /output\.schema\.json/);
+	assert.match(notifications.at(-1)?.message ?? "", /task contract failed/i);
+});
+
+test("/flow with no args opens an action menu instead of requiring typed subcommands", async () => {
 	const { pi, commands, sentMessages } = makePi();
-	const { ctx, notifications } = makeCtx();
+	const { ctx, inputs, selections } = makeCtx(fs.mkdtempSync(path.join(os.tmpdir(), "flow-menu-")));
 	registerFlow(pi as any);
 
 	await commands.get("flow").handler("", ctx);
 
-	assert.equal(notifications.length, 1);
-	assert.equal(notifications[0].type, "info");
-	assert.match(notifications[0].message, /\[FLOW HELP\]/);
-	assert.equal(sentMessages.length, 0);
+	assert.equal(selections.length, 1);
+	assert.equal(selections[0].title, "Flow");
+	assert.deepEqual(selections[0].options, ["Create task", "Attach driver", "Show status", "Exit"]);
+	assert.deepEqual(inputs, [{ title: "Create Flow task", placeholder: "Describe the goal" }]);
+	assert.equal(sentMessages.length, 1);
+	assert.match(sentMessages[0].message.content, /\[FLOW TASK CREATE\]/);
+	assert.match(sentMessages[0].message.content, /整理 README 要点/);
 });
 
 test("flow command does not run while agent is busy", async () => {
@@ -353,7 +436,7 @@ test("/flow task prove creates a run and starts a driver session", async () => {
 	}));
 	try {
 		const { pi, commands, sentMessages } = makePi();
-		const { ctx, notifications } = makeCtx();
+		const { ctx, notifications, sessionViewCalls } = makeCtx();
 		ctx.cwd = makeTempTaskProject("x");
 		registerFlow(pi as any);
 
@@ -365,6 +448,7 @@ test("/flow task prove creates a run and starts a driver session", async () => {
 		assert.match(initialPrompt, /validator\.md/);
 		assert.equal(fs.existsSync(path.join(runDir, "input.json")), true);
 		assert.equal(sentMessages.length, 0);
+		assert.deepEqual(sessionViewCalls, []);
 		assert.match(notifications.at(-1)!.message, /Flow driver running/);
 		assert.match(notifications.at(-1)!.message, /\/flow attach x\/run-001/);
 	} finally {
@@ -529,6 +613,7 @@ test("/flow run verified task starts only when latest review is accepted", async
 			taskId: options.taskId,
 			runId: options.runId,
 			runDir: options.runDir,
+			visibleSession: { kind: "run-driver" },
 			async start() {
 				await new Promise(() => {});
 			},
@@ -576,13 +661,273 @@ test("/flow run verified task starts only when latest review is accepted", async
 			)}\n`,
 		);
 		const { pi, commands } = makePi();
-		const { ctx, notifications } = makeCtx(cwd);
+		const { ctx, notifications, sessionViewCalls } = makeCtx(cwd);
 		registerFlow(pi as any);
 
 		await commands.get("flow").handler("run verified-task", ctx);
 
 		assert.equal(factoryCalls, 1);
+		assert.deepEqual(sessionViewCalls, []);
 		assert.match(notifications.at(-1)?.message ?? "", /Flow driver running/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow run canonicalizes repairable accepted review before starting", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async (options) => {
+		factoryCalls += 1;
+		return {
+			taskId: options.taskId,
+			runId: options.runId,
+			runDir: options.runDir,
+			visibleSession: { kind: "run-driver" },
+			async start() {
+				await new Promise(() => {});
+			},
+			async sendUserInput() {},
+			getTranscriptText() {
+				return "";
+			},
+			getWidgetLines() {
+				return ["driver"];
+			},
+			dispose() {},
+		};
+	});
+	try {
+		const cwd = makeTempTaskProject("active-task");
+		const taskDir = path.join(cwd, ".flow", "tasks", "active-task");
+		fs.writeFileSync(
+			path.join(taskDir, "task.json"),
+			`${JSON.stringify(
+				{
+					id: "active-task",
+					status: "active",
+					version: 3,
+					latest_review_run: "run-001",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const reviewRunDir = path.join(taskDir, "runs", "run-001");
+		fs.mkdirSync(reviewRunDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(reviewRunDir, "review.json"),
+			`${JSON.stringify(
+				{
+					taskId: "active-task",
+					runId: "run-001",
+					status: "accepted",
+					userConfirmed: true,
+					taskDesignUpdated: true,
+					decisions: ["用户确认结果可接受。"],
+					updatedFiles: ["SKILL.md"],
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const { pi, commands } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run active-task", ctx);
+
+		const review = JSON.parse(fs.readFileSync(path.join(reviewRunDir, "review.json"), "utf8"));
+		assert.equal(factoryCalls, 1);
+		assert.equal(review.status, "accepted");
+		assert.equal(review.taskVersion, 3);
+		assert.equal(review.taskDesignDecision, "updated");
+		assert.equal(typeof review.acceptedAt, "string");
+		assert.match(notifications.at(-1)?.message ?? "", /Flow driver running/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow run does not canonicalize stale accepted review to a newer task version", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async () => {
+		factoryCalls += 1;
+		throw new Error("factory should not run");
+	});
+	try {
+		const cwd = makeTempTaskProject("active-task");
+		const taskDir = path.join(cwd, ".flow", "tasks", "active-task");
+		fs.writeFileSync(
+			path.join(taskDir, "task.json"),
+			`${JSON.stringify(
+				{
+					id: "active-task",
+					status: "active",
+					version: 3,
+					latest_review_run: "run-001",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const reviewRunDir = path.join(taskDir, "runs", "run-001");
+		fs.mkdirSync(reviewRunDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(reviewRunDir, "review.json"),
+			`${JSON.stringify(
+				{
+					taskId: "active-task",
+					runId: "run-001",
+					status: "accepted",
+					userConfirmed: true,
+					taskDesignUpdated: true,
+					taskDesignDecision: "updated",
+					taskVersion: 2,
+					acceptedAt: "2026-06-18T02:00:00.000Z",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const { pi, commands } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run active-task", ctx);
+
+		const review = JSON.parse(fs.readFileSync(path.join(reviewRunDir, "review.json"), "utf8"));
+		assert.equal(factoryCalls, 0);
+		assert.equal(review.taskVersion, 2);
+		assert.match(notifications.at(-1)?.message ?? "", /not valid for version 3/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow run rejects accepted review whose task identity does not match", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async () => {
+		factoryCalls += 1;
+		throw new Error("factory should not run");
+	});
+	try {
+		const cwd = makeTempTaskProject("active-task");
+		const taskDir = path.join(cwd, ".flow", "tasks", "active-task");
+		fs.writeFileSync(
+			path.join(taskDir, "task.json"),
+			`${JSON.stringify(
+				{
+					id: "active-task",
+					status: "active",
+					version: 3,
+					latest_review_run: "run-001",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const reviewRunDir = path.join(taskDir, "runs", "run-001");
+		fs.mkdirSync(reviewRunDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(reviewRunDir, "review.json"),
+			`${JSON.stringify(
+				{
+					taskId: "other-task",
+					runId: "run-001",
+					status: "accepted",
+					userConfirmed: true,
+					taskDesignUpdated: true,
+					taskDesignDecision: "updated",
+					taskVersion: 3,
+					acceptedAt: "2026-06-18T02:00:00.000Z",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const { pi, commands } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run active-task", ctx);
+
+		assert.equal(factoryCalls, 0);
+		assert.match(notifications.at(-1)?.message ?? "", /not valid for version 3/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("PASS run completion opens an interruptive review gate", async () => {
+	let releaseStart!: () => void;
+	const startCompleted = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		async start() {
+			await startCompleted;
+			writePassingRunOutput(options.runDir, "run ok");
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "run ok";
+		},
+		getWidgetLines() {
+			return ["run ok"];
+		},
+		dispose() {},
+	}));
+	try {
+		const cwd = makeTempTaskProject("verified-task");
+		const taskDir = path.join(cwd, ".flow", "tasks", "verified-task");
+		fs.writeFileSync(
+			path.join(taskDir, "task.json"),
+			`${JSON.stringify(
+				{
+					id: "verified-task",
+					status: "verified",
+					version: 2,
+					latest_review_run: "run-001",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const reviewRunDir = path.join(taskDir, "runs", "run-001");
+		fs.mkdirSync(reviewRunDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(reviewRunDir, "review.json"),
+			`${JSON.stringify(
+				{
+					taskId: "verified-task",
+					runId: "run-001",
+					status: "accepted",
+					userConfirmed: true,
+					taskDesignUpdated: true,
+					taskVersion: 2,
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, selections } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run verified-task", ctx);
+		releaseStart();
+		await sleep(10);
+
+		assert.ok(selections.some((selection) =>
+			selection.title === "Flow next step" &&
+			selection.options.includes("Continue: review verified-task/run-002") &&
+			selection.options.includes("Stop here")
+		));
+		assert.match(sentMessages.at(-1)?.message.content ?? "", /\[FLOW TASK REVIEW\]/);
+		assert.match(sentMessages.at(-1)?.message.content ?? "", /Run ID: run-002/);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -612,7 +957,7 @@ test("/flow task prove missing task is blocked before creating a driver run", as
 	}
 });
 
-test("/flow task prove missing required task files is blocked before creating a driver run", async () => {
+test("/flow task prove repairs missing required task files before creating a driver run", async () => {
 	let factoryCalls = 0;
 	setFlowDriverSessionFactoryForTests(async () => {
 		factoryCalls += 1;
@@ -628,10 +973,12 @@ test("/flow task prove missing required task files is blocked before creating a 
 		await commands.get("flow").handler("task prove incomplete-task", ctx);
 
 		assert.equal(factoryCalls, 0);
-		assert.equal(sentMessages.length, 0);
+		assert.equal(sentMessages.length, 1);
+		assert.match(sentMessages[0].message.content ?? "", /\[FLOW TASK CONTRACT REPAIR\]/);
+		assert.match(sentMessages[0].message.content ?? "", /validator\.md/);
 		assert.equal(fs.existsSync(path.join(cwd, ".flow", "tasks", "incomplete-task", "runs")), false);
-		assert.equal(notifications.at(-1)?.type, "error");
-		assert.match(notifications.at(-1)?.message ?? "", /validator\.md/);
+		assert.equal(notifications.at(-1)?.type, "warning");
+		assert.match(notifications.at(-1)?.message ?? "", /task contract failed/i);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -748,7 +1095,7 @@ test("driver start failure disposes and removes the live driver", async () => {
 	}
 });
 
-test("driver terminal completion keeps the driver accessible until review", async () => {
+test("driver terminal completion keeps the driver retained and advances to review through the gate", async () => {
 	let disposed = false;
 	let releaseStart!: () => void;
 	const startCompleted = new Promise<void>((resolve) => {
@@ -792,14 +1139,13 @@ test("driver terminal completion keeps the driver accessible until review", asyn
 		assert.equal(runStatus?.status, "done");
 		assert.equal(runStatus?.step, "validated");
 		assert.equal(runStatus?.summary, "PASS: PASS");
-		assert.equal(JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "x", "task.json"), "utf8")).status, "proved");
+		assert.equal(JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "x", "task.json"), "utf8")).status, "reviewing");
 		assert.equal(fs.existsSync(path.join(runDir, "validation.json")), true);
-		assert.equal(status.get("flow-driver"), "driver:run-001");
-		assert.deepEqual(widgets.get("flow-driver-view"), ["PASS"]);
-		assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "x", runId: "run-001" });
+		assert.equal(status.get("flow-driver"), undefined);
+		assert.match((widgets.get("flow-driver-view") as string[]).join("\n"), /Flow Activity/);
+		assert.deepEqual(entries.at(-1)?.data, { focus: "main" });
 		assert.equal(notifications.at(-1)?.type, "info");
-		assert.match(notifications.at(-1)?.message ?? "", /Flow driver completed: x\/run-001/);
-		assert.match(notifications.at(-1)?.message ?? "", /driver completed/);
+		assert.match(notifications.at(-1)?.message ?? "", /复盘 Run x\/run-001|复盘 Run run-001/);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -838,19 +1184,25 @@ test("main view shows running driver activity and completed driver result", asyn
 		await commands.get("flow").handler("task prove x", ctx);
 
 		assert.deepEqual(widgets.get("flow-driver-view"), [
-			"Flow driver activity",
-			"- x/run-001 running starting",
-			"  waiting for driver result...",
+			"╭─ Flow Activity ─────────────────────────────",
+			"│ ● x/run-001",
+			"│   status: running / starting",
+			"│   task: proving",
+			"│   next: waiting for x/run-001",
+			"╰─────────────────────────────────────────────",
 		]);
 
 		releaseStart();
 		await sleep(10);
 
 		assert.deepEqual(widgets.get("flow-driver-view"), [
-			"Flow driver activity",
-			"- x/run-001 done validated",
-			"  result: PASS - 最终结果：找到 3 条 medtrum 相关帖子",
-			"  next: /flow task review x/run-001",
+			"╭─ Flow Activity ─────────────────────────────",
+			"│ ✓ x/run-001",
+			"│   status: done / validated",
+			"│   result: PASS - 最终结果：找到 3 条 medtrum 相关帖子",
+			"│   task: proved",
+			"│   next: /flow task review x/run-001",
+			"╰─────────────────────────────────────────────",
 		]);
 		const switcher = sessionSwitcherCalls.at(-1);
 		assert.deepEqual(
@@ -865,8 +1217,9 @@ test("main view shows running driver activity and completed driver result", asyn
 	}
 });
 
-test("driver completion queues a main-agent validation handoff", async () => {
+test("unrepaired driver output contract failure does not queue a user validation handoff", async () => {
 	let releaseStart!: () => void;
+	let repairPrompt = "";
 	const startCompleted = new Promise<void>((resolve) => {
 		releaseStart = resolve;
 	});
@@ -880,7 +1233,9 @@ test("driver completion queues a main-agent validation handoff", async () => {
 			fs.writeFileSync(path.join(options.runDir, "output", "result.json"), '{"ok":true}\n');
 			await startCompleted;
 		},
-		async sendUserInput() {},
+		async sendUserInput(text) {
+			repairPrompt = text;
+		},
 		getTranscriptText() {
 			return "✅ Run-001 完成\n结果: PASS";
 		},
@@ -891,23 +1246,153 @@ test("driver completion queues a main-agent validation handoff", async () => {
 	}));
 	try {
 		const { pi, commands, sentMessages } = makePi();
-		const { ctx } = makeCtx(makeTempTaskProject("x"));
+		const { ctx, notifications } = makeCtx(makeTempTaskProject("x"));
 		registerFlow(pi as any);
 
 		await commands.get("flow").handler("task prove x", ctx);
 		releaseStart();
 		await sleep(10);
 
-		const handoff = sentMessages.at(-1);
-		assert.equal(handoff?.options?.triggerTurn, true);
-		assert.equal(handoff?.message.customType, "flow-task-context");
-		assert.equal(handoff?.message.display, false);
-		assert.match(handoff?.message.content ?? "", /\[FLOW DRIVER COMPLETION\]/);
-		assert.match(handoff?.message.content ?? "", /Task ID: x/);
-		assert.match(handoff?.message.content ?? "", /Run ID: run-001/);
-		assert.match(handoff?.message.content ?? "", /output\/result\.json/);
-		assert.match(handoff?.message.content ?? "", /验收/);
-		assert.match(handoff?.message.content ?? "", /\/flow task review x\/run-001/);
+		assert.match(repairPrompt, /\[FLOW DRIVER CONTRACT REPAIR\]/);
+		assert.equal(sentMessages.some((message) => /\[FLOW DRIVER COMPLETION\]/.test(message.message.content ?? "")), false);
+		assert.match(notifications.at(-1)?.message ?? "", /contract failed/i);
+		assert.equal(notifications.at(-1)?.type, "error");
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("driver output contract failure is repaired by the driver before user review", async () => {
+	let releaseStart!: () => void;
+	let repairPrompt = "";
+	const startCompleted = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		async start() {
+			await startCompleted;
+			fs.mkdirSync(path.join(options.runDir, "output"), { recursive: true });
+			fs.writeFileSync(path.join(options.runDir, "output", "report.md"), "# Report\n\nPASS\n");
+		},
+		async sendUserInput(text) {
+			repairPrompt = text;
+			writePassingRunOutput(options.runDir, "repaired ok");
+		},
+		getTranscriptText() {
+			return "driver claimed PASS without result.json";
+		},
+		getWidgetLines() {
+			return ["driver widget fallback"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, selections } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		releaseStart();
+		await sleep(10);
+
+		assert.match(repairPrompt, /\[FLOW DRIVER CONTRACT REPAIR\]/);
+		assert.match(repairPrompt, /missing output\/result\.json/);
+		assert.ok(selections.some((selection) =>
+			selection.title === "Flow next step" &&
+			selection.options.includes("Continue: review x/run-001")
+		));
+		assert.equal(sentMessages.some((message) => /\[FLOW DRIVER COMPLETION\]/.test(message.message.content ?? "")), false);
+		assert.match(sentMessages.at(-1)?.message.content ?? "", /\[FLOW TASK REVIEW\]/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("PASS prove completion opens an interruptive review gate", async () => {
+	let releaseStart!: () => void;
+	const startCompleted = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		async start() {
+			await startCompleted;
+			writePassingRunOutput(options.runDir, "ok");
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "ok";
+		},
+		getWidgetLines() {
+			return ["ok"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, selections } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		releaseStart();
+		await sleep(10);
+
+		assert.ok(selections.some((selection) =>
+			selection.title === "Flow next step" &&
+			selection.options.includes("Continue: review x/run-001") &&
+			selection.options.includes("Stop here")
+		));
+		assert.match(sentMessages.at(-1)?.message.content ?? "", /\[FLOW TASK REVIEW\]/);
+		assert.match(sentMessages.at(-1)?.message.content ?? "", /Run ID: run-001/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("PASS prove completion stop-here does not queue a hidden validation handoff", async () => {
+	let releaseStart!: () => void;
+	const startCompleted = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		async start() {
+			await startCompleted;
+			writePassingRunOutput(options.runDir, "ok");
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "ok";
+		},
+		getWidgetLines() {
+			return ["ok"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands, sentMessages } = makePi();
+		const harness = makeCtx(makeTempTaskProject("x"));
+		const { ctx, selections } = harness;
+		ctx.ui.select = (title: string, options: string[]) => {
+			selections.push({ title, options });
+			return "Stop here";
+		};
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		releaseStart();
+		await sleep(10);
+
+		assert.ok(selections.some((selection) => selection.options.includes("Stop here")));
+		assert.equal(sentMessages.some((message) => /\[FLOW DRIVER COMPLETION\]/.test(message.message.content ?? "")), false);
+		assert.equal(sentMessages.length, 0);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -1025,6 +1510,7 @@ test("/flow task review opens a completed focused driver run and marks task revi
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
 	});
+	writePassingValidation(runDir, "task-a", "run-001", "ok");
 	fs.writeFileSync(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
 	const { pi, commands, sentMessages, entries } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
@@ -1041,6 +1527,28 @@ test("/flow task review opens a completed focused driver run and marks task revi
 	assert.equal(JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8")).status, "reviewing");
 	assert.equal(notifications.at(-1)?.type, "info");
 	assert.match(notifications.at(-1)?.message ?? "", /复盘 Run run-001/);
+});
+
+test("/flow task review blocks runs without PASS runtime validation", async () => {
+	const cwd = makeTempTaskProject("task-a");
+	const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
+	writeDriverStatus(runDir, {
+		taskId: "task-a",
+		runId: "run-001",
+		status: "done",
+		step: "validated",
+		summary: "FAIL: missing output/result.json",
+		updatedAt: "2026-06-18T01:00:00.000Z",
+	});
+	const { pi, commands, sentMessages } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("task review run-001", ctx);
+
+	assert.equal(sentMessages.length, 0);
+	assert.equal(fs.existsSync(path.join(runDir, "review.json")), false);
+	assert.match(notifications.at(-1)?.message ?? "", /validation is not PASS/i);
 });
 
 test("/flow task accept requires a started review", async () => {
@@ -1103,12 +1611,11 @@ test("/flow task accept marks a reviewed PASS prove as verified and unblocks run
 		writePassingRunOutput(runDir, "ok");
 		writePassingValidation(runDir, "task-a", "run-001", "ok");
 		const { pi, commands, sentMessages } = makePi();
-		const { ctx, notifications } = makeCtx(cwd);
+		const { ctx, notifications, selections } = makeCtx(cwd);
 		registerFlow(pi as any);
 
 		await commands.get("flow").handler("task review run-001", ctx);
 		await commands.get("flow").handler("task accept run-001", ctx);
-		await commands.get("flow").handler("run task-a", ctx);
 
 		const task = JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8"));
 		const review = JSON.parse(fs.readFileSync(path.join(runDir, "review.json"), "utf8"));
@@ -1118,6 +1625,7 @@ test("/flow task accept marks a reviewed PASS prove as verified and unblocks run
 		assert.equal(review.userConfirmed, true);
 		assert.equal(review.taskDesignUpdated, false);
 		assert.equal(review.taskDesignDecision, "no-change");
+		assert.ok(selections.some((selection) => selection.options.includes("Continue: run task-a")));
 		assert.equal(factoryCalls, 1);
 		assert.match(notifications.at(-1)?.message ?? "", /Flow driver running/);
 		assert.equal(sentMessages.length, 1);
@@ -1126,7 +1634,7 @@ test("/flow task accept marks a reviewed PASS prove as verified and unblocks run
 	}
 });
 
-test("/flow task reject marks task needs-human", async () => {
+test("/flow task reject requires a started PASS review", async () => {
 	const cwd = makeTempTaskProject("task-a");
 	const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
 	writeDriverStatus(runDir, {
@@ -1138,11 +1646,48 @@ test("/flow task reject marks task needs-human", async () => {
 		updatedAt: "2026-06-18T01:00:00.000Z",
 	});
 	writePassingValidation(runDir, "task-a", "run-001", "ok");
-	const validationPath = path.join(runDir, "validation.json");
-	const validation = JSON.parse(fs.readFileSync(validationPath, "utf8"));
-	validation.result = "NEEDS-HUMAN";
-	validation.summary = "missing output/result.json";
-	fs.writeFileSync(validationPath, `${JSON.stringify(validation, null, "\t")}\n`);
+	const { pi, commands } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler('task reject run-001 "证据不足"', ctx);
+
+	const task = JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8"));
+	assert.equal(fs.existsSync(path.join(runDir, "review.json")), false);
+	assert.notEqual(task.status, "needs-human");
+	assert.equal(notifications.at(-1)?.type, "warning");
+	assert.match(notifications.at(-1)?.message ?? "", /review has not started/i);
+});
+
+test("/flow task reject blocks started review when validation is not PASS", async () => {
+	const cwd = makeTempTaskProject("task-a");
+	const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
+	writeDriverStatus(runDir, {
+		taskId: "task-a",
+		runId: "run-001",
+		status: "done",
+		step: "validated",
+		summary: "FAIL: missing output/result.json",
+		updatedAt: "2026-06-18T01:00:00.000Z",
+	});
+	fs.mkdirSync(runDir, { recursive: true });
+	fs.writeFileSync(
+		path.join(runDir, "review.json"),
+		`${JSON.stringify(
+			{
+				taskId: "task-a",
+				runId: "run-001",
+				status: "in-review",
+				userConfirmed: false,
+				taskDesignUpdated: false,
+				startedAt: "2026-06-18T01:00:00.000Z",
+				decisions: [],
+				updatedFiles: [],
+			},
+			null,
+			"\t",
+		)}\n`,
+	);
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
 	registerFlow(pi as any);
@@ -1151,8 +1696,35 @@ test("/flow task reject marks task needs-human", async () => {
 
 	const task = JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8"));
 	const review = JSON.parse(fs.readFileSync(path.join(runDir, "review.json"), "utf8"));
+	assert.notEqual(task.status, "needs-human");
+	assert.equal(review.status, "in-review");
+	assert.equal(notifications.at(-1)?.type, "warning");
+	assert.match(notifications.at(-1)?.message ?? "", /validation is not PASS/i);
+});
+
+test("/flow task reject marks task needs-human after started PASS review", async () => {
+	const cwd = makeTempTaskProject("task-a");
+	const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
+	writeDriverStatus(runDir, {
+		taskId: "task-a",
+		runId: "run-001",
+		status: "done",
+		step: "validated",
+		summary: "PASS: ok",
+		updatedAt: "2026-06-18T01:00:00.000Z",
+	});
+	writePassingValidation(runDir, "task-a", "run-001", "ok");
+	const { pi, commands } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("task review run-001", ctx);
+	await commands.get("flow").handler('task reject run-001 "证据不足"', ctx);
+
+	const task = JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8"));
+	const review = JSON.parse(fs.readFileSync(path.join(runDir, "review.json"), "utf8"));
 	assert.equal(task.status, "needs-human");
-	assert.equal(task.latest_validation, "NEEDS-HUMAN");
+	assert.equal(task.latest_validation, "PASS");
 	assert.equal(review.status, "needs-changes");
 	assert.equal(review.decisions[0], "证据不足");
 	assert.equal(notifications.at(-1)?.type, "warning");

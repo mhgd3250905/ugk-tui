@@ -183,13 +183,18 @@ export function readFlowReview(runDir: string): FlowReviewRecord | undefined {
 	}
 }
 
-export function isFlowReviewAccepted(review: FlowReviewRecord | undefined, taskVersion: number): boolean {
+export function isFlowReviewAccepted(
+	review: FlowReviewRecord | undefined,
+	taskVersion: number,
+	expected?: { taskId: string; runId: string },
+): boolean {
 	const hasSettledTaskDesign =
 		review?.taskDesignUpdated === true ||
 		review?.taskDesignDecision === "updated" ||
 		review?.taskDesignDecision === "no-change";
 	return Boolean(
 		review &&
+			(!expected || (review.taskId === expected.taskId && review.runId === expected.runId)) &&
 			review.status === "accepted" &&
 			review.userConfirmed &&
 			hasSettledTaskDesign &&

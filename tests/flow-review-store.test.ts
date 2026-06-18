@@ -61,6 +61,9 @@ test("readFlowReview reads accepted review and acceptance predicate validates re
 	assert.equal(review?.status, "accepted");
 	assert.equal(isFlowReviewAccepted(review, 2), true);
 	assert.equal(isFlowReviewAccepted(review, 3), false);
+	assert.equal(isFlowReviewAccepted(review, 2, { taskId: "demo-task", runId: "run-001" }), true);
+	assert.equal(isFlowReviewAccepted(review, 2, { taskId: "other-task", runId: "run-001" }), false);
+	assert.equal(isFlowReviewAccepted(review, 2, { taskId: "demo-task", runId: "run-002" }), false);
 });
 
 test("incomplete review is not accepted", () => {

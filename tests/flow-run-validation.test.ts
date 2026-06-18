@@ -71,11 +71,11 @@ test("validateFlowRun fails when output violates schema or evidence is missing",
 	assert.ok(validation.issues.some((issue) => issue.includes("pathUsed")));
 });
 
-test("validateFlowRun returns NEEDS-HUMAN when result output is missing", () => {
+test("validateFlowRun returns FAIL when result output is missing", () => {
 	const { taskDir, runDir } = makeRun();
 
 	const validation = validateFlowRun({ taskId: "demo-task", runId: "run-001", taskDir, runDir, phase: "prove" });
 
-	assert.equal(validation.result, "NEEDS-HUMAN");
+	assert.equal(validation.result, "FAIL");
 	assert.ok(validation.issues.some((issue) => issue.includes("output/result.json")));
 });

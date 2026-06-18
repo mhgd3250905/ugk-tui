@@ -1,9 +1,16 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { clearFlowDriverBanner, setFlowDriverBanner } from "./driver-banner.ts";
+import {
+	buildFlowConsoleOptions,
+	buildFlowStageGateOptions,
+	parseFlowConsoleSelection,
+	parseFlowStageGateSelection,
+	type FlowStageGate,
+} from "./flow-console.ts";
 import {
 	attachFlowDriver,
 	detachFlowDriver,
@@ -24,14 +31,17 @@ import {
 import { formatFlowQueued } from "./formatter.ts";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId, parseFlowCommand } from "./parser.ts";
 import {
-	buildFlowDriverCompletionPrompt,
+	buildFlowDriverContractRepairPrompt,
 	buildFlowHelpText,
 	buildFlowRequestPrompt,
+	buildFlowTaskContractRepairPrompt,
 	buildFlowTaskReviewPrompt,
 } from "./prompts.ts";
 import { acceptFlowReview, isFlowReviewAccepted, readFlowReview, rejectFlowReview, startFlowReview } from "./review-store.ts";
 import { readFlowRunValidation, validateFlowRun } from "./run-validation.ts";
-import { updateFlowTaskStatus } from "./task-store.ts";
+import { validateFlowTaskAssets } from "./task-validation.ts";
+import { readFlowTask, updateFlowTaskStatus } from "./task-store.ts";
+import { formatFlowActivityCard, type FlowActivityViewModel } from "./status-presenter.ts";
 import type { FlowDriverStatus, FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
 
 const FLOW_CONTEXT_TYPE = "flow-task-context";
@@ -46,9 +56,7 @@ const FLOW_PROMPT_PREFIXES = [
 	"[FLOW DRIVER ATTACH]",
 	"[FLOW DRIVER DETACH]",
 	"[FLOW DRIVER STATUS]",
-	"[FLOW DRIVER COMPLETION]",
 ];
-const REQUIRED_TASK_FILES = ["task.json", "SKILL.md", "todo.template.md", "validator.md"];
 const TRANSIENT_DRIVER_STATUSES: FlowDriverStatus[] = [
 	"starting",
 	"running",
@@ -168,11 +176,11 @@ function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId: strin
 	}
 
 	if (kind === "prove") {
-		const missingFiles = REQUIRED_TASK_FILES.filter((file) => !existsSync(path.join(task.taskDir, file)));
-		if (missingFiles.length > 0) {
+		const assetValidation = validateFlowTaskAssets(cwd, taskId);
+		if (!assetValidation.ok) {
 			return {
 				ok: false,
-				message: `Flow task ${taskId} is incomplete. Missing required file(s): ${missingFiles.join(", ")}`,
+				message: `Flow task ${taskId} is incomplete. Runtime gate failed: ${assetValidation.issues.join(", ")}`,
 				type: "error",
 			};
 		}
@@ -194,8 +202,24 @@ function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId: strin
 		};
 	}
 	const reviewRunDir = path.join(task.taskDir, "runs", task.latestReviewRun);
-	const review = readFlowReview(reviewRunDir);
-	if (!isFlowReviewAccepted(review, task.version)) {
+	let review = readFlowReview(reviewRunDir);
+	const expectedReview = { taskId, runId: task.latestReviewRun };
+	if (
+		!isFlowReviewAccepted(review, task.version, expectedReview) &&
+		review?.status === "accepted" &&
+		review.userConfirmed &&
+		review.taskId === taskId &&
+		review.runId === task.latestReviewRun &&
+		review.taskVersion === undefined
+	) {
+		review = acceptFlowReview({
+			taskId,
+			runId: task.latestReviewRun,
+			runDir: reviewRunDir,
+			taskVersion: task.version,
+		});
+	}
+	if (!isFlowReviewAccepted(review, task.version, expectedReview)) {
 		return {
 			ok: false,
 			message: `Flow task ${taskId} is ${task.status} but accepted review ${task.latestReviewRun} is missing or not valid for version ${task.version}.`,
@@ -220,6 +244,8 @@ export function registerFlow(pi: ExtensionAPI): void {
 	const liveDrivers = new Map<string, FlowDriverSession>();
 	const retainedDrivers = new Map<string, FlowDriverSession>();
 	let activeSessionViewDriverKey: string | undefined;
+	let pendingCreateTaskIds: Set<string> | undefined;
+	let pendingTaskAssetRepair: { taskId: string; attempts: number } | undefined;
 
 	function persistFocus(state: FlowFocusState): void {
 		pi.appendEntry(FLOW_FOCUS_ENTRY_TYPE, state);
@@ -227,6 +253,66 @@ export function registerFlow(pi: ExtensionAPI): void {
 
 	function getCwd(ctx: ExtensionContext): string {
 		return typeof ctx.cwd === "string" ? ctx.cwd : process.cwd();
+	}
+
+	function listConsoleTasks(cwd: string): Array<{ id: string; status?: string }> {
+		const tasksDir = path.join(cwd, ".flow", "tasks");
+		if (!existsSync(tasksDir)) {
+			return [];
+		}
+		return readdirSync(tasksDir, { withFileTypes: true })
+			.filter((entry) => entry.isDirectory())
+			.map((entry) => readFlowTask(cwd, entry.name))
+			.filter((task): task is NonNullable<ReturnType<typeof readFlowTask>> => task !== undefined)
+			.map((task) => ({ id: task.id, status: task.status }))
+			.sort((a, b) => a.id.localeCompare(b.id));
+	}
+
+	async function resolveConsoleCommand(args: string, ctx: ExtensionContext): Promise<string | undefined> {
+		if (args.trim()) {
+			return args;
+		}
+		const cwd = getCwd(ctx);
+		const options = buildFlowConsoleOptions({
+			tasks: listConsoleTasks(cwd),
+			drivers: listDriverSummaries(cwd),
+		});
+		const selection = await ctx.ui.select("Flow", options.map((option) => option.label));
+		const option = parseFlowConsoleSelection(selection);
+		if (!option?.command) {
+			return undefined;
+		}
+		if (option.command === "task create") {
+			const goal = await ctx.ui.input("Create Flow task", "Describe the goal");
+			return goal?.trim() ? `task create ${JSON.stringify(goal.trim())}` : undefined;
+		}
+		return option.command;
+	}
+
+	async function runStageGate(ctx: ExtensionContext, gate: FlowStageGate): Promise<boolean> {
+		const options = buildFlowStageGateOptions(gate);
+		const selection = await ctx.ui.select("Flow next step", options.map((option) => option.label));
+		const selected = parseFlowStageGateSelection(selection, gate);
+		if (!selected?.command) {
+			return false;
+		}
+		const request = parseFlowCommand(selected.command);
+		if (!isActionableFlowRequest(request)) {
+			return false;
+		}
+		if (request.kind === "task-review") {
+			startCompletedFlowReview(ctx, request.runId);
+			return true;
+		}
+		if (request.kind === "task-run") {
+			await startDriverForTask("run", request.taskId, request.input, ctx);
+			return true;
+		}
+		if (request.kind === "task-prove") {
+			await startDriverForTask("prove", request.taskId, request.input, ctx);
+			return true;
+		}
+		return false;
 	}
 
 	function queueFlowContextPrompt(prompt: string): void {
@@ -240,6 +326,13 @@ export function registerFlow(pi: ExtensionAPI): void {
 			},
 			{ triggerTurn: true },
 		);
+	}
+
+	function queueTaskAssetRepair(ctx: ExtensionContext, taskId: string, issues: string[]): void {
+		const attempts = pendingTaskAssetRepair?.taskId === taskId ? pendingTaskAssetRepair.attempts + 1 : 1;
+		pendingTaskAssetRepair = { taskId, attempts };
+		queueFlowContextPrompt(buildFlowTaskContractRepairPrompt({ taskId, issues }));
+		ctx.ui.notify(`Flow task contract failed for ${taskId}; asking main agent to repair task assets.`, "warning");
 	}
 
 	function detachVisibleSessionView(ctx: ExtensionContext): void {
@@ -272,45 +365,55 @@ export function registerFlow(pi: ExtensionAPI): void {
 			.slice(-maxLines);
 	}
 
-	function buildDriverActivityLines(): string[] | undefined {
+	function buildDriverActivityLines(cwd: string): string[] | undefined {
 		const drivers = getViewableDrivers();
 		if (drivers.length === 0) {
 			return undefined;
 		}
 
-		const lines = ["Flow driver activity"];
+		const items: FlowActivityViewModel[] = [];
 		for (const driver of drivers) {
-			const driverKey = getDriverKey(driver.taskId, driver.runId);
 			const status = readDriverStatus(driver.runDir);
 			const validation = readFlowRunValidation(driver.runDir);
-			const statusText = [status?.status ?? "running", status?.step].filter(Boolean).join(" ");
-			lines.push(`- ${driverKey} ${statusText}`);
+			const review = readFlowReview(driver.runDir);
+			const task = readFlowTask(cwd, driver.taskId);
+			const item: FlowActivityViewModel = {
+				taskId: driver.taskId,
+				runId: driver.runId,
+				status: status?.status ?? "running",
+				step: status?.step,
+				summary: status?.summary,
+				validation: validation
+					? {
+							result: validation.result,
+							summary: validation.summary,
+							nextStep: validation.nextStep,
+						}
+					: undefined,
+				review: review ? { status: review.status } : undefined,
+				task: task
+					? {
+							status: task.status,
+							nextStep: typeof task.next_step === "string" ? task.next_step : undefined,
+						}
+					: undefined,
+			};
 			if (status?.status === "done" || status?.status === "failed" || status?.status === "needs-human") {
-				if (validation) {
-					lines.push(`  result: ${validation.result} - ${validation.summary}`);
-					lines.push(`  next: ${validation.nextStep}`);
-					continue;
-				}
-				const preview = transcriptPreview(driver.getTranscriptText());
-				if (preview.length > 0) {
-					lines.push(`  result: ${preview[0]}`);
-					lines.push(...preview.slice(1).map((line) => `  ${line}`));
-				}
+				item.preview = validation ? undefined : transcriptPreview(driver.getTranscriptText());
+				items.push(item);
 				continue;
 			}
 			const preview = transcriptPreview(driver.getTranscriptText());
 			if (preview.length > 0) {
-				lines.push(`  latest: ${preview[0]}`);
-				lines.push(...preview.slice(1).map((line) => `  ${line}`));
-				continue;
+				item.preview = preview;
 			}
-			lines.push("  waiting for driver result...");
+			items.push(item);
 		}
-		return lines;
+		return formatFlowActivityCard(items);
 	}
 
 	function renderMainDriverActivity(ctx: ExtensionContext): void {
-		ctx.ui.setWidget?.("flow-driver-view", buildDriverActivityLines(), { placement: "aboveEditor" });
+		ctx.ui.setWidget?.("flow-driver-view", buildDriverActivityLines(getCwd(ctx)), { placement: "aboveEditor" });
 	}
 
 	function clearFocusedDriver(ctx: ExtensionContext, options?: { skipSessionViewDetach?: boolean }): void {
@@ -471,6 +574,18 @@ export function registerFlow(pi: ExtensionAPI): void {
 		ctx: ExtensionContext,
 	): Promise<void> {
 		const cwd = getCwd(ctx);
+		if (kind === "prove") {
+			const task = readTaskMetadata(cwd, taskId);
+			if (!task.ok) {
+				ctx.ui.notify(task.message, task.type);
+				return;
+			}
+			const assetValidation = validateFlowTaskAssets(cwd, taskId);
+			if (!assetValidation.ok) {
+				queueTaskAssetRepair(ctx, taskId, assetValidation.issues);
+				return;
+			}
+		}
 		const guard = validateTaskForDriver(kind, cwd, taskId);
 		if (!guard.ok) {
 			ctx.ui.notify(guard.message, guard.type);
@@ -556,7 +671,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 		updateSessionSwitcher(ctx);
 		void liveDriver
 			.start()
-			.then(() => {
+			.then(async () => {
 				writeDriverStatus(artifacts.runDir, {
 					taskId,
 					runId,
@@ -565,15 +680,57 @@ export function registerFlow(pi: ExtensionAPI): void {
 					summary: "validating driver output",
 					sessionFile: liveDriver.sessionFile,
 				});
-				const validation = validateFlowRun({
+				let attemptedContractRepair = false;
+				let validation = validateFlowRun({
 					taskId,
 					runId,
 					taskDir: artifacts.taskDir,
 					runDir: artifacts.runDir,
 					phase: kind,
 				});
+				if (validation.result !== "PASS") {
+					attemptedContractRepair = true;
+					writeDriverStatus(artifacts.runDir, {
+						taskId,
+						runId,
+						status: "running",
+						step: "repairing output contract",
+						summary: `${validation.result}: ${validation.summary}`,
+						sessionFile: liveDriver.sessionFile,
+					});
+					if (isCurrentFocusedDriver()) {
+						renderFocus(ctx, readDriverStatus(artifacts.runDir)!);
+					} else {
+						renderMainDriverActivity(ctx);
+					}
+					ctx.ui.notify(`Flow runtime gate failed for ${driverKey}; asking driver to repair output contract.\n${validation.summary}`, "warning");
+					await liveDriver.sendUserInput(
+						buildFlowDriverContractRepairPrompt({
+							kind,
+							taskId,
+							runId,
+							issues: validation.issues,
+							summary: validation.summary,
+						}),
+					);
+					writeDriverStatus(artifacts.runDir, {
+						taskId,
+						runId,
+						status: "validating",
+						step: "validating repaired output",
+						summary: "validating repaired driver output",
+						sessionFile: liveDriver.sessionFile,
+					});
+					validation = validateFlowRun({
+						taskId,
+						runId,
+						taskDir: artifacts.taskDir,
+						runDir: artifacts.runDir,
+						phase: kind,
+					});
+				}
 				const terminalStatus: FlowDriverStatus =
-					validation.result === "PASS" ? "done" : validation.result === "NEEDS-HUMAN" ? "needs-human" : "failed";
+					validation.result === "PASS" ? "done" : "failed";
 				writeDriverStatus(artifacts.runDir, {
 					taskId,
 					runId,
@@ -584,11 +741,11 @@ export function registerFlow(pi: ExtensionAPI): void {
 				});
 				const status = readDriverStatus(artifacts.runDir)!;
 				if (kind === "prove") {
-					updateFlowTaskStatus(cwd, taskId, validation.result === "PASS" ? "proved" : "needs-human", {
+					updateFlowTaskStatus(cwd, taskId, validation.result === "PASS" ? "proved" : "draft", {
 						proven_at: validation.result === "PASS" ? validation.createdAt : undefined,
 						latest_prove_run: runId,
 						latest_validation: validation.result,
-						next_step: validation.result === "PASS" ? validation.nextStep : `fix ${taskId}/${runId} and run /flow task prove ${taskId}`,
+						next_step: validation.result === "PASS" ? validation.nextStep : `/flow task prove ${taskId}`,
 					});
 				}
 
@@ -600,19 +757,24 @@ export function registerFlow(pi: ExtensionAPI): void {
 					renderMainDriverActivity(ctx);
 				}
 				updateSessionSwitcher(ctx);
+				if (validation.result !== "PASS" && attemptedContractRepair) {
+					ctx.ui.notify(
+						`Flow driver contract failed after automatic repair: ${driverKey}\n${validation.summary}`,
+						"error",
+					);
+					return;
+				}
 				const summary = status.summary ? `\n${status.summary}` : "";
 				const type = status.status === "failed" ? "error" : status.status === "needs-human" ? "warning" : "info";
 				ctx.ui.notify(`Flow driver completed: ${driverKey}\nStatus: ${status.status}${summary}`, type);
-				queueFlowContextPrompt(
-					buildFlowDriverCompletionPrompt({
-						kind,
+				if ((kind === "prove" || kind === "run") && validation.result === "PASS") {
+					await runStageGate(ctx, {
+						phase: kind === "prove" ? "prove-pass" : "run-pass",
 						taskId,
 						runId,
-						status: status.status,
-						summary: status.summary,
-						transcriptText: liveDriver.getTranscriptText(),
-					}),
-				);
+					});
+					return;
+				}
 			})
 			.catch((error) => {
 				const summary = errorMessage(error);
@@ -687,7 +849,39 @@ export function registerFlow(pi: ExtensionAPI): void {
 		return driver;
 	}
 
-	function acceptCompletedFlowReview(ctx: ExtensionContext, runId: string): void {
+	function startCompletedFlowReview(ctx: ExtensionContext, runId: string): void {
+		const driver = findDriverForReview(ctx, runId);
+		if (!driver) {
+			return;
+		}
+		const driverKey = getDriverKey(driver.taskId, driver.runId);
+		const liveDriver = liveDrivers.get(driverKey);
+		if (liveDriver || isTransientDriverStatus(driver.status)) {
+			ctx.ui.notify("Flow task review cannot start while the Flow driver is still running.", "warning");
+			return;
+		}
+		const validation = readFlowRunValidation(driver.runDir);
+		if (!validation || validation.result !== "PASS") {
+			ctx.ui.notify(`Flow task review cannot start because validation is not PASS: ${driver.taskId}/${driver.runId}`, "warning");
+			return;
+		}
+		if (focusState.focus === "driver") {
+			clearFocusedDriver(ctx);
+		}
+		startFlowReview({
+			taskId: driver.taskId,
+			runId: driver.runId,
+			runDir: driver.runDir,
+		});
+		updateFlowTaskStatus(getCwd(ctx), driver.taskId, "reviewing", {
+			latest_review_run: driver.runId,
+			next_step: `main reviewing ${driverKey}`,
+		});
+		queueFlowContextPrompt(buildFlowTaskReviewPrompt({ taskId: driver.taskId, runId: driver.runId }));
+		ctx.ui.notify(formatFlowQueued({ kind: "task-review", runId }), "info");
+	}
+
+	async function acceptCompletedFlowReview(ctx: ExtensionContext, runId: string): Promise<void> {
 		const driver = ensureCompletedDriverForReview(ctx, runId);
 		if (!driver) {
 			return;
@@ -726,6 +920,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 		}
 		updateSessionSwitcher(ctx);
 		ctx.ui.notify(`Flow review accepted: ${driver.taskId}/${driver.runId}\nTask status: verified\nNext: /flow run ${driver.taskId}`, "info");
+		await runStageGate(ctx, { phase: "review-accepted", taskId: driver.taskId, runId: driver.runId });
 	}
 
 	function rejectCompletedFlowReview(ctx: ExtensionContext, runId: string, reason?: string): void {
@@ -734,6 +929,15 @@ export function registerFlow(pi: ExtensionAPI): void {
 			return;
 		}
 		const validation = readFlowRunValidation(driver.runDir);
+		if (!validation || validation.result !== "PASS") {
+			ctx.ui.notify(`Flow review cannot be rejected because validation is not PASS: ${driver.taskId}/${driver.runId}`, "warning");
+			return;
+		}
+		const existingReview = readFlowReview(driver.runDir);
+		if (!existingReview) {
+			ctx.ui.notify(`Flow review has not started for ${driver.taskId}/${driver.runId}. Run /flow task review ${driver.taskId}/${driver.runId} first.`, "warning");
+			return;
+		}
 		const review = rejectFlowReview({
 			taskId: driver.taskId,
 			runId: driver.runId,
@@ -758,7 +962,11 @@ export function registerFlow(pi: ExtensionAPI): void {
 	pi.registerCommand("flow", {
 		description: "Queue Flow task workflow requests",
 		handler: async (args, ctx) => {
-			const request = parseFlowCommand(args);
+			const resolvedArgs = await resolveConsoleCommand(args, ctx);
+			if (resolvedArgs === undefined) {
+				return;
+			}
+			const request = parseFlowCommand(resolvedArgs);
 
 			if (request.kind === "help") {
 				ctx.ui.notify(buildFlowHelpText(), "info");
@@ -839,34 +1047,11 @@ export function registerFlow(pi: ExtensionAPI): void {
 				return;
 			}
 			if (request.kind === "task-review") {
-				const driver = findDriverForReview(ctx, request.runId);
-				if (!driver) {
-					return;
-				}
-				const driverKey = getDriverKey(driver.taskId, driver.runId);
-				const liveDriver = liveDrivers.get(driverKey);
-				if (liveDriver || isTransientDriverStatus(driver.status)) {
-					ctx.ui.notify("Flow task review cannot start while the Flow driver is still running.", "warning");
-					return;
-				}
-				if (focusState.focus === "driver") {
-					clearFocusedDriver(ctx);
-				}
-				startFlowReview({
-					taskId: driver.taskId,
-					runId: driver.runId,
-					runDir: driver.runDir,
-				});
-				updateFlowTaskStatus(getCwd(ctx), driver.taskId, "reviewing", {
-					latest_review_run: driver.runId,
-					next_step: `main reviewing ${driverKey}`,
-				});
-				queueFlowContextPrompt(buildFlowTaskReviewPrompt({ taskId: driver.taskId, runId: driver.runId }));
-				ctx.ui.notify(formatFlowQueued(request), "info");
+				startCompletedFlowReview(ctx, request.runId);
 				return;
 			}
 			if (request.kind === "task-accept") {
-				acceptCompletedFlowReview(ctx, request.runId);
+				await acceptCompletedFlowReview(ctx, request.runId);
 				return;
 			}
 			if (request.kind === "task-reject") {
@@ -874,9 +1059,51 @@ export function registerFlow(pi: ExtensionAPI): void {
 				return;
 			}
 
+			if (request.kind === "task-create") {
+				pendingCreateTaskIds = new Set(listConsoleTasks(getCwd(ctx)).map((task) => task.id));
+			}
 			queueFlowContextPrompt(buildFlowRequestPrompt(request));
 			ctx.ui.notify(formatFlowQueued(request), "info");
 		},
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		if (ctx && pendingTaskAssetRepair) {
+			const repair = pendingTaskAssetRepair;
+			const validation = validateFlowTaskAssets(getCwd(ctx), repair.taskId);
+			if (validation.ok) {
+				pendingTaskAssetRepair = undefined;
+				await runStageGate(ctx, { phase: "create", taskId: repair.taskId });
+				return;
+			}
+			if (repair.attempts >= 1) {
+				pendingTaskAssetRepair = undefined;
+				ctx.ui.notify(
+					`Flow task contract failed after automatic repair: ${repair.taskId}\n${validation.issues.join("\n")}`,
+					"error",
+				);
+				return;
+			}
+			queueTaskAssetRepair(ctx, repair.taskId, validation.issues);
+			return;
+		}
+		if (!ctx || !pendingCreateTaskIds) {
+			return;
+		}
+		const previousTaskIds = pendingCreateTaskIds;
+		pendingCreateTaskIds = undefined;
+		const createdTasks = listConsoleTasks(getCwd(ctx)).filter((task) =>
+			!previousTaskIds.has(task.id) && task.status === "draft"
+		);
+		if (createdTasks.length !== 1) {
+			return;
+		}
+		const validation = validateFlowTaskAssets(getCwd(ctx), createdTasks[0].id);
+		if (!validation.ok) {
+			queueTaskAssetRepair(ctx, createdTasks[0].id, validation.issues);
+			return;
+		}
+		await runStageGate(ctx, { phase: "create", taskId: createdTasks[0].id });
 	});
 
 	pi.on("context", async (event) => {

@@ -136,16 +136,16 @@ export function transition(cwd: string, taskId: string, event: FlowTaskEvent): T
 		return { ok: false, reason: `Illegal transition: ${from} ──${event.kind}──▶ (not allowed)` };
 	}
 
-	const fields = buildTransitionFields(event);
+	const fields = buildTransitionFields(taskId, event);
 	const updated = updateFlowTaskStatus(cwd, taskId, to, fields);
 	return { ok: true, state: to, task: updated };
 }
 
 /** 把事件携带的证据字段映射成 task.json 要落盘的字段。 */
-function buildTransitionFields(event: FlowTaskEvent): Record<string, unknown> {
+function buildTransitionFields(taskId: string, event: FlowTaskEvent): Record<string, unknown> {
 	switch (event.kind) {
 		case "prove-start":
-			return { latest_prove_run: event.runId, next_step: `waiting for ${event.runId}`, ready_origin: undefined };
+			return { latest_prove_run: event.runId, next_step: `waiting for ${taskId}/${event.runId}`, ready_origin: undefined };
 		case "prove-pass":
 			return {
 				proven_at: event.validatedAt,

@@ -50,6 +50,7 @@ import { isFlowReviewAccepted, readFlowReview } from "./review-store.ts";
 import { readFlowRunValidation, validateFlowRun } from "./run-validation.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
 import { deleteFlowTask, readFlowTask, updateFlowTaskStatus } from "./task-store.ts";
+import { transition } from "./task-state.ts";
 import { formatFlowActivityCard, type FlowActivityViewModel } from "./status-presenter.ts";
 import type { FlowDriverStatus, FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
 
@@ -529,10 +530,14 @@ export function registerFlow(pi: ExtensionAPI): void {
 		const runId = nextRunId(cwd, taskId);
 		const artifacts = createRunArtifacts(cwd, taskId, input, runId);
 		if (kind === "prove") {
-			updateFlowTaskStatus(cwd, taskId, "proving", {
-				latest_prove_run: runId,
-				next_step: `waiting for ${taskId}/${runId}`,
+			const proveStart = transition(cwd, taskId, {
+				kind: "prove-start",
+				runId,
 			});
+			if (!proveStart.ok) {
+				ctx.ui.notify(proveStart.reason, "error");
+				return;
+			}
 		}
 		const initialPrompt = buildDriverInitialPrompt(artifacts);
 		const createDriver = driverSessionFactoryForTests ?? createFlowDriverSession;
@@ -676,12 +681,13 @@ export function registerFlow(pi: ExtensionAPI): void {
 				});
 				const status = readDriverStatus(artifacts.runDir)!;
 				if (kind === "prove") {
-					updateFlowTaskStatus(cwd, taskId, validation.result === "PASS" ? "proved" : "draft", {
-						proven_at: validation.result === "PASS" ? validation.createdAt : undefined,
-						latest_prove_run: runId,
-						latest_validation: validation.result,
-						next_step: validation.result === "PASS" ? validation.nextStep : `/flow task prove ${taskId}`,
-					});
+					const event = validation.result === "PASS"
+						? { kind: "prove-pass" as const, runId, validatedAt: validation.createdAt, nextStep: validation.nextStep }
+						: { kind: "prove-fail" as const, runId, nextStep: `/flow task prove ${taskId}` };
+					const proveResult = transition(cwd, taskId, event);
+					if (!proveResult.ok) {
+						ctx.ui.notify(proveResult.reason, "error");
+					}
 				}
 
 				liveDrivers.delete(driverKey);

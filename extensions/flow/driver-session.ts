@@ -1,4 +1,5 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
@@ -42,6 +43,19 @@ export interface DriverSessionLike {
 }
 
 export type DriverSessionFactory = (options: FlowDriverSessionOptions) => Promise<{ session: DriverSessionLike }>;
+
+export function createFlowDriverResourceLoaderOptions(options: { cwd: string; agentDir: string }): {
+	cwd: string;
+	agentDir: string;
+	additionalExtensionPaths: string[];
+} {
+	const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+	return {
+		cwd: options.cwd,
+		agentDir: options.agentDir,
+		additionalExtensionPaths: [path.join(extensionRoot, "index.ts")],
+	};
+}
 
 export function assertExpectedDriverTools(session: DriverSessionLike, expectedToolNames: string[] = []): void {
 	if (expectedToolNames.length === 0) {
@@ -135,10 +149,10 @@ export async function defaultDriverSessionFactory(
 	options: FlowDriverSessionOptions,
 ): Promise<{ session: DriverSessionLike }> {
 	const agentDir = getAgentDir();
-	const resourceLoader = new DefaultResourceLoader({
+	const resourceLoader = new DefaultResourceLoader(createFlowDriverResourceLoaderOptions({
 		cwd: options.cwd,
 		agentDir,
-	});
+	}));
 	await resourceLoader.reload();
 
 	const { session } = await createAgentSession({

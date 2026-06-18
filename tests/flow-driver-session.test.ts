@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
 	createFlowDriverSession,
+	createFlowDriverResourceLoaderOptions,
 	type DriverSessionFactory,
 	type FlowDriverSessionOptions,
 } from "../extensions/flow/driver-session.ts";
@@ -68,6 +69,17 @@ test("driver session fails when an expected tool is missing from the driver envi
 		() => createFlowDriverSession({ ...createOptions(), expectedToolNames: ["chrome_cdp"] }, factory),
 		/Flow driver environment is missing expected tools: chrome_cdp/,
 	);
+});
+
+test("driver resource loader explicitly includes the bundled UGK extension", () => {
+	const options = createFlowDriverResourceLoaderOptions({
+		cwd: "E:/workspace",
+		agentDir: "C:/Users/demo/.pi/agent",
+	});
+
+	assert.equal(options.cwd, "E:/workspace");
+	assert.equal(options.agentDir, "C:/Users/demo/.pi/agent");
+	assert.ok(options.additionalExtensionPaths?.some((extensionPath) => extensionPath.endsWith("extensions\\index.ts") || extensionPath.endsWith("extensions/index.ts")));
 });
 
 test("driver session notifies when transcript receives text deltas", async () => {

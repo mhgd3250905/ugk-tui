@@ -67,7 +67,7 @@ function closeMigrationWindow(cwd: string): void {
 
 /** 派生项目签名密钥。 HKDF 轻量,但缓存一次避免重复派生。 */
 const projectKeyCache = new Map<string, Buffer>();
-function getProjectKey(cwd: string): Buffer {
+export function getProjectKey(cwd: string): Buffer {
 	const resolved = path.resolve(cwd);
 	let key = projectKeyCache.get(resolved);
 	if (!key) {

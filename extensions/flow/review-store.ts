@@ -1,6 +1,11 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { readJsonRecord } from "./flow-fs.ts";
+import { signRecord, verifyRecord } from "./flow-signing.ts";
+import { getProjectKey } from "./task-store.ts";
+
+/** review.json 签名覆盖的关键字段:防 agent 把 rejected 改 accepted,或伪造 acceptedAt。 */
+const REVIEW_SIGNED_FIELDS = ["taskId", "runId", "status", "taskVersion", "acceptedAt"];
 
 export type FlowReviewStatus = "in-review" | "accepted" | "rejected" | "needs-changes";
 export type FlowTaskDesignDecision = "updated" | "no-change";
@@ -20,6 +25,7 @@ export interface FlowReviewRecord {
 }
 
 interface StartFlowReviewArgs {
+	cwd: string;
 	taskId: string;
 	runId: string;
 	runDir: string;
@@ -27,6 +33,7 @@ interface StartFlowReviewArgs {
 }
 
 interface AcceptFlowReviewArgs {
+	cwd: string;
 	taskId: string;
 	runId: string;
 	runDir: string;
@@ -35,6 +42,7 @@ interface AcceptFlowReviewArgs {
 }
 
 interface RejectFlowReviewArgs {
+	cwd: string;
 	taskId: string;
 	runId: string;
 	runDir: string;
@@ -95,9 +103,19 @@ function renderReviewMarkdown(review: FlowReviewRecord): string {
 	].filter((line): line is string => line !== undefined).join("\n");
 }
 
+/** 写 review.json(带签名)+ review.md。签名由 runtime 独占(agent 拿不到密钥)。 */
+function writeSignedReview(cwd: string, runDir: string, review: FlowReviewRecord): void {
+	mkdirSync(runDir, { recursive: true });
+	const projectKey = getProjectKey(cwd);
+	const reviewRecord = review as unknown as Record<string, unknown>;
+	const sig = signRecord(projectKey, reviewRecord, REVIEW_SIGNED_FIELDS);
+	const withSig = { ...reviewRecord, _sig: sig };
+	writeFileSync(path.join(runDir, "review.json"), `${JSON.stringify(withSig, null, "\t")}\n`);
+	writeFileSync(path.join(runDir, "review.md"), renderReviewMarkdown(review));
+}
+
 export function startFlowReview(args: StartFlowReviewArgs): FlowReviewRecord {
 	mkdirSync(args.runDir, { recursive: true });
-	const reviewPath = path.join(args.runDir, "review.json");
 	const existing = readFlowReview(args.runDir);
 	if (existing?.status === "accepted") {
 		return existing;
@@ -112,7 +130,7 @@ export function startFlowReview(args: StartFlowReviewArgs): FlowReviewRecord {
 		decisions: [],
 		updatedFiles: [],
 	};
-	writeFileSync(reviewPath, `${JSON.stringify(review, null, "\t")}\n`);
+	writeSignedReview(args.cwd, args.runDir, review);
 	if (!existsSync(path.join(args.runDir, "review.md"))) {
 		writeFileSync(path.join(args.runDir, "review.md"), renderReviewMarkdown(review));
 	}
@@ -142,8 +160,7 @@ export function acceptFlowReview(args: AcceptFlowReviewArgs): FlowReviewRecord {
 					: "用户已确认本次 prove 输出和证据可接受，Task 设计无需修改。"],
 		updatedFiles: existing?.updatedFiles.length ? existing.updatedFiles : [],
 	};
-	writeFileSync(path.join(args.runDir, "review.json"), `${JSON.stringify(review, null, "\t")}\n`);
-	writeFileSync(path.join(args.runDir, "review.md"), renderReviewMarkdown(review));
+	writeSignedReview(args.cwd, args.runDir, review);
 	return review;
 }
 
@@ -162,8 +179,7 @@ export function rejectFlowReview(args: RejectFlowReviewArgs): FlowReviewRecord {
 		decisions: [args.reason?.trim() || "本次 review 未通过，需要修正后重新 prove。"],
 		updatedFiles: existing?.updatedFiles ?? [],
 	};
-	writeFileSync(path.join(args.runDir, "review.json"), `${JSON.stringify(review, null, "\t")}\n`);
-	writeFileSync(path.join(args.runDir, "review.md"), renderReviewMarkdown(review));
+	writeSignedReview(args.cwd, args.runDir, review);
 	return review;
 }
 

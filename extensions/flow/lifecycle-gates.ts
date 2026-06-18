@@ -110,6 +110,7 @@ export function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId
 		review.taskVersion === undefined
 	) {
 		review = acceptFlowReview({
+			cwd,
 			taskId,
 			runId: task.latestReviewRun,
 			runDir: reviewRunDir,

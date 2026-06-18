@@ -40,7 +40,9 @@ function writeFullTask(
 function writeAcceptedReview(taskDir: string, runId: string, taskVersion: number): void {
 	const runDir = path.join(taskDir, "runs", runId);
 	mkdirSync(runDir, { recursive: true });
-	acceptFlowReview({ taskId: path.basename(taskDir), runId, runDir, taskVersion });
+	// taskDir = <cwd>/.flow/tasks/<id>,cwd = taskDir 上两级
+	const cwd = path.resolve(taskDir, "..", "..");
+	acceptFlowReview({ cwd, taskId: path.basename(taskDir), runId, runDir, taskVersion });
 }
 
 // ---- isTransientDriverStatus ----

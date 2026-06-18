@@ -28,7 +28,7 @@ function makePassRun(cwd: string, taskId = "demo-task", runId = "run-001"): {
 	writeFileSync(path.join(runDir, "output", "result.json"), JSON.stringify({ summary: "ok" }, null, "\t"));
 	writeFileSync(path.join(runDir, "evidence", "e.txt"), "evidence\n");
 	writeFileSync(path.join(runDir, "progress.md"), "# Progress\n");
-	validateFlowRun({ taskId, runId, taskDir, runDir, phase: "prove" });
+	validateFlowRun({ cwd, taskId, runId, taskDir, runDir, phase: "prove" });
 	const driver: FlowDriverSummary = {
 		taskId,
 		runId,
@@ -43,7 +43,7 @@ function makeFailRun(cwd: string, taskId = "demo-task", runId = "run-001"): Flow
 	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
 	const runDir = path.join(taskDir, "runs", runId);
 	mkdirSync(runDir, { recursive: true });
-	validateFlowRun({ taskId, runId, taskDir, runDir, phase: "prove" });
+	validateFlowRun({ cwd, taskId, runId, taskDir, runDir, phase: "prove" });
 	return { taskId, runId, status: "failed", runDir };
 }
 
@@ -108,7 +108,7 @@ test("acceptReview fails when no review has started", () => {
 test("acceptReview uses 'cannot change' wording for live driver (not 'start')", () => {
 	const cwd = makeTempCwd();
 	const { driver, runDir } = makePassRun(cwd);
-	startFlowReview({ taskId: "demo-task", runId: "run-001", runDir });
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
 	seedTask(cwd, "demo-task", "reviewing");
 	const outcome = acceptReview({ driver, driverLive: true }, cwd);
 	assert.equal(outcome.ok, false);
@@ -118,7 +118,7 @@ test("acceptReview uses 'cannot change' wording for live driver (not 'start')", 
 test("acceptReview succeeds and transitions task to ready", () => {
 	const cwd = makeTempCwd();
 	const { driver, runDir } = makePassRun(cwd);
-	startFlowReview({ taskId: "demo-task", runId: "run-001", runDir });
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
 	seedTask(cwd, "demo-task", "reviewing");
 	const outcome = acceptReview({ driver, driverLive: false }, cwd);
 	assert.equal(outcome.ok, true);
@@ -130,7 +130,7 @@ test("acceptReview succeeds and transitions task to ready", () => {
 test("acceptReview fails when task metadata is unreadable", () => {
 	const cwd = makeTempCwd();
 	const { driver, runDir } = makePassRun(cwd);
-	startFlowReview({ taskId: "demo-task", runId: "run-001", runDir });
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
 	// 故意不写 task.json → acceptReview 在 acceptFlowReview 前就拒绝
 	const outcome = acceptReview({ driver, driverLive: false }, cwd);
 	assert.equal(outcome.ok, false);
@@ -140,7 +140,7 @@ test("acceptReview fails when task metadata is unreadable", () => {
 test("acceptReview leaves review.json unchanged when state machine rejects the transition", () => {
 	const cwd = makeTempCwd();
 	const { driver, runDir } = makePassRun(cwd);
-	startFlowReview({ taskId: "demo-task", runId: "run-001", runDir });
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
 	// task 在 proved(不是 reviewing)→ transition(review-accept)非法。
 	// review.json 此时是 in-review;accept 必须不把它改成 accepted。
 	seedTask(cwd, "demo-task", "proved");
@@ -165,7 +165,7 @@ test("rejectReview fails when no review has started", () => {
 test("rejectReview succeeds and transitions task to needs-work", () => {
 	const cwd = makeTempCwd();
 	const { driver, runDir } = makePassRun(cwd);
-	startFlowReview({ taskId: "demo-task", runId: "run-001", runDir });
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
 	seedTask(cwd, "demo-task", "reviewing");
 	const outcome = rejectReview({ driver, driverLive: false }, cwd, "证据不足");
 	assert.equal(outcome.ok, true);
@@ -176,7 +176,7 @@ test("rejectReview succeeds and transitions task to needs-work", () => {
 test("rejectReview uses 'cannot change' wording for live driver", () => {
 	const cwd = makeTempCwd();
 	const { driver, runDir } = makePassRun(cwd);
-	startFlowReview({ taskId: "demo-task", runId: "run-001", runDir });
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
 	seedTask(cwd, "demo-task", "reviewing");
 	const outcome = rejectReview({ driver, driverLive: true }, cwd);
 	assert.equal(outcome.ok, false);

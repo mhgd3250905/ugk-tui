@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { readFlowRunValidation, validateFlowRun } from "../extensions/flow/run-validation.ts";
 
-function makeRun(): { taskDir: string; runDir: string } {
+function makeRun(): { cwd: string; taskDir: string; runDir: string } {
 	const cwd = mkdtempSync(path.join(tmpdir(), "flow-run-validation-"));
 	const taskDir = path.join(cwd, ".flow", "tasks", "demo-task");
 	const runDir = path.join(taskDir, "runs", "run-001");
@@ -24,11 +24,11 @@ function makeRun(): { taskDir: string; runDir: string } {
 	writeFileSync(path.join(taskDir, "validator.md"), "# Validator\n");
 	writeFileSync(path.join(runDir, "progress.md"), "# Progress\n\n## 结论: PASS\n");
 	writeFileSync(path.join(runDir, "evidence", "read-evidence.md"), "# Evidence\n");
-	return { taskDir, runDir };
+	return { cwd, taskDir, runDir };
 }
 
 test("validateFlowRun writes PASS validation from structured output", () => {
-	const { taskDir, runDir } = makeRun();
+	const { cwd, taskDir, runDir } = makeRun();
 	writeFileSync(path.join(runDir, "output", "result.json"), JSON.stringify({
 		title: "ugk",
 		summary: "ugk 是一个终端编码 agent。",
@@ -36,7 +36,7 @@ test("validateFlowRun writes PASS validation from structured output", () => {
 		pathUsed: "A",
 	}, null, "\t"));
 
-	const validation = validateFlowRun({ taskId: "demo-task", runId: "run-001", taskDir, runDir, phase: "prove" });
+	const validation = validateFlowRun({ cwd, taskId: "demo-task", runId: "run-001", taskDir, runDir, phase: "prove" });
 
 	assert.equal(validation.result, "PASS");
 	assert.equal(validation.scope, "structural");
@@ -54,7 +54,7 @@ test("validateFlowRun writes PASS validation from structured output", () => {
 });
 
 test("validateFlowRun fails when output violates schema or evidence is missing", () => {
-	const { taskDir, runDir } = makeRun();
+	const { cwd, taskDir, runDir } = makeRun();
 	writeFileSync(path.join(runDir, "output", "result.json"), JSON.stringify({
 		title: "ugk",
 		summary: "x".repeat(100),
@@ -65,7 +65,7 @@ test("validateFlowRun fails when output violates schema or evidence is missing",
 		writeFileSync(path.join(runDir, "evidence", evidenceFile), "");
 	}
 
-	const validation = validateFlowRun({ taskId: "demo-task", runId: "run-001", taskDir, runDir, phase: "prove" });
+	const validation = validateFlowRun({ cwd, taskId: "demo-task", runId: "run-001", taskDir, runDir, phase: "prove" });
 
 	assert.equal(validation.result, "FAIL");
 	assert.ok(validation.issues.some((issue) => issue.includes("summary")));
@@ -74,9 +74,9 @@ test("validateFlowRun fails when output violates schema or evidence is missing",
 });
 
 test("validateFlowRun returns FAIL when result output is missing", () => {
-	const { taskDir, runDir } = makeRun();
+	const { cwd, taskDir, runDir } = makeRun();
 
-	const validation = validateFlowRun({ taskId: "demo-task", runId: "run-001", taskDir, runDir, phase: "prove" });
+	const validation = validateFlowRun({ cwd, taskId: "demo-task", runId: "run-001", taskDir, runDir, phase: "prove" });
 
 	assert.equal(validation.result, "FAIL");
 	assert.ok(validation.issues.some((issue) => issue.includes("output/result.json")));

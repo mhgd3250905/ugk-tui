@@ -85,6 +85,7 @@ export function startReview(ctx: ReviewDriverContext, cwd: string): ReviewAction
 		return fail(transitionResult.reason, "error");
 	}
 	const review = startFlowReview({
+		cwd,
 		taskId: driver.taskId,
 		runId: driver.runId,
 		runDir: driver.runDir,
@@ -113,6 +114,7 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 		return fail(transitionResult.reason, "error");
 	}
 	const review = acceptFlowReview({
+		cwd,
 		taskId: driver.taskId,
 		runId: driver.runId,
 		runDir: driver.runDir,
@@ -137,6 +139,7 @@ export function rejectReview(ctx: ReviewDriverContext, cwd: string, reason?: str
 		return fail(transitionResult.reason, "error");
 	}
 	const review = rejectFlowReview({
+		cwd,
 		taskId: driver.taskId,
 		runId: driver.runId,
 		runDir: driver.runDir,

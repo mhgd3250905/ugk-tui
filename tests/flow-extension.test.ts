@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { registerFlow, setFlowDriverSessionFactoryForTests } from "../extensions/flow/index.ts";
 import { readDriverStatus, writeDriverStatus } from "../extensions/flow/driver-store.ts";
+import { writeFlowTask } from "../extensions/flow/task-store.ts";
 
 function makePi() {
 	const commands = new Map<string, any>();
@@ -153,11 +154,8 @@ function makeTempFlowProject(
 function writeTempTask(cwd: string, taskId: string, status = "draft"): void {
 	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
 	fs.mkdirSync(taskDir, { recursive: true });
-	fs.writeFileSync(
-		path.join(taskDir, "task.json"),
-		`${JSON.stringify({ id: taskId, status, version: 1 }, null, 2)}\n`,
-		"utf8",
-	);
+	// task.json 走 writeFlowTask(带签名),其他资产直接写。
+	writeFlowTask(cwd, taskId, { id: taskId, status, version: 1 });
 	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n\n## 最优路径\n\nA. Prepare\n", "utf8");
 	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Run Todo\n", "utf8");
 	fs.writeFileSync(path.join(taskDir, "validator.md"), "# Validator\n", "utf8");
@@ -169,6 +167,11 @@ function makeTempTaskProject(taskId: string): string {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
 	writeTempTask(cwd, taskId);
 	return cwd;
+}
+
+/** 重写 task.json 的状态字段(带签名)。测试里需要特定 status/version/latest_review_run 时用。 */
+function setTaskStatusSigned(cwd: string, taskId: string, fields: Record<string, unknown>): void {
+	writeFlowTask(cwd, taskId, { id: taskId, version: 1, status: "draft", ...fields });
 }
 
 function writePassingRunOutput(runDir: string, summary = "driver result PASS"): void {
@@ -318,7 +321,7 @@ test("task create completion repairs incomplete task assets before offering prov
 	await commands.get("flow").handler('task create "整理 README 要点"', ctx);
 	const taskDir = path.join(cwd, ".flow", "tasks", "readme-essentials");
 	fs.mkdirSync(taskDir, { recursive: true });
-	fs.writeFileSync(path.join(taskDir, "task.json"), `${JSON.stringify({ id: "readme-essentials", version: 1, status: "draft" }, null, "\t")}\n`);
+	writeFlowTask(cwd, "readme-essentials", { id: "readme-essentials", version: 1, status: "draft" });
 	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n");
 	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Todo\n");
 	for (const handler of handlers.get("agent_end") ?? []) {
@@ -682,20 +685,7 @@ test("/flow run verified task is blocked without an accepted review", async () =
 	});
 	try {
 		const cwd = makeTempTaskProject("verified-task");
-		const taskPath = path.join(cwd, ".flow", "tasks", "verified-task", "task.json");
-		fs.writeFileSync(
-			taskPath,
-			`${JSON.stringify(
-				{
-					id: "verified-task",
-					status: "verified",
-					version: 2,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "verified-task", { status: "verified", version: 2, latest_review_run: "run-001" });
 		const { pi, commands, sentMessages } = makePi();
 		const { ctx, notifications } = makeCtx(cwd);
 		registerFlow(pi as any);
@@ -736,19 +726,7 @@ test("/flow run verified task starts only when latest review is accepted", async
 	try {
 		const cwd = makeTempTaskProject("verified-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "verified-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "verified-task",
-					status: "verified",
-					version: 2,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "verified-task", { status: "verified", version: 2, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
 		fs.writeFileSync(
@@ -804,19 +782,7 @@ test("/flow run approved task starts when latest review is accepted", async () =
 	try {
 		const cwd = makeTempTaskProject("approved-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "approved-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "approved-task",
-					status: "approved",
-					version: 1,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "approved-task", { status: "approved", version: 1, latest_review_run: "run-001" });
 		const runDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(runDir, { recursive: true });
 		writeAcceptedReview(runDir, "approved-task");
@@ -857,19 +823,7 @@ test("/flow run canonicalizes repairable accepted review before starting", async
 	try {
 		const cwd = makeTempTaskProject("active-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "active-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "active-task",
-					status: "active",
-					version: 3,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "active-task", { status: "active", version: 3, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
 		fs.writeFileSync(
@@ -915,19 +869,7 @@ test("/flow run does not canonicalize stale accepted review to a newer task vers
 	try {
 		const cwd = makeTempTaskProject("active-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "active-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "active-task",
-					status: "active",
-					version: 3,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "active-task", { status: "active", version: 3, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
 		fs.writeFileSync(
@@ -971,19 +913,7 @@ test("/flow run rejects accepted review whose task identity does not match", asy
 	try {
 		const cwd = makeTempTaskProject("active-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "active-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "active-task",
-					status: "active",
-					version: 3,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "active-task", { status: "active", version: 3, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
 		fs.writeFileSync(
@@ -1041,19 +971,7 @@ test("PASS run completion opens an interruptive review gate", async () => {
 	try {
 		const cwd = makeTempTaskProject("verified-task");
 		const taskDir = path.join(cwd, ".flow", "tasks", "verified-task");
-		fs.writeFileSync(
-			path.join(taskDir, "task.json"),
-			`${JSON.stringify(
-				{
-					id: "verified-task",
-					status: "verified",
-					version: 2,
-					latest_review_run: "run-001",
-				},
-				null,
-				"\t",
-			)}\n`,
-		);
+		setTaskStatusSigned(cwd, "verified-task", { status: "verified", version: 2, latest_review_run: "run-001" });
 		const reviewRunDir = path.join(taskDir, "runs", "run-001");
 		fs.mkdirSync(reviewRunDir, { recursive: true });
 		fs.writeFileSync(

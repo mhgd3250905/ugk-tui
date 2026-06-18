@@ -106,7 +106,10 @@ export function canonicalJson(value: unknown): string {
 function extractCovered(record: Record<string, unknown>, covered: string[]): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 	for (const key of covered) {
-		out[key] = key in record ? record[key] : null;
+		// undefined 和缺失统一当 null,避免"签时 undefined、验时缺失"的不一致
+		// (JSON.stringify 会省略 undefined,导致落盘后字段消失,验签时 key 不在)。
+		const v = record[key];
+		out[key] = v === undefined ? null : v;
 	}
 	return out;
 }

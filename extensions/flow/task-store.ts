@@ -52,7 +52,7 @@ function flowTasksDir(cwd: string): string {
  * 窗口外(.flow/.migrated 存在):无 _sig 或签名不符的记录当损坏。
  * 窗口在第一次签名写入时关闭(runtime 会创建 .migrated)。
  */
-function isInMigrationWindow(cwd: string): boolean {
+export function isInMigrationWindow(cwd: string): boolean {
 	return !existsSync(path.join(cwd, ".flow", MIGRATED_MARKER));
 }
 

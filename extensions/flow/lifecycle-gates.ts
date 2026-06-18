@@ -1,11 +1,15 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { isRecord, readJsonStrict } from "./flow-fs.ts";
+import { CORRUPT_FEEDBACK } from "./flow-signing.ts";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
 import { acceptFlowReview, isFlowReviewAccepted, readFlowReview } from "./review-store.ts";
+import { getProjectKey } from "./task-store.ts";
 import { isRunnable, normalizeLegacyState } from "./task-state.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
 import type { FlowDriverStatus } from "./types.ts";
+import { verifyRecord } from "./flow-signing.ts";
+import { isInMigrationWindow } from "./task-store.ts";
 
 /**
  * 纯生命周期 gate:只读 + 判断,零 UI/进程副作用。
@@ -54,6 +58,19 @@ export function readTaskMetadata(cwd: string, taskId: string): TaskGuardResult {
 			message: `Flow task metadata is invalid: ${taskJsonPath}\n${errorMessage(error)}`,
 			type: "error",
 		};
+	}
+
+	// 签名校验:迁移窗口外,无 _sig 或签名不符 = 记录被篡改。
+	// 反馈用中性措辞(CORRUPT_FEEDBACK),不提签名/密钥——见设计文档反馈安全要求。
+	if (!isInMigrationWindow(cwd) && isRecord(parsed)) {
+		const sigCheck = verifyRecord(getProjectKey(cwd), parsed);
+		if (!sigCheck.verified) {
+			return {
+				ok: false,
+				message: CORRUPT_FEEDBACK.taskStatus(taskId),
+				type: "warning",
+			};
+		}
 	}
 
 	return {

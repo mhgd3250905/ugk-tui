@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { clearFlowDriverBanner, setFlowDriverBanner } from "./driver-banner.ts";
 import {
@@ -9,7 +9,6 @@ import {
 	buildFlowTaskActionOptions,
 	buildFlowTaskListOptions,
 	buildFlowStageGateOptions,
-	isRunnableFlowTaskStatus,
 	parseFlowConsoleSelection,
 	parseFlowStageGateSelection,
 	type FlowStageGate,
@@ -32,7 +31,13 @@ import {
 	writeDriverStatus,
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
-import { invalidFlowTaskIdMessage, isValidFlowTaskId, parseFlowCommand } from "./parser.ts";
+import {
+	isTransientDriverStatus,
+	readTaskMetadata,
+	validateTaskForDriver,
+	type TaskGuardResult,
+} from "./lifecycle-gates.ts";
+import { parseFlowCommand } from "./parser.ts";
 import {
 	buildFlowDriverContractRepairPrompt,
 	buildFlowHelpText,
@@ -60,20 +65,10 @@ const FLOW_PROMPT_PREFIXES = [
 	"[FLOW DRIVER DETACH]",
 	"[FLOW DRIVER STATUS]",
 ];
-const TRANSIENT_DRIVER_STATUSES: FlowDriverStatus[] = [
-	"starting",
-	"running",
-	"waiting",
-	"waiting-for-user",
-	"validating",
-];
 const FLOW_SESSION_VIEW_OWNER = "flow-driver";
 const FLOW_DRIVER_CRITICAL_TOOL_NAMES = ["chrome_cdp"];
 
 type ActionableFlowRequest = Exclude<FlowRequest, { kind: "help" } | { kind: "error"; message: string }>;
-type TaskGuardResult =
-	| { ok: true; taskDir: string; status: string | undefined; version: number; latestReviewRun?: string }
-	| { ok: false; message: string; type: "warning" | "error" };
 type FlowSessionViewUi = ExtensionContext["ui"] & {
 	attachSessionView?: (
 		owner: string,
@@ -102,10 +97,6 @@ type FlowSessionViewUi = ExtensionContext["ui"] & {
 
 function isActionableFlowRequest(request: FlowRequest): request is ActionableFlowRequest {
 	return request.kind !== "help" && request.kind !== "error";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function errorMessage(error: unknown): string {
@@ -137,100 +128,6 @@ function getFlowContextId(message: { content?: unknown; customType?: string }): 
 
 function getDriverKey(taskId: string, runId: string): string {
 	return `${taskId}/${runId}`;
-}
-
-function isTransientDriverStatus(status: FlowDriverStatus): boolean {
-	return TRANSIENT_DRIVER_STATUSES.includes(status);
-}
-
-function readTaskMetadata(cwd: string, taskId: string): TaskGuardResult {
-	if (!isValidFlowTaskId(taskId)) {
-		return { ok: false, message: invalidFlowTaskIdMessage(taskId), type: "error" };
-	}
-	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
-	const taskJsonPath = path.join(taskDir, "task.json");
-	if (!existsSync(taskJsonPath)) {
-		return { ok: false, message: `Flow task not found: ${taskId}`, type: "error" };
-	}
-
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(readFileSync(taskJsonPath, "utf8"));
-	} catch (error) {
-		return {
-			ok: false,
-			message: `Flow task metadata is invalid: ${taskJsonPath}\n${errorMessage(error)}`,
-			type: "error",
-		};
-	}
-
-	return {
-		ok: true,
-		taskDir,
-		status: isRecord(parsed) && typeof parsed.status === "string" ? parsed.status : undefined,
-		version: isRecord(parsed) && typeof parsed.version === "number" ? parsed.version : 1,
-		latestReviewRun: isRecord(parsed) && typeof parsed.latest_review_run === "string" ? parsed.latest_review_run : undefined,
-	};
-}
-
-function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId: string): TaskGuardResult {
-	const task = readTaskMetadata(cwd, taskId);
-	if (!task.ok) {
-		return task;
-	}
-
-	if (kind === "prove") {
-		const assetValidation = validateFlowTaskAssets(cwd, taskId);
-		if (!assetValidation.ok) {
-			return {
-				ok: false,
-				message: `Flow task ${taskId} is incomplete. Runtime gate failed: ${assetValidation.issues.join(", ")}`,
-				type: "error",
-			};
-		}
-		return task;
-	}
-
-	if (!isRunnableFlowTaskStatus(task.status)) {
-		return {
-			ok: false,
-			message: `Flow task ${taskId} status is ${task.status ?? "unknown"}; /flow run requires verified/active/approved.`,
-			type: "warning",
-		};
-	}
-	if (!task.latestReviewRun) {
-		return {
-			ok: false,
-			message: `Flow task ${taskId} is ${task.status} but has no accepted review. Run /flow task review <run-id> first.`,
-			type: "warning",
-		};
-	}
-	const reviewRunDir = path.join(task.taskDir, "runs", task.latestReviewRun);
-	let review = readFlowReview(reviewRunDir);
-	const expectedReview = { taskId, runId: task.latestReviewRun };
-	if (
-		!isFlowReviewAccepted(review, task.version, expectedReview) &&
-		review?.status === "accepted" &&
-		review.userConfirmed &&
-		review.taskId === taskId &&
-		review.runId === task.latestReviewRun &&
-		review.taskVersion === undefined
-	) {
-		review = acceptFlowReview({
-			taskId,
-			runId: task.latestReviewRun,
-			runDir: reviewRunDir,
-			taskVersion: task.version,
-		});
-	}
-	if (!isFlowReviewAccepted(review, task.version, expectedReview)) {
-		return {
-			ok: false,
-			message: `Flow task ${taskId} is ${task.status} but accepted review ${task.latestReviewRun} is missing or not valid for version ${task.version}.`,
-			type: "warning",
-		};
-	}
-	return task;
 }
 
 let driverSessionFactoryForTests:

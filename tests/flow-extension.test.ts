@@ -41,6 +41,7 @@ function makeCtx(cwd = process.cwd()) {
 	const statusCalls: Array<{ key: string; value: string | undefined }> = [];
 	const widgetCalls: Array<{ key: string; value: unknown }> = [];
 	const sessionViewCalls: Array<{ action: "attach" | "detach"; owner: string; session?: unknown; options?: any }> = [];
+	const sessionSwitcherCalls: Array<{ owner: string; options?: any }> = [];
 	return {
 		notifications,
 		confirms,
@@ -49,6 +50,7 @@ function makeCtx(cwd = process.cwd()) {
 		statusCalls,
 		widgetCalls,
 		sessionViewCalls,
+		sessionSwitcherCalls,
 		ctx: {
 			cwd,
 			hasUI: true,
@@ -86,6 +88,10 @@ function makeCtx(cwd = process.cwd()) {
 				},
 				detachSessionView(owner: string) {
 					sessionViewCalls.push({ action: "detach", owner });
+					return true;
+				},
+				setSessionSwitcher(owner: string, options?: any) {
+					sessionSwitcherCalls.push({ owner, options });
 					return true;
 				},
 				theme: {
@@ -149,6 +155,43 @@ function makeTempTaskProject(taskId: string): string {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-"));
 	writeTempTask(cwd, taskId);
 	return cwd;
+}
+
+function writePassingRunOutput(runDir: string, summary = "driver result PASS"): void {
+	fs.mkdirSync(path.join(runDir, "output"), { recursive: true });
+	fs.mkdirSync(path.join(runDir, "evidence"), { recursive: true });
+	fs.writeFileSync(
+		path.join(runDir, "output", "result.json"),
+		`${JSON.stringify({ title: "PASS", summary, pathUsed: "A" }, null, "\t")}\n`,
+	);
+	fs.writeFileSync(path.join(runDir, "evidence", "read-evidence.md"), "# Evidence\n\nPASS\n");
+}
+
+function writePassingValidation(runDir: string, taskId: string, runId = "run-001", summary = "ok"): void {
+	fs.writeFileSync(
+		path.join(runDir, "validation.json"),
+		`${JSON.stringify(
+			{
+				taskId,
+				runId,
+				phase: "prove",
+				result: "PASS",
+				summary,
+				issues: [],
+				artifacts: {
+					resultJson: path.join(runDir, "output", "result.json"),
+					evidenceDir: path.join(runDir, "evidence"),
+					progressMd: path.join(runDir, "progress.md"),
+					validationJson: path.join(runDir, "validation.json"),
+					validationMd: path.join(runDir, "validation.md"),
+				},
+				createdAt: "2026-06-18T01:00:00.000Z",
+				nextStep: `/flow task review ${taskId}/${runId}`,
+			},
+			null,
+			"\t",
+		)}\n`,
+	);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -441,6 +484,110 @@ test("/flow run needs-human task is blocked before creating a driver run", async
 	}
 });
 
+test("/flow run verified task is blocked without an accepted review", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async () => {
+		factoryCalls += 1;
+		throw new Error("factory should not run");
+	});
+	try {
+		const cwd = makeTempTaskProject("verified-task");
+		const taskPath = path.join(cwd, ".flow", "tasks", "verified-task", "task.json");
+		fs.writeFileSync(
+			taskPath,
+			`${JSON.stringify(
+				{
+					id: "verified-task",
+					status: "verified",
+					version: 2,
+					latest_review_run: "run-001",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run verified-task", ctx);
+
+		assert.equal(factoryCalls, 0);
+		assert.equal(sentMessages.length, 0);
+		assert.equal(notifications.at(-1)?.type, "warning");
+		assert.match(notifications.at(-1)?.message ?? "", /accepted review/i);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow run verified task starts only when latest review is accepted", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async (options) => {
+		factoryCalls += 1;
+		return {
+			taskId: options.taskId,
+			runId: options.runId,
+			runDir: options.runDir,
+			async start() {
+				await new Promise(() => {});
+			},
+			async sendUserInput() {},
+			getTranscriptText() {
+				return "";
+			},
+			getWidgetLines() {
+				return ["driver"];
+			},
+			dispose() {},
+		};
+	});
+	try {
+		const cwd = makeTempTaskProject("verified-task");
+		const taskDir = path.join(cwd, ".flow", "tasks", "verified-task");
+		fs.writeFileSync(
+			path.join(taskDir, "task.json"),
+			`${JSON.stringify(
+				{
+					id: "verified-task",
+					status: "verified",
+					version: 2,
+					latest_review_run: "run-001",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const reviewRunDir = path.join(taskDir, "runs", "run-001");
+		fs.mkdirSync(reviewRunDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(reviewRunDir, "review.json"),
+			`${JSON.stringify(
+				{
+					taskId: "verified-task",
+					runId: "run-001",
+					status: "accepted",
+					userConfirmed: true,
+					taskDesignUpdated: true,
+					taskVersion: 2,
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const { pi, commands } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run verified-task", ctx);
+
+		assert.equal(factoryCalls, 1);
+		assert.match(notifications.at(-1)?.message ?? "", /Flow driver running/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
 test("/flow task prove missing task is blocked before creating a driver run", async () => {
 	let factoryCalls = 0;
 	setFlowDriverSessionFactoryForTests(async () => {
@@ -601,7 +748,7 @@ test("driver start failure disposes and removes the live driver", async () => {
 	}
 });
 
-test("driver terminal completion detaches focused driver and disposes the live session", async () => {
+test("driver terminal completion keeps the driver accessible until review", async () => {
 	let disposed = false;
 	let releaseStart!: () => void;
 	const startCompleted = new Promise<void>((resolve) => {
@@ -614,6 +761,7 @@ test("driver terminal completion detaches focused driver and disposes the live s
 		sessionFile: "driver.jsonl",
 		async start() {
 			await startCompleted;
+			writePassingRunOutput(options.runDir, "PASS");
 		},
 		async sendUserInput() {},
 		getTranscriptText() {
@@ -640,15 +788,126 @@ test("driver terminal completion detaches focused driver and disposes the live s
 		await sleep(10);
 
 		const runStatus = readDriverStatus(runDir);
-		assert.equal(disposed, true);
+		assert.equal(disposed, false);
 		assert.equal(runStatus?.status, "done");
-		assert.equal(runStatus?.summary, "driver completed");
-		assert.equal(status.get("flow-driver"), undefined);
-		assert.equal(widgets.get("flow-driver-view"), undefined);
-		assert.deepEqual(entries.at(-1)?.data, { focus: "main" });
+		assert.equal(runStatus?.step, "validated");
+		assert.equal(runStatus?.summary, "PASS: PASS");
+		assert.equal(JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "x", "task.json"), "utf8")).status, "proved");
+		assert.equal(fs.existsSync(path.join(runDir, "validation.json")), true);
+		assert.equal(status.get("flow-driver"), "driver:run-001");
+		assert.deepEqual(widgets.get("flow-driver-view"), ["PASS"]);
+		assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "x", runId: "run-001" });
 		assert.equal(notifications.at(-1)?.type, "info");
 		assert.match(notifications.at(-1)?.message ?? "", /Flow driver completed: x\/run-001/);
 		assert.match(notifications.at(-1)?.message ?? "", /driver completed/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("main view shows running driver activity and completed driver result", async () => {
+	let releaseStart!: () => void;
+	const startCompleted = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	let transcript = "";
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		async start() {
+			await startCompleted;
+			transcript = "最终结果：找到 3 条 medtrum 相关帖子";
+			writePassingRunOutput(options.runDir, transcript);
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return transcript;
+		},
+		getWidgetLines() {
+			return ["driver widget fallback"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands } = makePi();
+		const { ctx, widgets, sessionSwitcherCalls } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+
+		assert.deepEqual(widgets.get("flow-driver-view"), [
+			"Flow driver activity",
+			"- x/run-001 running starting",
+			"  waiting for driver result...",
+		]);
+
+		releaseStart();
+		await sleep(10);
+
+		assert.deepEqual(widgets.get("flow-driver-view"), [
+			"Flow driver activity",
+			"- x/run-001 done validated",
+			"  result: PASS - 最终结果：找到 3 条 medtrum 相关帖子",
+			"  next: /flow task review x/run-001",
+		]);
+		const switcher = sessionSwitcherCalls.at(-1);
+		assert.deepEqual(
+			switcher?.options.items.map((item: any) => ({
+				id: item.id,
+				description: item.description,
+			})),
+			[{ id: "x/run-001", description: "done validated" }],
+		);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("driver completion queues a main-agent validation handoff", async () => {
+	let releaseStart!: () => void;
+	const startCompleted = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		async start() {
+			fs.mkdirSync(path.join(options.runDir, "output"), { recursive: true });
+			fs.writeFileSync(path.join(options.runDir, "output", "result.json"), '{"ok":true}\n');
+			await startCompleted;
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "✅ Run-001 完成\n结果: PASS";
+		},
+		getWidgetLines() {
+			return ["driver widget fallback"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		releaseStart();
+		await sleep(10);
+
+		const handoff = sentMessages.at(-1);
+		assert.equal(handoff?.options?.triggerTurn, true);
+		assert.equal(handoff?.message.customType, "flow-task-context");
+		assert.equal(handoff?.message.display, false);
+		assert.match(handoff?.message.content ?? "", /\[FLOW DRIVER COMPLETION\]/);
+		assert.match(handoff?.message.content ?? "", /Task ID: x/);
+		assert.match(handoff?.message.content ?? "", /Run ID: run-001/);
+		assert.match(handoff?.message.content ?? "", /output\/result\.json/);
+		assert.match(handoff?.message.content ?? "", /验收/);
+		assert.match(handoff?.message.content ?? "", /\/flow task review x\/run-001/);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -692,7 +951,9 @@ test("/flow attach with no args opens picker and focuses selected driver", async
 	await commands.get("flow").handler("attach", ctx);
 
 	assert.equal(notifications.at(-1)?.type, "info");
-	assert.match(notifications.at(-1)?.message ?? "", /Flow driver attached/);
+	assert.doesNotMatch(notifications.at(-1)?.message ?? "", /Flow driver attached/);
+	assert.match(notifications.at(-1)?.message ?? "", /not live/);
+	assert.match(notifications.at(-1)?.message ?? "", /showing summary only/);
 	assert.match(notifications.at(-1)?.message ?? "", /task-b\/run-004/);
 	assert.ok(pickerOptions.some((option) => option.includes("done") && option.includes("run-009")));
 	assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "task-b", runId: "run-004" });
@@ -714,6 +975,7 @@ test("/flow attach <run-id> warns when run id is ambiguous", async () => {
 	assert.equal(notifications.at(-1)?.type, "warning");
 	assert.match(notifications.at(-1)?.message ?? "", /ambiguous/);
 	assert.match(notifications.at(-1)?.message ?? "", /run-001/);
+	assert.match(notifications.at(-1)?.message ?? "", /task-a\/run-001/);
 	assert.equal(sentMessages.length, 0);
 	assert.equal(entries.length, 0);
 });
@@ -748,11 +1010,156 @@ test("/flow task review warns instead of queueing hidden prompt while focused on
 
 	assert.equal(sentMessages.length, 0);
 	assert.equal(notifications.at(-1)?.type, "warning");
-	assert.match(notifications.at(-1)?.message ?? "", /flow detach/i);
+	assert.match(notifications.at(-1)?.message ?? "", /still running/i);
 	assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "task-a", runId: "run-001" });
 });
 
-test("/flow attach <run-id> direct attach", async () => {
+test("/flow task review opens a completed focused driver run and marks task reviewing", async () => {
+	const cwd = makeTempTaskProject("task-a");
+	const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
+	writeDriverStatus(runDir, {
+		taskId: "task-a",
+		runId: "run-001",
+		status: "done",
+		step: "validated",
+		summary: "PASS: ok",
+		updatedAt: "2026-06-18T01:00:00.000Z",
+	});
+	fs.writeFileSync(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
+	const { pi, commands, sentMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("attach task-a/run-001", ctx);
+	await commands.get("flow").handler("task review run-001", ctx);
+
+	assert.deepEqual(entries.at(-1)?.data, { focus: "main" });
+	assert.equal(sentMessages.length, 1);
+	assert.match(sentMessages[0].message.content, /\[FLOW TASK REVIEW\]/);
+	assert.match(sentMessages[0].message.content, /Task ID: task-a/);
+	assert.match(sentMessages[0].message.content, /Run path: \.flow\/tasks\/task-a\/runs\/run-001/);
+	assert.equal(JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8")).status, "reviewing");
+	assert.equal(notifications.at(-1)?.type, "info");
+	assert.match(notifications.at(-1)?.message ?? "", /复盘 Run run-001/);
+});
+
+test("/flow task accept requires a started review", async () => {
+	const cwd = makeTempTaskProject("task-a");
+	const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
+	writeDriverStatus(runDir, {
+		taskId: "task-a",
+		runId: "run-001",
+		status: "done",
+		step: "validated",
+		summary: "PASS: ok",
+		updatedAt: "2026-06-18T01:00:00.000Z",
+	});
+	writePassingRunOutput(runDir, "ok");
+	writePassingValidation(runDir, "task-a", "run-001", "ok");
+	const { pi, commands } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("task accept run-001", ctx);
+
+	assert.equal(notifications.at(-1)?.type, "warning");
+	assert.match(notifications.at(-1)?.message ?? "", /has not started/);
+	assert.match(notifications.at(-1)?.message ?? "", /task-a\/run-001/);
+	assert.equal(JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8")).status, "draft");
+});
+
+test("/flow task accept marks a reviewed PASS prove as verified and unblocks run", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async (options) => {
+		factoryCalls += 1;
+		return {
+			taskId: options.taskId,
+			runId: options.runId,
+			runDir: options.runDir,
+			async start() {
+				await new Promise(() => {});
+			},
+			async sendUserInput() {},
+			getTranscriptText() {
+				return "";
+			},
+			getWidgetLines() {
+				return ["driver"];
+			},
+			dispose() {},
+		};
+	});
+	try {
+		const cwd = makeTempTaskProject("task-a");
+		const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
+		writeDriverStatus(runDir, {
+			taskId: "task-a",
+			runId: "run-001",
+			status: "done",
+			step: "validated",
+			summary: "PASS: ok",
+			updatedAt: "2026-06-18T01:00:00.000Z",
+		});
+		writePassingRunOutput(runDir, "ok");
+		writePassingValidation(runDir, "task-a", "run-001", "ok");
+		const { pi, commands, sentMessages } = makePi();
+		const { ctx, notifications } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task review run-001", ctx);
+		await commands.get("flow").handler("task accept run-001", ctx);
+		await commands.get("flow").handler("run task-a", ctx);
+
+		const task = JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8"));
+		const review = JSON.parse(fs.readFileSync(path.join(runDir, "review.json"), "utf8"));
+		assert.equal(task.status, "verified");
+		assert.equal(task.latest_review_run, "run-001");
+		assert.equal(review.status, "accepted");
+		assert.equal(review.userConfirmed, true);
+		assert.equal(review.taskDesignUpdated, false);
+		assert.equal(review.taskDesignDecision, "no-change");
+		assert.equal(factoryCalls, 1);
+		assert.match(notifications.at(-1)?.message ?? "", /Flow driver running/);
+		assert.equal(sentMessages.length, 1);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow task reject marks task needs-human", async () => {
+	const cwd = makeTempTaskProject("task-a");
+	const runDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
+	writeDriverStatus(runDir, {
+		taskId: "task-a",
+		runId: "run-001",
+		status: "done",
+		step: "validated",
+		summary: "PASS: ok",
+		updatedAt: "2026-06-18T01:00:00.000Z",
+	});
+	writePassingValidation(runDir, "task-a", "run-001", "ok");
+	const validationPath = path.join(runDir, "validation.json");
+	const validation = JSON.parse(fs.readFileSync(validationPath, "utf8"));
+	validation.result = "NEEDS-HUMAN";
+	validation.summary = "missing output/result.json";
+	fs.writeFileSync(validationPath, `${JSON.stringify(validation, null, "\t")}\n`);
+	const { pi, commands } = makePi();
+	const { ctx, notifications } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler('task reject run-001 "证据不足"', ctx);
+
+	const task = JSON.parse(fs.readFileSync(path.join(cwd, ".flow", "tasks", "task-a", "task.json"), "utf8"));
+	const review = JSON.parse(fs.readFileSync(path.join(runDir, "review.json"), "utf8"));
+	assert.equal(task.status, "needs-human");
+	assert.equal(task.latest_validation, "NEEDS-HUMAN");
+	assert.equal(review.status, "needs-changes");
+	assert.equal(review.decisions[0], "证据不足");
+	assert.equal(notifications.at(-1)?.type, "warning");
+	assert.match(notifications.at(-1)?.message ?? "", /needs-human/);
+});
+
+test("/flow attach <run-id> shows summary-only notice for a non-live driver", async () => {
 	const cwd = makeTempFlowProject([
 		{ taskId: "task-a", runId: "run-001", status: "running", updatedAt: "2026-06-17T00:00:01.000Z" },
 	]);
@@ -763,7 +1170,9 @@ test("/flow attach <run-id> direct attach", async () => {
 	await commands.get("flow").handler("attach run-001", ctx);
 
 	assert.equal(notifications.at(-1)?.type, "info");
-	assert.match(notifications.at(-1)?.message ?? "", /Flow driver attached/);
+	assert.doesNotMatch(notifications.at(-1)?.message ?? "", /Flow driver attached/);
+	assert.match(notifications.at(-1)?.message ?? "", /not live/);
+	assert.match(notifications.at(-1)?.message ?? "", /showing summary only/);
 	assert.match(notifications.at(-1)?.message ?? "", /task-a\/run-001/);
 	assert.equal(sentMessages.length, 0);
 });
@@ -936,6 +1345,170 @@ test("/flow attach live driver activates native session view when a visible sess
 		assert.equal(sessionViewCalls[0].options.detachCommand, "/flow detach");
 		assert.match(sessionViewCalls[0].options.label, /x\/run-001/);
 		assert.equal(widgets.get("flow-driver-view"), undefined);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("live Flow drivers populate the session switcher below the editor", async () => {
+	const visibleSession = { kind: "driver-session" };
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		visibleSession,
+		async start() {
+			await new Promise(() => {});
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver widget fallback"];
+		},
+		dispose() {},
+	}));
+	try {
+		const { pi, commands } = makePi();
+		const { ctx, sessionSwitcherCalls } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+
+		const switcher = sessionSwitcherCalls.at(-1);
+		assert.equal(switcher?.owner, "flow-driver");
+		assert.equal(switcher?.options.title, "Flow sessions");
+		assert.deepEqual(
+			switcher?.options.items.map((item: any) => ({
+				id: item.id,
+				label: item.label,
+				active: item.active,
+			})),
+			[{ id: "x/run-001", label: "x/run-001", active: false }],
+		);
+		assert.equal(typeof switcher?.options.onSelect, "function");
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("Flow session switcher moves from a focused driver to main or another live driver", async () => {
+	const visibleSessions: Record<string, unknown> = {
+		"task-a/run-001": { kind: "driver-a" },
+		"task-b/run-001": { kind: "driver-b" },
+	};
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: `${options.taskId}.jsonl`,
+		visibleSession: visibleSessions[`${options.taskId}/${options.runId}`],
+		async start() {
+			await new Promise(() => {});
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return [`${options.taskId} widget`];
+		},
+		dispose() {},
+	}));
+	try {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-switcher-"));
+		writeTempTask(cwd, "task-a");
+		writeTempTask(cwd, "task-b");
+		const { pi, commands, entries } = makePi();
+		const { ctx, sessionSwitcherCalls, sessionViewCalls } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove task-a", ctx);
+		await commands.get("flow").handler("task prove task-b", ctx);
+		await commands.get("flow").handler("attach task-a/run-001", ctx);
+
+		let switcher = sessionSwitcherCalls.at(-1);
+		assert.deepEqual(
+			switcher?.options.items.map((item: any) => ({
+				id: item.id,
+				label: item.label,
+				active: item.active,
+			})),
+			[
+				{ id: "main", label: "main", active: false },
+				{ id: "task-a/run-001", label: "task-a/run-001", active: true },
+				{ id: "task-b/run-001", label: "task-b/run-001", active: false },
+			],
+		);
+
+		await switcher?.options.onSelect("main", switcher.options.items[0]);
+		assert.deepEqual(sessionViewCalls.map((call) => call.action), ["attach", "detach"]);
+		assert.deepEqual(entries.at(-1)?.data, { focus: "main" });
+
+		switcher = sessionSwitcherCalls.at(-1);
+		await switcher?.options.onSelect("task-b/run-001", switcher.options.items[1]);
+		assert.equal(sessionViewCalls.at(-1)?.action, "attach");
+		assert.equal(sessionViewCalls.at(-1)?.session, visibleSessions["task-b/run-001"]);
+		assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "task-b", runId: "run-001" });
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("Flow session switcher can open a completed driver retained in this session", async () => {
+	const visibleSession = { kind: "completed-driver" };
+	let releaseStart!: () => void;
+	const startCompleted = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	let disposed = false;
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		visibleSession,
+		async start() {
+			await startCompleted;
+			writePassingRunOutput(options.runDir, "done transcript");
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "done transcript";
+		},
+		getWidgetLines() {
+			return ["done transcript"];
+		},
+		dispose() {
+			disposed = true;
+		},
+	}));
+	try {
+		const { pi, commands, entries } = makePi();
+		const { ctx, sessionSwitcherCalls, sessionViewCalls } = makeCtx(makeTempTaskProject("x"));
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+		releaseStart();
+		await sleep(10);
+
+		const switcher = sessionSwitcherCalls.at(-1);
+		assert.deepEqual(
+			switcher?.options.items.map((item: any) => ({
+				id: item.id,
+				description: item.description,
+			})),
+			[{ id: "x/run-001", description: "done validated" }],
+		);
+
+		await switcher?.options.onSelect("x/run-001", switcher.options.items[0]);
+
+		assert.equal(disposed, false);
+		assert.equal(sessionViewCalls.at(-1)?.action, "attach");
+		assert.equal(sessionViewCalls.at(-1)?.session, visibleSession);
+		assert.deepEqual(entries.at(-1)?.data, { focus: "driver", taskId: "x", runId: "run-001" });
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}

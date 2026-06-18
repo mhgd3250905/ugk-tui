@@ -106,6 +106,143 @@ test("session view patch switches visible session and restores main on detach co
 	assert.ok(mode.calls.includes("subscribe:main"));
 });
 
+test("session switcher renders below editor and handles empty-editor navigation", async () => {
+	class FakeInteractiveMode {
+		constructor(mainSession) {
+			this.runtimeHost = { session: mainSession };
+			this.calls = [];
+			this.selected = [];
+			this.editorText = "";
+			this.editor = {
+				getText: () => this.editorText,
+				setText: (text) => {
+					this.editorText = text;
+				},
+			};
+			this.defaultEditor = {
+				onExtensionShortcut: (data) => {
+					this.calls.push(`previous:${data}`);
+					return false;
+				},
+			};
+			this.ui = {
+				requestRender: () => {
+					this.calls.push("requestRender");
+				},
+			};
+		}
+
+		get session() {
+			return this.runtimeHost.session;
+		}
+
+		get agent() {
+			return this.session.agent;
+		}
+
+		get sessionManager() {
+			return this.session.sessionManager;
+		}
+
+		createExtensionUIContext() {
+			return {};
+		}
+
+		setExtensionWidget(key, content, options) {
+			this.widgetKey = key;
+			this.widgetOptions = options;
+			this.widget = content?.(this.ui, {
+				fg: (_name, text) => text,
+				bold: (text) => text,
+			});
+		}
+	}
+
+	installUgkSessionViewPatch({ InteractiveMode: FakeInteractiveMode });
+	const mode = new FakeInteractiveMode(createSession("main"));
+	const ui = mode.createExtensionUIContext();
+
+	assert.equal(ui.setSessionSwitcher("flow-driver", {
+		title: "Flow sessions",
+		items: [
+			{ id: "main", label: "main", description: "main agent", active: true },
+			{ id: "x/run-001", label: "x/run-001", description: "running" },
+		],
+		onSelect: async (id) => {
+			mode.selected.push(id);
+		},
+	}), true);
+
+	assert.equal(mode.widgetKey, "ugk-session-switcher");
+	assert.deepEqual(mode.widgetOptions, { placement: "belowEditor" });
+	assert.match(mode.widget.render(80).join("\n"), /Flow sessions/);
+
+	assert.equal(mode.defaultEditor.onExtensionShortcut("\x1b[B"), true);
+	assert.match(mode.widget.render(80).join("\n"), /> x\/run-001/);
+	assert.equal(mode.defaultEditor.onExtensionShortcut("\r"), true);
+	await Promise.resolve();
+
+	assert.deepEqual(mode.selected, ["x/run-001"]);
+	assert.equal(mode.defaultEditor.onExtensionShortcut("\x1b[B"), true);
+	assert.equal(mode.defaultEditor.onExtensionShortcut("\x1b"), true);
+
+	mode.editorText = "draft";
+	assert.equal(mode.defaultEditor.onExtensionShortcut("\x1b[B"), false);
+	assert.deepEqual(mode.calls.filter((call) => call.startsWith("previous:")), ["previous:\x1b[B"]);
+});
+
+test("session switcher rewraps editor shortcuts after pi replaces them", () => {
+	class FakeInteractiveMode {
+		constructor(mainSession) {
+			this.runtimeHost = { session: mainSession };
+			this.editorText = "";
+			this.editor = {
+				getText: () => this.editorText,
+			};
+			this.defaultEditor = {
+				onExtensionShortcut: () => false,
+			};
+			this.ui = {
+				requestRender: () => {},
+			};
+		}
+
+		get session() {
+			return this.runtimeHost.session;
+		}
+
+		get agent() {
+			return this.session.agent;
+		}
+
+		get sessionManager() {
+			return this.session.sessionManager;
+		}
+
+		createExtensionUIContext() {
+			return {};
+		}
+
+		setExtensionWidget() {}
+	}
+
+	installUgkSessionViewPatch({ InteractiveMode: FakeInteractiveMode });
+	const mode = new FakeInteractiveMode(createSession("main"));
+	const ui = mode.createExtensionUIContext();
+
+	ui.setSessionSwitcher("flow-driver", {
+		items: [{ id: "x/run-001", label: "x/run-001" }],
+		onSelect: () => {},
+	});
+	mode.defaultEditor.onExtensionShortcut = () => false;
+	ui.setSessionSwitcher("flow-driver", {
+		items: [{ id: "x/run-001", label: "x/run-001" }],
+		onSelect: () => {},
+	});
+
+	assert.equal(mode.defaultEditor.onExtensionShortcut("\x1b[B"), true);
+});
+
 test("session view patch is idempotent", () => {
 	class FakeInteractiveMode {
 		get session() {

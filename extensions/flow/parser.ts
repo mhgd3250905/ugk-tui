@@ -79,5 +79,22 @@ export function parseFlowCommand(args: string): FlowRequest {
 		return { kind: "task-review", runId };
 	}
 
+	const acceptPrefix = "task accept";
+	if (text === acceptPrefix) return { kind: "error", message: "Usage: /flow task accept <run-id>" };
+	if (text.startsWith(`${acceptPrefix} `)) {
+		const runId = text.slice(acceptPrefix.length).trim();
+		if (!runId) return { kind: "error", message: "Usage: /flow task accept <run-id>" };
+		return { kind: "task-accept", runId };
+	}
+
+	const rejectPrefix = "task reject";
+	if (text === rejectPrefix) return { kind: "error", message: "Usage: /flow task reject <run-id> [reason]" };
+	if (text.startsWith(`${rejectPrefix} `)) {
+		const rest = text.slice(rejectPrefix.length).trim();
+		const match = rest.match(/^(\S+)(?:\s+([\s\S]+))?$/);
+		if (!match) return { kind: "error", message: "Usage: /flow task reject <run-id> [reason]" };
+		return { kind: "task-reject", runId: match[1], reason: match[2] ? unquote(match[2]) : undefined };
+	}
+
 	return { kind: "help" };
 }

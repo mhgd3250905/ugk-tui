@@ -3,6 +3,7 @@ export type ChromeCdpAction = "status" | "tabs" | "navigate" | "evaluate" | "scr
 
 export interface ChromeCdpState {
 	mode: ChromeCdpMode;
+	sessionAllowed: boolean;
 	runtimePort?: number;
 	envPort?: number;
 }
@@ -34,12 +35,22 @@ function parsePort(value: unknown): number | undefined {
 export function createChromeCdpState(env: Record<string, string | undefined> = process.env): ChromeCdpState {
 	return {
 		mode: "ask",
+		sessionAllowed: false,
 		envPort: parsePort(env.UGK_CDP_PORT),
 	};
 }
 
 export function setChromeCdpMode(state: ChromeCdpState, mode: ChromeCdpMode): void {
 	state.mode = mode;
+	clearChromeCdpSessionAllow(state);
+}
+
+export function grantChromeCdpSessionAllow(state: ChromeCdpState): void {
+	state.sessionAllowed = true;
+}
+
+export function clearChromeCdpSessionAllow(state: ChromeCdpState): void {
+	state.sessionAllowed = false;
 }
 
 export function setChromeCdpPort(state: ChromeCdpState, port: number): void {
@@ -78,6 +89,6 @@ export function checkChromeCdpPolicy(
 
 	return {
 		allowed: true,
-		requiresConfirmation: state.mode === "ask",
+		requiresConfirmation: state.mode === "ask" && !state.sessionAllowed,
 	};
 }

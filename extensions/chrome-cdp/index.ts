@@ -12,6 +12,7 @@ import {
 import {
 	checkChromeCdpPolicy,
 	createChromeCdpState,
+	grantChromeCdpSessionAllow,
 	resolveChromeCdpPort,
 	setChromeCdpMode,
 	setChromeCdpPort,
@@ -22,6 +23,11 @@ import { formatChromeCdpStatus, formatChromeTabs } from "./formatter.ts";
 import { launchChromeCdp, launchChromeCdpAndWait } from "./launcher.ts";
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
+type ChromeCdpConfirmation = "allow-once" | "allow-session" | "deny";
+
+const CHROME_CDP_ALLOW_ONCE = "Allow once";
+const CHROME_CDP_ALLOW_SESSION = "Allow for this session";
+const CHROME_CDP_DENY = "Deny";
 
 export interface ChromeCdpDeps {
 	getStatus?: (port: number) => Promise<Awaited<ReturnType<typeof getChromeCdpStatus>>>;
@@ -48,9 +54,36 @@ function defaultDeps(): Required<ChromeCdpDeps> {
 	};
 }
 
-async function confirmChromeCdpUse(ctx: any, params: any): Promise<boolean> {
-	if (!ctx.hasUI || !ctx.ui?.confirm) return false;
-	return ctx.ui.confirm(
+async function confirmChromeCdpUse(ctx: any, params: any): Promise<ChromeCdpConfirmation> {
+	if (!ctx.hasUI) return "deny";
+	const prompt = [
+		"Allow Chrome CDP?",
+		"",
+		[
+			"An agent wants to control your local logged-in Chrome session.",
+			params.url ? `URL: ${params.url}` : params.target ? `Target: ${params.target}` : "",
+			`Reason: ${params.reason}`,
+			"Allow this browser operation?",
+		]
+			.filter(Boolean)
+			.join("\n"),
+	]
+		.filter(Boolean)
+		.join("\n");
+
+	if (ctx.ui?.select) {
+		const choice = await ctx.ui.select(prompt, [
+			CHROME_CDP_ALLOW_ONCE,
+			CHROME_CDP_ALLOW_SESSION,
+			CHROME_CDP_DENY,
+		]);
+		if (choice === CHROME_CDP_ALLOW_SESSION) return "allow-session";
+		if (choice === CHROME_CDP_ALLOW_ONCE) return "allow-once";
+		return "deny";
+	}
+
+	if (!ctx.ui?.confirm) return "deny";
+	return (await ctx.ui.confirm(
 		"Allow Chrome CDP?",
 		[
 			"An agent wants to control your local logged-in Chrome session.",
@@ -60,7 +93,9 @@ async function confirmChromeCdpUse(ctx: any, params: any): Promise<boolean> {
 		]
 			.filter(Boolean)
 			.join("\n"),
-	);
+	))
+		? "allow-once"
+		: "deny";
 }
 
 function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps>) {
@@ -106,8 +141,14 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 				normalAccessAttempted: params.normalAccessAttempted,
 			});
 			if (!policy.allowed) return textResult(policy.reason, { blocked: true });
-			if (policy.requiresConfirmation && !(await confirmChromeCdpUse(ctx, params))) {
-				return textResult("Chrome CDP request denied by user.", { blocked: true });
+			if (policy.requiresConfirmation) {
+				const confirmation = await confirmChromeCdpUse(ctx, params);
+				if (confirmation === "deny") {
+					return textResult("Chrome CDP request denied by user.", { blocked: true });
+				}
+				if (confirmation === "allow-session") {
+					grantChromeCdpSessionAllow(state);
+				}
 			}
 
 			const port = resolveChromeCdpPort(state, { port: params.port });

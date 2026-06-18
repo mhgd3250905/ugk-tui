@@ -19,17 +19,28 @@ function makePi() {
 	};
 }
 
-function makeCtx(confirmResult = true) {
+function makeCtx(confirmResult: boolean | string = true) {
 	const notifications: string[] = [];
+	const selections: Array<{ title: string; options: string[] }> = [];
+	const confirms: Array<{ title: string; message: string }> = [];
 	return {
 		notifications,
+		selections,
+		confirms,
 		ctx: {
 			hasUI: true,
 			ui: {
 				notify(message: string) {
 					notifications.push(message);
 				},
-				confirm: async () => confirmResult,
+				confirm: async (title: string, message: string) => {
+					confirms.push({ title, message });
+					return confirmResult === true;
+				},
+				select: async (title: string, options: string[]) => {
+					selections.push({ title, options });
+					return typeof confirmResult === "string" ? confirmResult : confirmResult ? options[0] : options.at(-1);
+				},
 			},
 		},
 	};
@@ -147,4 +158,36 @@ test("chrome_cdp tool refuses non-status actions when normal access was not atte
 
 	assert.equal(tabsCalled, false);
 	assert.match(result.content[0].text, /ordinary access/i);
+});
+
+test("chrome_cdp can be allowed for the current session without prompting again", async () => {
+	const allowForSession = "Allow for this session";
+	const { pi, tools } = makePi();
+	const { ctx, selections } = makeCtx(allowForSession);
+	let tabsCalled = 0;
+	registerChromeCdp(pi as any, {
+		listTabs: async () => {
+			tabsCalled += 1;
+			return [{ id: "tab-1", type: "page", title: "Private", url: "https://private.example.com" }];
+		},
+	});
+
+	await tools.get("chrome_cdp").execute(
+		"tool-1",
+		{ action: "tabs", reason: "Requires logged-in Chrome session", normalAccessAttempted: true },
+		undefined,
+		undefined,
+		ctx,
+	);
+	await tools.get("chrome_cdp").execute(
+		"tool-2",
+		{ action: "tabs", reason: "Requires logged-in Chrome session", normalAccessAttempted: true },
+		undefined,
+		undefined,
+		ctx,
+	);
+
+	assert.equal(tabsCalled, 2);
+	assert.equal(selections.length, 1);
+	assert.deepEqual(selections[0].options, ["Allow once", "Allow for this session", "Deny"]);
 });

@@ -36,6 +36,15 @@ test("parses prove run review and status commands", () => {
 		kind: "task-review",
 		runId: "run-001",
 	});
+	assert.deepEqual(parseFlowCommand("task accept run-001"), {
+		kind: "task-accept",
+		runId: "run-001",
+	});
+	assert.deepEqual(parseFlowCommand('task reject run-001 "证据不足"'), {
+		kind: "task-reject",
+		runId: "run-001",
+		reason: "证据不足",
+	});
 	assert.deepEqual(parseFlowCommand("status"), {
 		kind: "status",
 	});

@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
 	checkChromeCdpPolicy,
+	clearChromeCdpSessionAllow,
 	createChromeCdpState,
+	grantChromeCdpSessionAllow,
 	resolveChromeCdpPort,
 	setChromeCdpMode,
 	setChromeCdpPort,
@@ -98,4 +100,29 @@ test("checkChromeCdpPolicy requires confirmation in ask mode and allows in on mo
 		allowed: true,
 		requiresConfirmation: false,
 	});
+});
+
+test("session allow skips ask confirmation until mode changes clear it", () => {
+	const state = createChromeCdpState({});
+	const request = {
+		action: "tabs",
+		reason: "Requires logged-in Chrome session",
+		normalAccessAttempted: true,
+	} as const;
+
+	assert.equal(checkChromeCdpPolicy(state, request).requiresConfirmation, true);
+
+	grantChromeCdpSessionAllow(state);
+	assert.equal(checkChromeCdpPolicy(state, request).requiresConfirmation, false);
+
+	clearChromeCdpSessionAllow(state);
+	assert.equal(checkChromeCdpPolicy(state, request).requiresConfirmation, true);
+
+	grantChromeCdpSessionAllow(state);
+	setChromeCdpMode(state, "ask");
+	assert.equal(checkChromeCdpPolicy(state, request).requiresConfirmation, true);
+
+	grantChromeCdpSessionAllow(state);
+	setChromeCdpMode(state, "off");
+	assert.equal(state.sessionAllowed, false);
 });

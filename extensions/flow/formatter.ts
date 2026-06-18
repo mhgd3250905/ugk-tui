@@ -14,6 +14,10 @@ export function formatFlowQueued(request: FlowRequest): string {
 			return `Flow 已排队: 运行 Task ${request.taskId}${inputSuffix(request.input)}`;
 		case "task-review":
 			return `Flow 已排队: 复盘 Run ${request.runId}`;
+		case "task-accept":
+			return `Flow review accepted: ${request.runId}`;
+		case "task-reject":
+			return `Flow review rejected: ${request.runId}`;
 		case "status":
 			return "Flow 已排队: 查看状态";
 		case "attach":

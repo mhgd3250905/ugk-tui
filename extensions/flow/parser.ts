@@ -114,5 +114,7 @@ export function parseFlowCommand(args: string): FlowRequest {
 		return { kind: "task-delete", taskId };
 	}
 
+	if (text === "reset-signing") return { kind: "reset-signing" };
+
 	return { kind: "help" };
 }

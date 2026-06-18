@@ -27,6 +27,8 @@ import {
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
 import { lockTaskAssets, type FlowWriteGuard } from "./flow-write-guard.ts";
+import { autoMigrateIfNeeded, resignAllRecords } from "./flow-resign.ts";
+import { closeMigrationWindow } from "./task-store.ts";
 import {
 	isTransientDriverStatus,
 	readTaskMetadata,
@@ -787,6 +789,24 @@ export function registerFlow(pi: ExtensionAPI): void {
 				return;
 			}
 
+			if (request.kind === "reset-signing") {
+				const confirmed = await ctx.ui.confirm(
+					"Reset Flow record signatures",
+					"This will re-sign all Flow task/review/validation records with the current key. It trusts their current content. Continue?",
+				);
+				if (!confirmed) {
+					ctx.ui.notify("Flow reset-signing cancelled.", "info");
+					return;
+				}
+				const result = resignAllRecords(getCwd(ctx), "manual /flow reset-signing");
+				closeMigrationWindow(getCwd(ctx));
+				ctx.ui.notify(
+					`Flow records re-signed: ${result.tasks} tasks, ${result.reviews} reviews, ${result.validations} validations (${result.skipped} skipped).`,
+					"info",
+				);
+				return;
+			}
+
 			if (request.kind === "task-create") {
 				pendingCreateTaskIds = new Set(listConsoleTasks(getCwd(ctx)).map((task) => task.id));
 			}
@@ -847,6 +867,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		// 启动期自动迁移:迁移窗口内,一次性重签所有旧记录 + 关窗口。
+		// 解决多 task / 跨机器场景(第一个 task 关窗口前,其他旧 task 无签名被拒)。
+		autoMigrateIfNeeded(getCwd(ctx));
 		const entries = ctx.sessionManager?.getEntries?.() ?? [];
 		driverView.restoreFromEntries(entries);
 		if (driverView.focusState.focus === "driver") {

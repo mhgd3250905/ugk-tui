@@ -13,6 +13,7 @@ export function buildFlowHelpText(): string {
 		"- /flow task accept <task-id>/<run-id> 用户确认且 Task 设计已更新或确认无需更新后接受 review，推进 Task 为 verified",
 		"- /flow task reject <task-id>/<run-id> [reason] 驳回 review，标记 Task 需要修正",
 		"- /flow task delete <task-id> 删除 Task 和它的所有历史 run",
+		"- /flow reset-signing 重新签名所有 Flow 记录(密钥丢失/换机器后恢复用)",
 		"- /flow attach 选择一个正在运行或可恢复的 driver",
 		"- /flow attach <run-id> 或 /flow attach <task-id>/<run-id> 直接进入指定 driver",
 		"- /flow detach 退出当前 driver focus",

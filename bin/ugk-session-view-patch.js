@@ -1,9 +1,10 @@
-import { matchesKey } from "@earendil-works/pi-tui";
+import { matchesKey, Spacer } from "@earendil-works/pi-tui";
 
 const PATCHED = Symbol.for("ugk.sessionViewPatch.installed");
 const ACTIVE_VIEW = Symbol.for("ugk.sessionViewPatch.activeView");
 const SESSION_SWITCHER = Symbol.for("ugk.sessionViewPatch.sessionSwitcher");
 const SESSION_SWITCHER_SHORTCUT = Symbol.for("ugk.sessionViewPatch.sessionSwitcherShortcut");
+const STABLE_STATUS_AREA = Symbol.for("ugk.sessionViewPatch.stableStatusArea");
 const SESSION_SWITCHER_WIDGET_KEY = "ugk-session-switcher";
 
 function getEditorText(mode) {
@@ -66,6 +67,60 @@ function setSessionSwitcherWidget(mode, state) {
 			: undefined,
 		{ placement: "belowEditor" },
 	);
+	return true;
+}
+
+function installStableStatusArea(mode) {
+	const container = mode.statusContainer;
+	if (!container || container[STABLE_STATUS_AREA] || typeof container.clear !== "function" || typeof container.addChild !== "function") {
+		return false;
+	}
+
+	const spacer = new Spacer(2);
+	const originalClear = container.clear.bind(container);
+	const originalAddChild = container.addChild.bind(container);
+	const originalRemoveChild = typeof container.removeChild === "function" ? container.removeChild.bind(container) : undefined;
+	const hasSpacer = () => Array.isArray(container.children) && container.children.includes(spacer);
+	const addSpacer = () => {
+		if (!hasSpacer()) {
+			originalAddChild(spacer);
+		}
+	};
+	const removeSpacer = () => {
+		if (!hasSpacer()) {
+			return;
+		}
+		if (originalRemoveChild) {
+			originalRemoveChild(spacer);
+			return;
+		}
+		container.children = container.children.filter((child) => child !== spacer);
+	};
+
+	container.clear = () => {
+		originalClear();
+		addSpacer();
+	};
+	container.addChild = (component) => {
+		if (component !== spacer) {
+			removeSpacer();
+		}
+		originalAddChild(component);
+	};
+	if (originalRemoveChild) {
+		container.removeChild = (component) => {
+			originalRemoveChild(component);
+			if (component !== spacer && Array.isArray(container.children) && container.children.length === 0) {
+				addSpacer();
+			}
+		};
+	}
+
+	Object.defineProperty(container, STABLE_STATUS_AREA, {
+		configurable: false,
+		value: true,
+	});
+	container.clear();
 	return true;
 }
 
@@ -173,6 +228,7 @@ export function installUgkSessionViewPatch({ InteractiveMode } = {}) {
 	const sessionManagerDescriptor = Object.getOwnPropertyDescriptor(proto, "sessionManager");
 	const originalCreateExtensionUIContext = proto.createExtensionUIContext;
 	const originalSetupExtensionShortcuts = proto.setupExtensionShortcuts;
+	const originalInit = proto.init;
 	if (
 		typeof sessionDescriptor?.get !== "function" ||
 		typeof agentDescriptor?.get !== "function" ||
@@ -209,7 +265,16 @@ export function installUgkSessionViewPatch({ InteractiveMode } = {}) {
 		};
 	}
 
+	if (typeof originalInit === "function") {
+		proto.init = async function initUgkSessionViewPatch(...args) {
+			const result = await originalInit.apply(this, args);
+			installStableStatusArea(this);
+			return result;
+		};
+	}
+
 	proto.createExtensionUIContext = function createUgkExtensionUIContext() {
+		installStableStatusArea(this);
 		const ui = originalCreateExtensionUIContext.call(this);
 		return {
 			...ui,

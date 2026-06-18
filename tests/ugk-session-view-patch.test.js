@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Container } from "@earendil-works/pi-tui";
 import { installUgkSessionViewPatch } from "../bin/ugk-session-view-patch.js";
 
 function createSession(name) {
@@ -241,6 +242,48 @@ test("session switcher rewraps editor shortcuts after pi replaces them", () => {
 	});
 
 	assert.equal(mode.defaultEditor.onExtensionShortcut("\x1b[B"), true);
+});
+
+test("session view patch keeps status area height stable across loading clears", async () => {
+	class FakeInteractiveMode {
+		constructor(mainSession) {
+			this.runtimeHost = { session: mainSession };
+			this.statusContainer = new Container();
+		}
+
+		get session() {
+			return this.runtimeHost.session;
+		}
+
+		get agent() {
+			return this.session.agent;
+		}
+
+		get sessionManager() {
+			return this.session.sessionManager;
+		}
+
+		async init() {}
+
+		createExtensionUIContext() {
+			return {};
+		}
+	}
+
+	installUgkSessionViewPatch({ InteractiveMode: FakeInteractiveMode });
+	const mode = new FakeInteractiveMode(createSession("main"));
+
+	await mode.init();
+	assert.deepEqual(mode.statusContainer.render(80), ["", ""]);
+
+	mode.statusContainer.addChild({
+		render: () => ["", "Working..."],
+		invalidate: () => {},
+	});
+	assert.deepEqual(mode.statusContainer.render(80), ["", "Working..."]);
+
+	mode.statusContainer.clear();
+	assert.deepEqual(mode.statusContainer.render(80), ["", ""]);
 });
 
 test("session view patch is idempotent", () => {

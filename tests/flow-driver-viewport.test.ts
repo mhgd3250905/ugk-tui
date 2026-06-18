@@ -30,10 +30,12 @@ function makeFakeCtx(): ExtensionContext & {
 	_widgets: Map<string, unknown>;
 	_statuses: Map<string, string | undefined>;
 	_notifies: Array<{ message: string; type?: string }>;
+	_switcherCalls: Array<{ owner: string; options?: unknown }>;
 } {
 	const widgets = new Map<string, unknown>();
 	const statuses = new Map<string, string | undefined>();
 	const notifies: Array<{ message: string; type?: string }> = [];
+	const switcherCalls: Array<{ owner: string; options?: unknown }> = [];
 	const ctx = {
 		cwd: "/fake-cwd",
 		hasUI: true,
@@ -43,6 +45,7 @@ function makeFakeCtx(): ExtensionContext & {
 			notify: (message: string, type?: string) => notifies.push({ message, type }),
 			setWidget: (key: string, value: unknown) => widgets.set(key, value),
 			setStatus: (key: string, value: string | undefined) => statuses.set(key, value),
+			setSessionSwitcher: (owner: string, options?: unknown) => switcherCalls.push({ owner, options }),
 			select: async () => undefined,
 			input: async () => undefined,
 			confirm: async () => false,
@@ -50,11 +53,13 @@ function makeFakeCtx(): ExtensionContext & {
 		_widgets: widgets,
 		_statuses: statuses,
 		_notifies: notifies,
+		_switcherCalls: switcherCalls,
 	};
 	return ctx as unknown as ExtensionContext & {
 		_widgets: Map<string, unknown>;
 		_statuses: Map<string, string | undefined>;
 		_notifies: Array<{ message: string; type?: string }>;
+		_switcherCalls: Array<{ owner: string; options?: unknown }>;
 	};
 }
 
@@ -147,4 +152,44 @@ test("restoreFromEntries restores a persisted driver focus", () => {
 	]);
 	assert.equal(view.focusState.focus, "driver");
 	assert.equal(view.focusState.runId, "r1");
+});
+
+test("updateSwitcher populates items including a 'main' entry when focused on a driver", () => {
+	const ctx = makeFakeCtx();
+	const session = makeFakeSession("task-a", "run-001");
+	const sessions = new Map([["task-a/run-001", session]]);
+	const summary: FlowDriverSummary = { taskId: "task-a", runId: "run-001", status: "running", runDir: "/fake" };
+	const view = createDriverView(makeDeps(sessions, new Set(["task-a/run-001"]), [summary]));
+
+	view.focus(summary, ctx);
+	view.updateSwitcher(ctx);
+
+	const last = (ctx as any)._switcherCalls.at(-1);
+	assert.ok(last?.options, "switcher should be set with options");
+	const items = (last.options as { items: Array<{ id: string; label: string; active?: boolean }> }).items;
+	const ids = items.map((i) => i.id);
+	assert.ok(ids.includes("main"), "switcher must include a 'main' entry when focused on a driver");
+	assert.ok(ids.includes("task-a/run-001"), "switcher must include the focused driver");
+});
+
+test("updateSwitcher clears switcher when no drivers are viewable", () => {
+	const ctx = makeFakeCtx();
+	const view = createDriverView(makeDeps(new Map(), new Set(), []));
+	view.updateSwitcher(ctx);
+	const last = (ctx as any)._switcherCalls.at(-1);
+	assert.equal(last?.options, undefined, "switcher should be cleared when no drivers");
+});
+
+test("focusState getter returns a copy, not the internal reference", () => {
+	const ctx = makeFakeCtx();
+	const session = makeFakeSession("t", "r1");
+	const sessions = new Map([["t/r1", session]]);
+	const summary: FlowDriverSummary = { taskId: "t", runId: "r1", status: "running", runDir: "/f" };
+	const view = createDriverView(makeDeps(sessions, new Set(["t/r1"]), [summary]));
+	view.focus(summary, ctx);
+
+	const snapshot = view.focusState;
+	// 外部就地 mutate 不应影响内部状态
+	(snapshot as { runId: string }).runId = "tampered";
+	assert.equal(view.focusState.runId, "r1", "internal focusState must not be mutated by external aliasing");
 });

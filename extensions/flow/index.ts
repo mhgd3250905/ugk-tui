@@ -933,7 +933,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		if (ctx) {
-			detachVisibleSessionView(ctx);
+			driverView.detachSessionView(ctx);
 		}
 		for (const driver of liveDrivers.values()) {
 			const status = readDriverStatus(driver.runDir);

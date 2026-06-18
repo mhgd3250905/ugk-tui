@@ -81,6 +81,8 @@ export interface DriverView {
 	refreshFocus(ctx: ExtensionContext, driver?: FlowDriverSummary, options?: { skipSessionViewDetach?: boolean }): void;
 	/** 刷新 session switcher(右上角会话切换)。 */
 	updateSwitcher(ctx: ExtensionContext): void;
+	/** 仅 detach 当前 session view(不改变 focus,不刷 UI)。供 session_shutdown 单独调用。 */
+	detachSessionView(ctx: ExtensionContext): void;
 	/** 当前 attach 的 session view driverKey(供外部判断 widget 该不该刷)。 */
 	readonly activeSessionViewDriverKey: string | undefined;
 }
@@ -332,7 +334,8 @@ export function createDriverView(deps: DriverViewDeps): DriverView {
 
 	return {
 		get focusState() {
-			return state.focusState;
+			// 浅拷贝,防止外部拿到引用后就地 mutate 污染内部状态。
+			return { ...state.focusState };
 		},
 		get activeSessionViewDriverKey() {
 			return state.activeSessionViewDriverKey;
@@ -345,5 +348,8 @@ export function createDriverView(deps: DriverViewDeps): DriverView {
 		refreshActivity,
 		refreshFocus,
 		updateSwitcher,
+		detachSessionView(ctx) {
+			detachVisibleSessionView(ctx.ui as FlowSessionViewUi, state);
+		},
 	};
 }

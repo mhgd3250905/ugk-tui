@@ -47,6 +47,29 @@ test("driver session starts with the generated prompt and records transcript tai
 	assert.equal(driver.visibleSession, sessionHandle);
 });
 
+test("driver session fails when an expected tool is missing from the driver environment", async () => {
+	const factory: DriverSessionFactory = async () => ({
+		session: {
+			isStreaming: false,
+			getAllTools() {
+				return [{ name: "read" }, { name: "bash" }];
+			},
+			subscribe() {
+				return () => {};
+			},
+			async prompt() {},
+			async steer() {},
+			async followUp() {},
+			dispose() {},
+		},
+	});
+
+	await assert.rejects(
+		() => createFlowDriverSession({ ...createOptions(), expectedToolNames: ["chrome_cdp"] }, factory),
+		/Flow driver environment is missing expected tools: chrome_cdp/,
+	);
+});
+
 test("driver session notifies when transcript receives text deltas", async () => {
 	let listener: ((event: any) => void) | undefined;
 	let updates = 0;

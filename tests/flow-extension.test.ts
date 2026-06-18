@@ -67,6 +67,9 @@ function makeCtx(cwd = process.cwd()) {
 					return [];
 				},
 			},
+			getAllTools() {
+				return [];
+			},
 			ui: {
 				notify(message: string, type?: string) {
 					notifications.push({ message, type });
@@ -489,6 +492,40 @@ test("/flow task prove passes a confirmation-capable driver UI proxy", async () 
 		assert.deepEqual(confirms, [{ title: "Allow Chrome CDP?", message: "driver needs logged-in Chrome" }]);
 		assert.equal(status.has("driver-probe"), false);
 		assert.equal(widgets.has("driver-probe"), false);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow task prove passes main critical tools as expected driver tools", async () => {
+	let expectedToolNames: string[] | undefined;
+	setFlowDriverSessionFactoryForTests(async (options: any) => {
+		expectedToolNames = options.expectedToolNames;
+		return {
+			taskId: "x",
+			runId: "run-001",
+			runDir: options.runDir,
+			async start() {},
+			async sendUserInput() {},
+			getTranscriptText() {
+				return "";
+			},
+			getWidgetLines() {
+				return ["driver"];
+			},
+			dispose() {},
+		};
+	});
+	try {
+		const { pi, commands } = makePi();
+		const { ctx } = makeCtx();
+		ctx.cwd = makeTempTaskProject("x");
+		ctx.getAllTools = () => [{ name: "read" }, { name: "chrome_cdp" }, { name: "scrcpy" }];
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove x", ctx);
+
+		assert.deepEqual(expectedToolNames, ["chrome_cdp"]);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}

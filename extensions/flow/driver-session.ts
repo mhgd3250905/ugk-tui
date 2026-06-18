@@ -14,6 +14,7 @@ export interface FlowDriverSessionOptions {
 	runId: string;
 	runDir: string;
 	initialPrompt: string;
+	expectedToolNames?: string[];
 	onTranscriptUpdate?: () => void;
 	uiContext?: ExtensionUIContext;
 	extensionMode?: ExtensionMode;
@@ -32,6 +33,7 @@ type DriverSessionEvent = {
 export interface DriverSessionLike {
 	readonly sessionFile?: string;
 	readonly isStreaming: boolean;
+	getAllTools?(): Array<{ name: string }>;
 	subscribe(listener: (event: DriverSessionEvent) => void): () => void;
 	prompt(text: string): Promise<void>;
 	steer(text: string): Promise<void>;
@@ -40,6 +42,17 @@ export interface DriverSessionLike {
 }
 
 export type DriverSessionFactory = (options: FlowDriverSessionOptions) => Promise<{ session: DriverSessionLike }>;
+
+export function assertExpectedDriverTools(session: DriverSessionLike, expectedToolNames: string[] = []): void {
+	if (expectedToolNames.length === 0) {
+		return;
+	}
+	const availableToolNames = new Set(session.getAllTools?.().map((tool) => tool.name) ?? []);
+	const missing = expectedToolNames.filter((name) => !availableToolNames.has(name));
+	if (missing.length > 0) {
+		throw new Error(`Flow driver environment is missing expected tools: ${missing.join(", ")}`);
+	}
+}
 
 function formatRuntimeEvent(event: DriverSessionEvent): string | undefined {
 	if (event.type === "agent_start") {
@@ -176,6 +189,7 @@ export async function createFlowDriverSession(
 	factory: DriverSessionFactory = defaultDriverSessionFactory,
 ): Promise<FlowDriverSession> {
 	const { session } = await factory(options);
+	assertExpectedDriverTools(session, options.expectedToolNames);
 	const transcript = new DriverTranscriptTail();
 	const unsubscribe = session.subscribe((event) => {
 		if (

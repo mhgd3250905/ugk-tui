@@ -65,6 +65,7 @@ const TRANSIENT_DRIVER_STATUSES: FlowDriverStatus[] = [
 	"validating",
 ];
 const FLOW_SESSION_VIEW_OWNER = "flow-driver";
+const FLOW_DRIVER_CRITICAL_TOOL_NAMES = ["chrome_cdp"];
 
 type ActionableFlowRequest = Exclude<FlowRequest, { kind: "help" } | { kind: "error"; message: string }>;
 type TaskGuardResult =
@@ -253,6 +254,11 @@ export function registerFlow(pi: ExtensionAPI): void {
 
 	function getCwd(ctx: ExtensionContext): string {
 		return typeof ctx.cwd === "string" ? ctx.cwd : process.cwd();
+	}
+
+	function getExpectedDriverToolNames(ctx: ExtensionContext): string[] {
+		const available = new Set(ctx.getAllTools?.().map((tool) => tool.name) ?? []);
+		return FLOW_DRIVER_CRITICAL_TOOL_NAMES.filter((name) => available.has(name));
 	}
 
 	function listConsoleTasks(cwd: string): Array<{ id: string; status?: string }> {
@@ -633,6 +639,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 				runId,
 				runDir: artifacts.runDir,
 				initialPrompt,
+				expectedToolNames: getExpectedDriverToolNames(ctx),
 				onTranscriptUpdate: scheduleTranscriptWidgetRefresh,
 				uiContext: ctx.hasUI ? createFlowDriverUiContext(ctx.ui, driverKey) : undefined,
 				extensionMode: "print",

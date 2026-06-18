@@ -145,7 +145,7 @@ index.ts (1159行)              ← 命令路由 + driver 进程胶水 + UI 副�
 
 ```bash
 npm test          # 323 pass / 0 fail
-git log --oneline main..HEAD   # 列出全部 commit(当前 19 个,全部属于状态机主题)
+git log --oneline main..HEAD   # 列出全部 commit
 ```
 
 - 测试 270 → 323(+53):状态机 20、lifecycle-gates 11、review-actions 10、flow-fs 4、write-guard 5、其他调整。

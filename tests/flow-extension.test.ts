@@ -2202,7 +2202,7 @@ test("live driver transcript updates refresh the attached driver widget", async 
 	});
 	try {
 		const { pi, commands } = makePi();
-		const { ctx, widgets } = makeCtx(makeTempTaskProject("x"));
+		const { ctx, widgets, widgetCalls } = makeCtx(makeTempTaskProject("x"));
 		registerFlow(pi as any);
 
 		await commands.get("flow").handler("task prove x", ctx);
@@ -2210,10 +2210,17 @@ test("live driver transcript updates refresh the attached driver widget", async 
 		assert.equal(typeof onTranscriptUpdate, "function");
 
 		widgetLines = ["fresh live line"];
+		const before = widgetCalls.filter((call) => call.key === "flow-driver-view").length;
 		onTranscriptUpdate!();
 		await sleep(0);
 
 		assert.deepEqual(widgets.get("flow-driver-view"), ["fresh live line"]);
+		assert.equal(widgetCalls.filter((call) => call.key === "flow-driver-view").length, before + 1);
+
+		onTranscriptUpdate!();
+		await sleep(0);
+
+		assert.equal(widgetCalls.filter((call) => call.key === "flow-driver-view").length, before + 1);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}

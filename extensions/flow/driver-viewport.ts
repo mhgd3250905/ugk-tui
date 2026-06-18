@@ -85,6 +85,8 @@ export interface DriverView {
 	detachSessionView(ctx: ExtensionContext): void;
 	/** 当前 attach 的 session view driverKey(供外部判断 widget 该不该刷)。 */
 	readonly activeSessionViewDriverKey: string | undefined;
+	/** 更新 Flow driver widget;内容未变化时跳过,避免 TUI 重建 widget 导致滚动跳动。 */
+	setWidget(ctx: ExtensionContext, lines: string[] | undefined): void;
 }
 
 function transcriptPreview(text: string, maxLines = 3): string[] {
@@ -194,17 +196,28 @@ function attachVisibleSessionView(
 interface DriverViewState {
 	focusState: FlowFocusState;
 	activeSessionViewDriverKey: string | undefined;
+	widgetSnapshot: string | undefined;
 }
 
 export function createDriverView(deps: DriverViewDeps): DriverView {
 	const state: DriverViewState = {
 		focusState: { focus: "main" },
 		activeSessionViewDriverKey: undefined,
+		widgetSnapshot: undefined,
+	};
+
+	const setWidget = (ctx: ExtensionContext, lines: string[] | undefined): void => {
+		const snapshot = lines === undefined ? "<flow-widget:none>" : JSON.stringify(lines);
+		if (state.widgetSnapshot === snapshot) {
+			return;
+		}
+		state.widgetSnapshot = snapshot;
+		ctx.ui.setWidget?.("flow-driver-view", lines, { placement: "aboveEditor" });
 	};
 
 	const refreshActivity = (ctx: ExtensionContext): void => {
 		const cwd = typeof ctx.cwd === "string" ? ctx.cwd : process.cwd();
-		ctx.ui.setWidget?.("flow-driver-view", buildActivityLines(deps, cwd), { placement: "aboveEditor" });
+		setWidget(ctx, buildActivityLines(deps, cwd));
 	};
 
 	const refreshFocus = (
@@ -218,17 +231,16 @@ export function createDriverView(deps: DriverViewDeps): DriverView {
 			const viewDriver = deps.getSession(deps.getDriverKey(driver.taskId, driver.runId));
 			ctx.ui.setStatus?.("flow-driver", ctx.ui.theme?.fg?.("warning", statusText) ?? statusText);
 			if (state.activeSessionViewDriverKey === deps.getDriverKey(driver.taskId, driver.runId)) {
-				ctx.ui.setWidget?.("flow-driver-view", undefined);
+				setWidget(ctx, undefined);
 				return;
 			}
-			ctx.ui.setWidget?.(
-				"flow-driver-view",
+			setWidget(
+				ctx,
 				viewDriver?.getWidgetLines() ?? [
 					`Flow driver: ${driver.taskId}/${driver.runId}`,
 					`Status: ${driver.status}`,
 					`Step: ${driver.step ?? "-"}`,
 				],
-				{ placement: "aboveEditor" },
 			);
 			return;
 		}
@@ -347,6 +359,7 @@ export function createDriverView(deps: DriverViewDeps): DriverView {
 		clear,
 		refreshActivity,
 		refreshFocus,
+		setWidget,
 		updateSwitcher,
 		detachSessionView(ctx) {
 			detachVisibleSessionView(ctx.ui as FlowSessionViewUi, state);

@@ -28,11 +28,13 @@ function makeFakeSession(taskId: string, runId: string): FlowDriverSession {
 
 function makeFakeCtx(): ExtensionContext & {
 	_widgets: Map<string, unknown>;
+	_widgetCalls: Array<{ key: string; value: unknown }>;
 	_statuses: Map<string, string | undefined>;
 	_notifies: Array<{ message: string; type?: string }>;
 	_switcherCalls: Array<{ owner: string; options?: unknown }>;
 } {
 	const widgets = new Map<string, unknown>();
+	const widgetCalls: Array<{ key: string; value: unknown }> = [];
 	const statuses = new Map<string, string | undefined>();
 	const notifies: Array<{ message: string; type?: string }> = [];
 	const switcherCalls: Array<{ owner: string; options?: unknown }> = [];
@@ -43,7 +45,10 @@ function makeFakeCtx(): ExtensionContext & {
 		isIdle: () => true,
 		ui: {
 			notify: (message: string, type?: string) => notifies.push({ message, type }),
-			setWidget: (key: string, value: unknown) => widgets.set(key, value),
+			setWidget: (key: string, value: unknown) => {
+				widgets.set(key, value);
+				widgetCalls.push({ key, value });
+			},
 			setStatus: (key: string, value: string | undefined) => statuses.set(key, value),
 			setSessionSwitcher: (owner: string, options?: unknown) => switcherCalls.push({ owner, options }),
 			select: async () => undefined,
@@ -51,12 +56,14 @@ function makeFakeCtx(): ExtensionContext & {
 			confirm: async () => false,
 		},
 		_widgets: widgets,
+		_widgetCalls: widgetCalls,
 		_statuses: statuses,
 		_notifies: notifies,
 		_switcherCalls: switcherCalls,
 	};
 	return ctx as unknown as ExtensionContext & {
 		_widgets: Map<string, unknown>;
+		_widgetCalls: Array<{ key: string; value: unknown }>;
 		_statuses: Map<string, string | undefined>;
 		_notifies: Array<{ message: string; type?: string }>;
 		_switcherCalls: Array<{ owner: string; options?: unknown }>;
@@ -100,6 +107,36 @@ test("focus moves to a driver and renders its widget", () => {
 	// widget 被写入(驱动 transcript 行)
 	const widget = (ctx as any)._widgets.get("flow-driver-view");
 	assert.ok(Array.isArray(widget));
+});
+
+test("repeated driver widget updates with identical lines are skipped", () => {
+	const ctx = makeFakeCtx();
+	const view = createDriverView(makeDeps(new Map(), new Set(), []));
+
+	view.setWidget(ctx, ["same line"]);
+	view.setWidget(ctx, ["same line"]);
+
+	assert.equal((ctx as any)._widgetCalls.length, 1);
+	assert.deepEqual((ctx as any)._widgets.get("flow-driver-view"), ["same line"]);
+});
+
+test("refreshActivity skips widget rebuilds when activity content is unchanged", () => {
+	const ctx = makeFakeCtx();
+	const session = makeFakeSession("task-a", "run-001");
+	const sessions = new Map([["task-a/run-001", session]]);
+	const summary: FlowDriverSummary = {
+		taskId: "task-a",
+		runId: "run-001",
+		status: "running",
+		runDir: "/fake/task-a/run-001",
+	};
+	const view = createDriverView(makeDeps(sessions, new Set(["task-a/run-001"]), [summary]));
+
+	view.refreshActivity(ctx);
+	view.refreshActivity(ctx);
+
+	assert.equal((ctx as any)._widgetCalls.length, 1);
+	assert.match(((ctx as any)._widgets.get("flow-driver-view") as string[]).join("\n"), /Flow Activity/);
 });
 
 test("clear returns focus to main and clears driver status", () => {

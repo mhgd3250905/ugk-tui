@@ -254,6 +254,7 @@ export function buildDriverInitialPrompt(args: { taskId: string; runId: string; 
 		"",
 		"执行要求：",
 		"- 按 SKILL.md 的最优路径逐步执行。",
+		"- 如果任务需要控制本地登录态 Chrome，必须使用 chrome_cdp 工具；不要自己拼接或访问 CDP websocket/json 端点。",
 		"- 每一步都填写 todo.md 的实际执行、偏离旧方案、解决过程和证据。",
 		"- 输出写入 run/output/，证据写入 run/evidence/。",
 		"- 进度写入 progress.md。",

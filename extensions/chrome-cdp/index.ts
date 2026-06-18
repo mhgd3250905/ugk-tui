@@ -28,6 +28,16 @@ type ChromeCdpConfirmation = "allow-once" | "allow-session" | "deny";
 const CHROME_CDP_ALLOW_ONCE = "Allow once";
 const CHROME_CDP_ALLOW_SESSION = "Allow for this session";
 const CHROME_CDP_DENY = "Deny";
+const CDP_MENU_OPTIONS = [
+	"Status",
+	"Tabs",
+	"Launch Chrome",
+	"Mode: ask",
+	"Mode: on",
+	"Mode: off",
+	"Set port",
+	"Exit",
+];
 
 export interface ChromeCdpDeps {
 	getStatus?: (port: number) => Promise<Awaited<ReturnType<typeof getChromeCdpStatus>>>;
@@ -184,11 +194,36 @@ export function registerChromeCdp(pi: ExtensionAPI, overrides: ChromeCdpDeps = {
 	const state = createChromeCdpState();
 	const deps = { ...defaultDeps(), ...overrides };
 
+	async function resolveCdpArgs(args: string, ctx: any): Promise<string | undefined> {
+		if (args.trim()) return args;
+		if (!ctx.ui?.select) return "status";
+
+		const selection = await ctx.ui.select("Chrome CDP", CDP_MENU_OPTIONS);
+		if (!selection || selection === "Exit") return undefined;
+		if (selection === "Status") return "status";
+		if (selection === "Tabs") return "tabs";
+		if (selection === "Launch Chrome") return "launch";
+		if (selection === "Mode: ask") return "ask";
+		if (selection === "Mode: on") return "on";
+		if (selection === "Mode: off") return "off";
+		if (selection === "Set port") {
+			if (!ctx.ui?.input) {
+				ctx.ui.notify("Set port requires interactive input support. Use /cdp port <1-65535>.", "warning");
+				return undefined;
+			}
+			const port = await ctx.ui.input("Chrome CDP port", "1-65535");
+			return port?.trim() ? `port ${port.trim()}` : undefined;
+		}
+		return undefined;
+	}
+
 	pi.registerTool(createChromeCdpTool(state, deps));
 	pi.registerCommand("cdp", {
 		description: "Configure guarded local Chrome CDP access",
 		handler: async (args, ctx) => {
-			const [action, value] = args.trim().split(/\s+/);
+			const resolvedArgs = await resolveCdpArgs(args, ctx);
+			if (resolvedArgs === undefined) return;
+			const [action, value] = resolvedArgs.trim().split(/\s+/);
 			if (!action || action === "status") {
 				const port = resolveChromeCdpPort(state, {});
 				const status = await deps.getStatus(port);

@@ -6,6 +6,7 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionMode, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DriverTranscriptTail } from "./driver-view.ts";
 
 export interface FlowDriverSessionOptions {
@@ -28,6 +29,13 @@ type DriverSessionEvent = {
 	toolName?: string;
 	isError?: boolean;
 };
+
+const DIRECT_CHROME_CDP_PATTERNS = [
+	/\bws:\/\/(?:127\.0\.0\.1|localhost):\d+\/devtools\//i,
+	/\bhttps?:\/\/(?:127\.0\.0\.1|localhost):\d+\/json\/(?:version|list|new|activate|close)\b/i,
+	/\/devtools\/(?:page|browser)\b/i,
+	/\bwebSocketDebuggerUrl\b/i,
+];
 
 export interface DriverSessionLike {
 	readonly sessionFile?: string;
@@ -55,6 +63,52 @@ function formatRuntimeEvent(event: DriverSessionEvent): string | undefined {
 		return `[tool] ${event.toolName} ${event.isError ? "failed" : "completed"}`;
 	}
 	return undefined;
+}
+
+function collectStringValues(value: unknown, output: string[] = []): string[] {
+	if (typeof value === "string") {
+		output.push(value);
+		return output;
+	}
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			collectStringValues(item, output);
+		}
+		return output;
+	}
+	if (value && typeof value === "object") {
+		for (const item of Object.values(value as Record<string, unknown>)) {
+			collectStringValues(item, output);
+		}
+	}
+	return output;
+}
+
+export function shouldBlockDirectChromeCdpAccess(event: { toolName: string; input: Record<string, unknown> }): boolean {
+	if (event.toolName === "chrome_cdp") {
+		return false;
+	}
+	if (event.toolName !== "bash" && event.toolName !== "write" && event.toolName !== "edit") {
+		return false;
+	}
+	return collectStringValues(event.input).some((text) =>
+		DIRECT_CHROME_CDP_PATTERNS.some((pattern) => pattern.test(text))
+	);
+}
+
+function createFlowDriverCdpGuardExtension(): (pi: ExtensionAPI) => void {
+	return (pi) => {
+		pi.on("tool_call", async (event) => {
+			if (!shouldBlockDirectChromeCdpAccess(event)) {
+				return undefined;
+			}
+			return {
+				block: true,
+				reason:
+					"Flow driver blocked direct Chrome CDP endpoint access. Use the chrome_cdp tool for local logged-in Chrome operations instead of raw websocket/json endpoints.",
+			};
+		});
+	};
 }
 
 const SUPPRESSED_DRIVER_UI_METHODS = new Set<PropertyKey>([
@@ -122,7 +176,11 @@ export async function defaultDriverSessionFactory(
 	options: FlowDriverSessionOptions,
 ): Promise<{ session: DriverSessionLike }> {
 	const agentDir = getAgentDir();
-	const resourceLoader = new DefaultResourceLoader({ cwd: options.cwd, agentDir });
+	const resourceLoader = new DefaultResourceLoader({
+		cwd: options.cwd,
+		agentDir,
+		extensionFactories: [createFlowDriverCdpGuardExtension()],
+	});
 	await resourceLoader.reload();
 
 	const { session } = await createAgentSession({

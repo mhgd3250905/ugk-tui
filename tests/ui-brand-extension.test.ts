@@ -91,6 +91,58 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	header.dispose?.();
 });
 
+test("/ugk-ui with no args opens an action menu", async () => {
+	const handlers = new Map<string, Function>();
+	const commands = new Map<string, { handler: Function }>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand(name: string, options: { handler: Function }) {
+			commands.set(name, options);
+		},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	const calls: string[] = [];
+	const selections: Array<{ title: string; options: string[] }> = [];
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => [],
+		},
+		ui: {
+			setHeader: () => calls.push("header"),
+			setFooter: () => calls.push("footer"),
+			setTitle: () => {},
+			select: async (title: string, options: string[]) => {
+				selections.push({ title, options });
+				return "Turn off";
+			},
+			notify: (message: string) => calls.push(`notify:${message}`),
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await commands.get("ugk-ui")!.handler("", ctx);
+
+	assert.deepEqual(selections, [
+		{
+			title: "UGK UI",
+			options: ["Show status", "Turn off", "Turn on", "Exit"],
+		},
+	]);
+	assert.ok(calls.includes("header"));
+	assert.ok(calls.includes("footer"));
+	assert.match(calls.join("\n"), /ugk UI disabled/);
+});
+
 test("ugk brand header renders active flow driver banner", async () => {
 	const handlers = new Map<string, Function>();
 	const pi = {

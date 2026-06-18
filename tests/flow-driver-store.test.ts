@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
 	appendDriverFeedback,
+	buildDriverInitialPrompt,
 	createRunArtifacts,
 	listDriverSummaries,
 	nextRunId,
@@ -42,6 +43,17 @@ test("createRunArtifacts creates run directory and base files", () => {
 	assert.equal(status?.status, "starting");
 	assert.equal(status?.step, "not started");
 	assert.equal(status?.summary, "driver created");
+});
+
+test("driver initial prompt requires chrome_cdp instead of direct websocket access", () => {
+	const cwd = makeTempCwd();
+	const taskDir = path.join(cwd, ".flow", "tasks", "demo-task");
+	const runDir = path.join(taskDir, "runs", "run-001");
+	const prompt = buildDriverInitialPrompt({ taskId: "demo-task", runId: "run-001", taskDir, runDir });
+
+	assert.match(prompt, /chrome_cdp/);
+	assert.match(prompt, /websocket/i);
+	assert.match(prompt, /不要.*CDP.*端点/);
 });
 
 test("listDriverSummaries reads status files and sorts active runs first", () => {

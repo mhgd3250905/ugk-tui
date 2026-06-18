@@ -19,6 +19,7 @@ import { formatFlowDriverBannerText, getFlowDriverBanner, subscribeFlowDriverBan
 const VERSION = "1.0.0";
 const ENABLED_ENV_VALUES = new Set(["1", "true", "yes", "on"]);
 const DISABLED_ENV_VALUES = new Set(["0", "false", "no", "off"]);
+const UGK_UI_MENU_OPTIONS = ["Show status", "Turn off", "Turn on", "Exit"];
 
 function envDisablesBrandUi(): boolean {
 	const raw = process.env.UGK_UI;
@@ -258,7 +259,15 @@ export default function registerUgkBrandUi(pi: ExtensionAPI): void {
 	pi.registerCommand("ugk-ui", {
 		description: "Toggle ugk branded header/footer UI (on/off/status)",
 		handler: async (args, ctx) => {
-			const action = args.trim().toLowerCase() || "status";
+			let action = args.trim().toLowerCase();
+			if (!action && ctx.ui?.select) {
+				const selection = await ctx.ui.select("UGK UI", UGK_UI_MENU_OPTIONS);
+				if (!selection || selection === "Exit") return;
+				if (selection === "Show status") action = "status";
+				if (selection === "Turn off") action = "off";
+				if (selection === "Turn on") action = "on";
+			}
+			if (!action) action = "status";
 			if (action === "on" || action === "enable") {
 				enabled = true;
 				applyBrandUi(pi, ctx);

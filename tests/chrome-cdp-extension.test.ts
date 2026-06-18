@@ -77,6 +77,31 @@ test("/cdp command manages ask on off modes and port", async () => {
 	assert.match(notifications.join("\n"), /9444/);
 });
 
+test("/cdp with no args opens an action menu", async () => {
+	const { pi, commands } = makePi();
+	const { ctx, notifications, selections } = makeCtx("Tabs");
+	registerChromeCdp(pi as any, {
+		getStatus: async () => ({ online: false, port: 9222, error: "offline" }),
+		listTabs: async () => [{ id: "tab-1", type: "page", title: "Private", url: "https://private.example.com" }],
+	});
+
+	await commands.get("cdp").handler("", ctx);
+
+	assert.equal(selections.length, 1);
+	assert.equal(selections[0].title, "Chrome CDP");
+	assert.deepEqual(selections[0].options, [
+		"Status",
+		"Tabs",
+		"Launch Chrome",
+		"Mode: ask",
+		"Mode: on",
+		"Mode: off",
+		"Set port",
+		"Exit",
+	]);
+	assert.match(notifications.join("\n"), /tab-1/);
+});
+
 test("/cdp port reports invalid values without throwing", async () => {
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx();

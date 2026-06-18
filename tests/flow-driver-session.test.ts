@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
 	createFlowDriverSession,
+	shouldBlockDirectChromeCdpAccess,
 	type DriverSessionFactory,
 	type FlowDriverSessionOptions,
 } from "../extensions/flow/driver-session.ts";
@@ -45,6 +46,44 @@ test("driver session starts with the generated prompt and records transcript tai
 	assert.deepEqual(prompts, ["start driver"]);
 	assert.equal(driver.getTranscriptText(), "hello");
 	assert.equal(driver.visibleSession, sessionHandle);
+});
+
+test("direct Chrome CDP endpoint access is blocked in driver commands and file writes", () => {
+	assert.equal(
+		shouldBlockDirectChromeCdpAccess({
+			toolName: "bash",
+			input: { command: "node cdp.js ws://127.0.0.1:9222/devtools/page/tab-1" },
+		}),
+		true,
+	);
+	assert.equal(
+		shouldBlockDirectChromeCdpAccess({
+			toolName: "write",
+			input: { content: "const url = 'http://localhost:9222/json/version';" },
+		}),
+		true,
+	);
+	assert.equal(
+		shouldBlockDirectChromeCdpAccess({
+			toolName: "edit",
+			input: { newString: "const ws = data.webSocketDebuggerUrl;" },
+		}),
+		true,
+	);
+	assert.equal(
+		shouldBlockDirectChromeCdpAccess({
+			toolName: "chrome_cdp",
+			input: { action: "tabs" },
+		}),
+		false,
+	);
+	assert.equal(
+		shouldBlockDirectChromeCdpAccess({
+			toolName: "bash",
+			input: { command: "rg chrome-cdp extensions tests" },
+		}),
+		false,
+	);
 });
 
 test("driver session notifies when transcript receives text deltas", async () => {

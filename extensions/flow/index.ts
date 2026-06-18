@@ -31,6 +31,7 @@ import {
 	writeDriverStatus,
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
+import { lockTaskAssets } from "./flow-write-guard.ts";
 import {
 	isTransientDriverStatus,
 	readTaskMetadata,
@@ -609,6 +610,13 @@ export function registerFlow(pi: ExtensionAPI): void {
 			renderMainDriverActivity(ctx);
 		}
 		updateSessionSwitcher(ctx);
+		const writeGuard = lockTaskAssets(cwd, taskId);
+		let writeGuardReleased = false;
+		const releaseWriteGuard = () => {
+			if (writeGuardReleased) return;
+			writeGuardReleased = true;
+			writeGuard.unlock();
+		};
 		void liveDriver
 			.start()
 			.then(async () => {
@@ -715,6 +723,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 						`Flow driver contract failed after automatic repair: ${driverKey}\n${validation.summary}`,
 						"error",
 					);
+					releaseWriteGuard();
 					return;
 				}
 				const summary = status.summary ? `\n${status.summary}` : "";
@@ -726,11 +735,14 @@ export function registerFlow(pi: ExtensionAPI): void {
 						taskId,
 						runId,
 					});
+					releaseWriteGuard();
 					return;
 				}
+				releaseWriteGuard();
 			})
 			.catch((error) => {
 				const summary = errorMessage(error);
+				releaseWriteGuard();
 				writeDriverStatus(artifacts.runDir, {
 					taskId,
 					runId,

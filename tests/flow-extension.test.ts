@@ -2658,6 +2658,50 @@ test("session_shutdown releases task asset readonly locks held by live drivers",
 	}
 });
 
+test("session_shutdown detaches the active session view when called with a context", async () => {
+	// 回归 P1-1:session_shutdown 之前调用未定义的 detachVisibleSessionView(ctx)。
+	// 现有 shutdown 测试用 `await handler()` 无参调用,ctx 为 undefined 跳过了这行,
+	// 导致 ReferenceError 在真实框架(传 ctx)下才暴露。这个测试带上 ctx,堵住盲区。
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		visibleSession: { kind: "driver-session" },
+		async start() {
+			await new Promise(() => {});
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver"];
+		},
+		dispose() {},
+	}));
+	try {
+		const cwd = makeTempTaskProject("task-shutdown");
+		const { pi, commands, handlers } = makePi();
+		const { ctx, sessionViewCalls } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove task-shutdown", ctx);
+		await sleep(10);
+		// 显式 attach driver → 触发 session view attach
+		await commands.get("flow").handler("attach task-shutdown/run-001", ctx);
+		assert.ok(sessionViewCalls.some((c) => c.action === "attach"), "attach should register a session view");
+
+		// 带 ctx 调 shutdown(真实框架行为)——必须不抛 ReferenceError,且 detach
+		for (const handler of handlers.get("session_shutdown") ?? []) {
+			await handler({} as never, ctx);
+		}
+		assert.ok(sessionViewCalls.some((c) => c.action === "detach"), "shutdown must detach the session view");
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
 test("driver focus input writes feedback to the focused task when run ids collide", async () => {
 	const cwd = makeTempFlowProject([
 		{

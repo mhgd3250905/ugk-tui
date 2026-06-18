@@ -75,11 +75,7 @@ export function startReview(ctx: ReviewDriverContext, cwd: string): ReviewAction
 		return guard;
 	}
 	const { driver } = ctx;
-	const review = startFlowReview({
-		taskId: driver.taskId,
-		runId: driver.runId,
-		runDir: driver.runDir,
-	});
+	// 先推进 task 状态(状态机独占写权);成功后才写 review 记录,避免半提交。
 	const transitionResult = transition(cwd, driver.taskId, {
 		kind: "review-start",
 		runId: driver.runId,
@@ -88,6 +84,11 @@ export function startReview(ctx: ReviewDriverContext, cwd: string): ReviewAction
 	if (!transitionResult.ok) {
 		return fail(transitionResult.reason, "error");
 	}
+	const review = startFlowReview({
+		taskId: driver.taskId,
+		runId: driver.runId,
+		runDir: driver.runDir,
+	});
 	return { ok: true, kind: "started", review };
 }
 
@@ -101,12 +102,7 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 	if (!task) {
 		return fail(`Flow task not found: ${driver.taskId}`, "error");
 	}
-	const review = acceptFlowReview({
-		taskId: driver.taskId,
-		runId: driver.runId,
-		runDir: driver.runDir,
-		taskVersion: task.version,
-	});
+	// 先推进 task 状态(reviewing -> ready);成功后才写 accepted review,避免半提交。
 	const transitionResult = transition(cwd, driver.taskId, {
 		kind: "review-accept",
 		runId: driver.runId,
@@ -116,6 +112,12 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 	if (!transitionResult.ok) {
 		return fail(transitionResult.reason, "error");
 	}
+	const review = acceptFlowReview({
+		taskId: driver.taskId,
+		runId: driver.runId,
+		runDir: driver.runDir,
+		taskVersion: task.version,
+	});
 	return { ok: true, kind: "accepted", review };
 }
 
@@ -125,12 +127,7 @@ export function rejectReview(ctx: ReviewDriverContext, cwd: string, reason?: str
 		return guard;
 	}
 	const { driver } = ctx;
-	const review = rejectFlowReview({
-		taskId: driver.taskId,
-		runId: driver.runId,
-		runDir: driver.runDir,
-		reason,
-	});
+	// 先推进 task 状态(reviewing -> needs-work);成功后才写 rejected review,避免半提交。
 	const transitionResult = transition(cwd, driver.taskId, {
 		kind: "review-reject",
 		runId: driver.runId,
@@ -139,6 +136,12 @@ export function rejectReview(ctx: ReviewDriverContext, cwd: string, reason?: str
 	if (!transitionResult.ok) {
 		return fail(transitionResult.reason, "error");
 	}
+	const review = rejectFlowReview({
+		taskId: driver.taskId,
+		runId: driver.runId,
+		runDir: driver.runDir,
+		reason,
+	});
 	return { ok: true, kind: "rejected", review };
 }
 

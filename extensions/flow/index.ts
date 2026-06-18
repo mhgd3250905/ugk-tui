@@ -31,7 +31,7 @@ import {
 	writeDriverStatus,
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
-import { lockTaskAssets } from "./flow-write-guard.ts";
+import { lockTaskAssets, type FlowWriteGuard } from "./flow-write-guard.ts";
 import {
 	isTransientDriverStatus,
 	readTaskMetadata,
@@ -147,6 +147,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 	let focusState: FlowFocusState = { focus: "main" };
 	const liveDrivers = new Map<string, FlowDriverSession>();
 	const retainedDrivers = new Map<string, FlowDriverSession>();
+	// driver 执行期间的 task 资产只读锁,按 driverKey 索引。
+	// 所有 driver 终态(dispose/clear/shutdown)都必须释放对应 guard,否则文件永久只读。
+	const writeGuards = new Map<string, FlowWriteGuard>();
 	let activeSessionViewDriverKey: string | undefined;
 	let pendingCreateTaskIds: Set<string> | undefined;
 	let pendingTaskAssetRepair: { taskId: string; attempts: number } | undefined;
@@ -157,6 +160,15 @@ export function registerFlow(pi: ExtensionAPI): void {
 
 	function getCwd(ctx: ExtensionContext): string {
 		return typeof ctx.cwd === "string" ? ctx.cwd : process.cwd();
+	}
+
+	/** 释放某 driver 的 task 资产只读锁。幂等;所有 driver 终态路径都应调用。 */
+	function releaseWriteGuard(driverKey: string): void {
+		const guard = writeGuards.get(driverKey);
+		if (guard) {
+			guard.unlock();
+			writeGuards.delete(driverKey);
+		}
 	}
 
 	function getExpectedDriverToolNames(ctx: ExtensionContext): string[] {
@@ -610,13 +622,8 @@ export function registerFlow(pi: ExtensionAPI): void {
 			renderMainDriverActivity(ctx);
 		}
 		updateSessionSwitcher(ctx);
-		const writeGuard = lockTaskAssets(cwd, taskId);
-		let writeGuardReleased = false;
-		const releaseWriteGuard = () => {
-			if (writeGuardReleased) return;
-			writeGuardReleased = true;
-			writeGuard.unlock();
-		};
+		// driver 执行期间锁定 task 设计资产为只读;存入 map 以便所有终态路径统一释放。
+		writeGuards.set(driverKey, lockTaskAssets(cwd, taskId));
 		void liveDriver
 			.start()
 			.then(async () => {
@@ -723,7 +730,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 						`Flow driver contract failed after automatic repair: ${driverKey}\n${validation.summary}`,
 						"error",
 					);
-					releaseWriteGuard();
+					releaseWriteGuard(driverKey);
 					return;
 				}
 				const summary = status.summary ? `\n${status.summary}` : "";
@@ -735,14 +742,14 @@ export function registerFlow(pi: ExtensionAPI): void {
 						taskId,
 						runId,
 					});
-					releaseWriteGuard();
+					releaseWriteGuard(driverKey);
 					return;
 				}
-				releaseWriteGuard();
+				releaseWriteGuard(driverKey);
 			})
 			.catch((error) => {
 				const summary = errorMessage(error);
-				releaseWriteGuard();
+				releaseWriteGuard(driverKey);
 				writeDriverStatus(artifacts.runDir, {
 					taskId,
 					runId,
@@ -1138,7 +1145,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 				summary,
 				sessionFile: liveDriver.sessionFile,
 			});
-			liveDrivers.delete(getDriverKey(driver.taskId, driver.runId));
+			const failedDriverKey = getDriverKey(driver.taskId, driver.runId);
+			liveDrivers.delete(failedDriverKey);
+			releaseWriteGuard(failedDriverKey);
 			liveDriver.dispose();
 			updateSessionSwitcher(ctx);
 			renderFocus(ctx, { ...driver, status: "failed", summary });
@@ -1175,6 +1184,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 		}
 		liveDrivers.clear();
 		retainedDrivers.clear();
+		// 会话关闭:释放所有未释放的 task 资产只读锁,避免文件永久卡在 0444。
+		for (const key of [...writeGuards.keys()]) {
+			releaseWriteGuard(key);
+		}
 		ctx?.ui && updateSessionSwitcher(ctx);
 	});
 }

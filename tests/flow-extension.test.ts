@@ -2563,6 +2563,60 @@ test("session_shutdown preserves terminal live driver status", async () => {
 	}
 });
 
+test("session_shutdown releases task asset readonly locks held by live drivers", async () => {
+	// driver start 永不 resolve → guard 持有;shutdown 必须释放,否则 SKILL.md 永久只读。
+	let releaseStart!: () => void;
+	const startBlocked = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	setFlowDriverSessionFactoryForTests(async (options) => ({
+		taskId: options.taskId,
+		runId: options.runId,
+		runDir: options.runDir,
+		sessionFile: "driver.jsonl",
+		async start() {
+			await startBlocked;
+		},
+		async sendUserInput() {},
+		getTranscriptText() {
+			return "";
+		},
+		getWidgetLines() {
+			return ["driver"];
+		},
+		dispose() {
+			releaseStart();
+		},
+	}));
+	try {
+		const cwd = makeTempTaskProject("task-locked");
+		const skillPath = path.join(cwd, ".flow", "tasks", "task-locked", "SKILL.md");
+		const { pi, commands, handlers } = makePi();
+		const { ctx } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("task prove task-locked", ctx);
+		await sleep(10);
+
+		// driver 期间:SKILL.md 应只读
+		assert.throws(
+			() => fs.writeFileSync(skillPath, "tampered"),
+			(err: NodeJS.ErrnoException) => err.code === "EPERM" || err.code === "EACCES",
+		);
+
+		// shutdown 必须释放锁
+		for (const handler of handlers.get("session_shutdown") ?? []) {
+			await handler();
+		}
+
+		// shutdown 后:SKILL.md 应恢复可写
+		fs.writeFileSync(skillPath, "restored after shutdown");
+		assert.equal(fs.readFileSync(skillPath, "utf8"), "restored after shutdown");
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
 test("driver focus input writes feedback to the focused task when run ids collide", async () => {
 	const cwd = makeTempFlowProject([
 		{

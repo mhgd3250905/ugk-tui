@@ -8,9 +8,11 @@
 
 Flow 模块功能正确,但状态机没有中心:状态转换规则散落在 5+ 处,且 `verified/active/approved` 三个状态做同一件事。这是维护性隐患——每加一个状态都要在多处找全,漏一处就是隐蔽 bug。本 PR 把状态机收敛成单一模块,独占 task 状态写权,并修复了重构中暴露的 2 个真实语义 bug。
 
-- **16 个 commit**,每个都是通过完整测试的独立小步,可单独 review。
-- **270 → 322 pass / 0 fail**,新增 52 个测试。
+- **16 个 commit**(不含 UI 闪烁修复 e050137,已移出本 PR),每个都是通过完整测试的独立小步,可单独 review。
+- **270 → 323 pass / 0 fail**,新增 53 个测试。
 - **行为兼容**:旧数据(verified/active/approved)自动归一为新状态 `ready`。
+
+> **审核反馈修复(v2)**:首轮审核发现 3 个问题,已全部修复——见下方第十二节。
 
 ---
 
@@ -176,3 +178,37 @@ git log --oneline main..HEAD   # 16 个 commit
 | `extensions/flow/run-validation.ts` | scope: structural |
 | `tests/flow-task-state.test.ts` | 状态机完整测试(理解语义最快) |
 | `docs/reports/2026-06-18-flow-state-machine-rework.md` | 阶段总结文档 |
+
+## 十二、审核反馈修复(v2)
+
+首轮审核提出 3 个问题,**全部属实,已全部修复**:
+
+### P1:driver 被外部 dispose 时只读锁泄漏(必修)
+**问题**:`lockTaskAssets` 创建的 guard 只在 `liveDriver.start()` 的 then/catch 释放。但 driver 输入转发失败(直接 `dispose()`)和 `session_shutdown`(遍历 dispose)这两条路径不释放 guard,导致 SKILL.md / schema / validator 等文件可能**永久保持 0444 只读**,后续修 task 或资产修复失败。
+
+**修复**:guard 改为按 `driverKey` 存入 `writeGuards: Map`,新增统一释放函数 `releaseWriteGuard(driverKey)`(幂等)。所有 driver 终态路径统一调用:
+- `.then` 的 3 个终态 return
+- `.catch`
+- input 转发失败 dispose 前
+- `session_shutdown` 的 clear 前(遍历释放所有未释放 guard)
+
+**测试**:新增 `session_shutdown releases task asset readonly locks held by live drivers`——driver start 永不 resolve(锁持有中)→ shutdown → 验证 SKILL.md 恢复可写。
+
+### P2:review 记录先写、状态机 transition 后执行,失败留半提交(必修)
+**问题**:`startReview/acceptReview/rejectReview` 原本先 `startFlowReview/acceptFlowReview/rejectFlowReview` 写 review.json,再 `transition()`。若 transition 因 task 状态不合法失败,会出现 **review 文件已变更、task 状态没推进** 的半提交状态。
+
+**修复**:三个函数全部调整为**先 transition 后写 review 记录**。transition 失败则 review 不落盘(或保持原状)。
+
+**测试**:
+- `startReview is rejected...and leaves no review.json`:draft task 调 startReview → transition 失败 → review.json 不存在。
+- `acceptReview leaves review.json unchanged when state machine rejects`:proved task(非 reviewing)调 acceptReview → transition 失败 → review.json 保持 in-review(未被改成 accepted)。
+
+### P3:PR 范围含无关 commit(必修)
+**问题**:PR 报告写"16 个 commit",但实际 PR 含 18 个,包括 `e050137 Reduce flow driver background widget refreshes`(UI 闪烁修复),它不属于状态机中心化 PR,会误导审核方判断范围。
+
+**修复**:`git rebase --onto main e050137` 将 e050137 移出分支(它仍保留在 `codex/flow-ui-flicker-investigation` 分支不受影响)。PR 现在是干净的 17 个 commit(16 改动 + 1 报告),全部属于状态机中心化主题。
+
+### 修复后状态
+- **323 pass / 0 fail**(新增 1 个 shutdown 释放测试 + 2 个失败不落盘测试)
+- 审核者指出的"半提交""锁泄漏""范围不一致"全部消除
+

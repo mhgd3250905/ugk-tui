@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { clearFlowDriverBanner, setFlowDriverBanner } from "./driver-banner.ts";
 import {
@@ -9,7 +9,6 @@ import {
 	buildFlowTaskActionOptions,
 	buildFlowTaskListOptions,
 	buildFlowStageGateOptions,
-	isRunnableFlowTaskStatus,
 	parseFlowConsoleSelection,
 	parseFlowStageGateSelection,
 	type FlowStageGate,
@@ -32,7 +31,14 @@ import {
 	writeDriverStatus,
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
-import { invalidFlowTaskIdMessage, isValidFlowTaskId, parseFlowCommand } from "./parser.ts";
+import { lockTaskAssets, type FlowWriteGuard } from "./flow-write-guard.ts";
+import {
+	isTransientDriverStatus,
+	readTaskMetadata,
+	validateTaskForDriver,
+	type TaskGuardResult,
+} from "./lifecycle-gates.ts";
+import { parseFlowCommand } from "./parser.ts";
 import {
 	buildFlowDriverContractRepairPrompt,
 	buildFlowHelpText,
@@ -40,10 +46,12 @@ import {
 	buildFlowTaskContractRepairPrompt,
 	buildFlowTaskReviewPrompt,
 } from "./prompts.ts";
-import { acceptFlowReview, isFlowReviewAccepted, readFlowReview, rejectFlowReview, startFlowReview } from "./review-store.ts";
+import { acceptReview, rejectReview, startReview, type ReviewActionOutcome } from "./review-actions.ts";
+import { isFlowReviewAccepted, readFlowReview } from "./review-store.ts";
 import { readFlowRunValidation, validateFlowRun } from "./run-validation.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
 import { deleteFlowTask, readFlowTask, updateFlowTaskStatus } from "./task-store.ts";
+import { transition } from "./task-state.ts";
 import { formatFlowActivityCard, type FlowActivityViewModel } from "./status-presenter.ts";
 import type { FlowDriverStatus, FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
 
@@ -60,20 +68,10 @@ const FLOW_PROMPT_PREFIXES = [
 	"[FLOW DRIVER DETACH]",
 	"[FLOW DRIVER STATUS]",
 ];
-const TRANSIENT_DRIVER_STATUSES: FlowDriverStatus[] = [
-	"starting",
-	"running",
-	"waiting",
-	"waiting-for-user",
-	"validating",
-];
 const FLOW_SESSION_VIEW_OWNER = "flow-driver";
 const FLOW_DRIVER_CRITICAL_TOOL_NAMES = ["chrome_cdp"];
 
 type ActionableFlowRequest = Exclude<FlowRequest, { kind: "help" } | { kind: "error"; message: string }>;
-type TaskGuardResult =
-	| { ok: true; taskDir: string; status: string | undefined; version: number; latestReviewRun?: string }
-	| { ok: false; message: string; type: "warning" | "error" };
 type FlowSessionViewUi = ExtensionContext["ui"] & {
 	attachSessionView?: (
 		owner: string,
@@ -102,10 +100,6 @@ type FlowSessionViewUi = ExtensionContext["ui"] & {
 
 function isActionableFlowRequest(request: FlowRequest): request is ActionableFlowRequest {
 	return request.kind !== "help" && request.kind !== "error";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function errorMessage(error: unknown): string {
@@ -139,100 +133,6 @@ function getDriverKey(taskId: string, runId: string): string {
 	return `${taskId}/${runId}`;
 }
 
-function isTransientDriverStatus(status: FlowDriverStatus): boolean {
-	return TRANSIENT_DRIVER_STATUSES.includes(status);
-}
-
-function readTaskMetadata(cwd: string, taskId: string): TaskGuardResult {
-	if (!isValidFlowTaskId(taskId)) {
-		return { ok: false, message: invalidFlowTaskIdMessage(taskId), type: "error" };
-	}
-	const taskDir = path.join(cwd, ".flow", "tasks", taskId);
-	const taskJsonPath = path.join(taskDir, "task.json");
-	if (!existsSync(taskJsonPath)) {
-		return { ok: false, message: `Flow task not found: ${taskId}`, type: "error" };
-	}
-
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(readFileSync(taskJsonPath, "utf8"));
-	} catch (error) {
-		return {
-			ok: false,
-			message: `Flow task metadata is invalid: ${taskJsonPath}\n${errorMessage(error)}`,
-			type: "error",
-		};
-	}
-
-	return {
-		ok: true,
-		taskDir,
-		status: isRecord(parsed) && typeof parsed.status === "string" ? parsed.status : undefined,
-		version: isRecord(parsed) && typeof parsed.version === "number" ? parsed.version : 1,
-		latestReviewRun: isRecord(parsed) && typeof parsed.latest_review_run === "string" ? parsed.latest_review_run : undefined,
-	};
-}
-
-function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId: string): TaskGuardResult {
-	const task = readTaskMetadata(cwd, taskId);
-	if (!task.ok) {
-		return task;
-	}
-
-	if (kind === "prove") {
-		const assetValidation = validateFlowTaskAssets(cwd, taskId);
-		if (!assetValidation.ok) {
-			return {
-				ok: false,
-				message: `Flow task ${taskId} is incomplete. Runtime gate failed: ${assetValidation.issues.join(", ")}`,
-				type: "error",
-			};
-		}
-		return task;
-	}
-
-	if (!isRunnableFlowTaskStatus(task.status)) {
-		return {
-			ok: false,
-			message: `Flow task ${taskId} status is ${task.status ?? "unknown"}; /flow run requires verified/active/approved.`,
-			type: "warning",
-		};
-	}
-	if (!task.latestReviewRun) {
-		return {
-			ok: false,
-			message: `Flow task ${taskId} is ${task.status} but has no accepted review. Run /flow task review <run-id> first.`,
-			type: "warning",
-		};
-	}
-	const reviewRunDir = path.join(task.taskDir, "runs", task.latestReviewRun);
-	let review = readFlowReview(reviewRunDir);
-	const expectedReview = { taskId, runId: task.latestReviewRun };
-	if (
-		!isFlowReviewAccepted(review, task.version, expectedReview) &&
-		review?.status === "accepted" &&
-		review.userConfirmed &&
-		review.taskId === taskId &&
-		review.runId === task.latestReviewRun &&
-		review.taskVersion === undefined
-	) {
-		review = acceptFlowReview({
-			taskId,
-			runId: task.latestReviewRun,
-			runDir: reviewRunDir,
-			taskVersion: task.version,
-		});
-	}
-	if (!isFlowReviewAccepted(review, task.version, expectedReview)) {
-		return {
-			ok: false,
-			message: `Flow task ${taskId} is ${task.status} but accepted review ${task.latestReviewRun} is missing or not valid for version ${task.version}.`,
-			type: "warning",
-		};
-	}
-	return task;
-}
-
 let driverSessionFactoryForTests:
 	| ((options: Parameters<typeof createFlowDriverSession>[0]) => Promise<FlowDriverSession>)
 	| undefined;
@@ -247,6 +147,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 	let focusState: FlowFocusState = { focus: "main" };
 	const liveDrivers = new Map<string, FlowDriverSession>();
 	const retainedDrivers = new Map<string, FlowDriverSession>();
+	// driver 执行期间的 task 资产只读锁,按 driverKey 索引。
+	// 所有 driver 终态(dispose/clear/shutdown)都必须释放对应 guard,否则文件永久只读。
+	const writeGuards = new Map<string, FlowWriteGuard>();
 	let activeSessionViewDriverKey: string | undefined;
 	let pendingCreateTaskIds: Set<string> | undefined;
 	let pendingTaskAssetRepair: { taskId: string; attempts: number } | undefined;
@@ -257,6 +160,15 @@ export function registerFlow(pi: ExtensionAPI): void {
 
 	function getCwd(ctx: ExtensionContext): string {
 		return typeof ctx.cwd === "string" ? ctx.cwd : process.cwd();
+	}
+
+	/** 释放某 driver 的 task 资产只读锁。幂等;所有 driver 终态路径都应调用。 */
+	function releaseWriteGuard(driverKey: string): void {
+		const guard = writeGuards.get(driverKey);
+		if (guard) {
+			guard.unlock();
+			writeGuards.delete(driverKey);
+		}
 	}
 
 	function getExpectedDriverToolNames(ctx: ExtensionContext): string[] {
@@ -631,10 +543,14 @@ export function registerFlow(pi: ExtensionAPI): void {
 		const runId = nextRunId(cwd, taskId);
 		const artifacts = createRunArtifacts(cwd, taskId, input, runId);
 		if (kind === "prove") {
-			updateFlowTaskStatus(cwd, taskId, "proving", {
-				latest_prove_run: runId,
-				next_step: `waiting for ${taskId}/${runId}`,
+			const proveStart = transition(cwd, taskId, {
+				kind: "prove-start",
+				runId,
 			});
+			if (!proveStart.ok) {
+				ctx.ui.notify(proveStart.reason, "error");
+				return;
+			}
 		}
 		const initialPrompt = buildDriverInitialPrompt(artifacts);
 		const createDriver = driverSessionFactoryForTests ?? createFlowDriverSession;
@@ -706,6 +622,8 @@ export function registerFlow(pi: ExtensionAPI): void {
 			renderMainDriverActivity(ctx);
 		}
 		updateSessionSwitcher(ctx);
+		// driver 执行期间锁定 task 设计资产为只读;存入 map 以便所有终态路径统一释放。
+		writeGuards.set(driverKey, lockTaskAssets(cwd, taskId));
 		void liveDriver
 			.start()
 			.then(async () => {
@@ -778,12 +696,13 @@ export function registerFlow(pi: ExtensionAPI): void {
 				});
 				const status = readDriverStatus(artifacts.runDir)!;
 				if (kind === "prove") {
-					updateFlowTaskStatus(cwd, taskId, validation.result === "PASS" ? "proved" : "draft", {
-						proven_at: validation.result === "PASS" ? validation.createdAt : undefined,
-						latest_prove_run: runId,
-						latest_validation: validation.result,
-						next_step: validation.result === "PASS" ? validation.nextStep : `/flow task prove ${taskId}`,
-					});
+					const event = validation.result === "PASS"
+						? { kind: "prove-pass" as const, runId, validatedAt: validation.createdAt, nextStep: validation.nextStep }
+						: { kind: "prove-fail" as const, runId, nextStep: `/flow task prove ${taskId}` };
+					const proveResult = transition(cwd, taskId, event);
+					if (!proveResult.ok) {
+						ctx.ui.notify(proveResult.reason, "error");
+					}
 				}
 
 				liveDrivers.delete(driverKey);
@@ -795,10 +714,23 @@ export function registerFlow(pi: ExtensionAPI): void {
 				}
 				updateSessionSwitcher(ctx);
 				if (validation.result !== "PASS" && attemptedContractRepair) {
+					// run 路径:ready task 连结构都过不了 → 复用链路断了,转 needs-work。
+					// prove 路径的 FAIL 已在上方 prove-fail transition 处理。
+					if (kind === "run") {
+						const runFail = transition(cwd, taskId, {
+							kind: "run-fail",
+							runId,
+							nextStep: `fix ${taskId}/${runId} and run /flow task prove ${taskId}`,
+						});
+						if (!runFail.ok) {
+							ctx.ui.notify(runFail.reason, "error");
+						}
+					}
 					ctx.ui.notify(
 						`Flow driver contract failed after automatic repair: ${driverKey}\n${validation.summary}`,
 						"error",
 					);
+					releaseWriteGuard(driverKey);
 					return;
 				}
 				const summary = status.summary ? `\n${status.summary}` : "";
@@ -810,11 +742,14 @@ export function registerFlow(pi: ExtensionAPI): void {
 						taskId,
 						runId,
 					});
+					releaseWriteGuard(driverKey);
 					return;
 				}
+				releaseWriteGuard(driverKey);
 			})
 			.catch((error) => {
 				const summary = errorMessage(error);
+				releaseWriteGuard(driverKey);
 				writeDriverStatus(artifacts.runDir, {
 					taskId,
 					runId,
@@ -872,128 +807,66 @@ export function registerFlow(pi: ExtensionAPI): void {
 		return findDriverForAttach(ctx, runId);
 	}
 
-	function ensureCompletedDriverForReview(ctx: ExtensionContext, runId: string): FlowDriverSummary | undefined {
-		const driver = findDriverForReview(ctx, runId);
-		if (!driver) {
-			return undefined;
-		}
-		const driverKey = getDriverKey(driver.taskId, driver.runId);
-		const liveDriver = liveDrivers.get(driverKey);
-		if (liveDriver || isTransientDriverStatus(driver.status)) {
-			ctx.ui.notify("Flow task review cannot change while the Flow driver is still running.", "warning");
-			return undefined;
-		}
-		return driver;
-	}
-
 	function startCompletedFlowReview(ctx: ExtensionContext, runId: string): void {
 		const driver = findDriverForReview(ctx, runId);
 		if (!driver) {
 			return;
 		}
 		const driverKey = getDriverKey(driver.taskId, driver.runId);
-		const liveDriver = liveDrivers.get(driverKey);
-		if (liveDriver || isTransientDriverStatus(driver.status)) {
-			ctx.ui.notify("Flow task review cannot start while the Flow driver is still running.", "warning");
-			return;
-		}
-		const validation = readFlowRunValidation(driver.runDir);
-		if (!validation || validation.result !== "PASS") {
-			ctx.ui.notify(`Flow task review cannot start because validation is not PASS: ${driver.taskId}/${driver.runId}`, "warning");
+		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
+		const outcome = startReview({ driver, driverLive }, getCwd(ctx));
+		if (!outcome.ok) {
+			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
 		if (focusState.focus === "driver") {
 			clearFocusedDriver(ctx);
 		}
-		startFlowReview({
-			taskId: driver.taskId,
-			runId: driver.runId,
-			runDir: driver.runDir,
-		});
-		updateFlowTaskStatus(getCwd(ctx), driver.taskId, "reviewing", {
-			latest_review_run: driver.runId,
-			next_step: `main reviewing ${driverKey}`,
-		});
 		queueFlowContextPrompt(buildFlowTaskReviewPrompt({ taskId: driver.taskId, runId: driver.runId }));
 		ctx.ui.notify(formatFlowQueued({ kind: "task-review", runId }), "info");
 	}
 
 	async function acceptCompletedFlowReview(ctx: ExtensionContext, runId: string): Promise<void> {
-		const driver = ensureCompletedDriverForReview(ctx, runId);
+		const driver = findDriverForReview(ctx, runId);
 		if (!driver) {
 			return;
 		}
-		const validation = readFlowRunValidation(driver.runDir);
-		if (!validation || validation.result !== "PASS") {
-			ctx.ui.notify(`Flow review cannot be accepted because validation is not PASS: ${driver.taskId}/${driver.runId}`, "warning");
+		const driverKey = getDriverKey(driver.taskId, driver.runId);
+		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
+		const outcome = acceptReview({ driver, driverLive }, getCwd(ctx));
+		if (!outcome.ok) {
+			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
-		const existingReview = readFlowReview(driver.runDir);
-		if (!existingReview) {
-			ctx.ui.notify(`Flow review has not started for ${driver.taskId}/${driver.runId}. Run /flow task review ${driver.taskId}/${driver.runId} first.`, "warning");
-			return;
-		}
-		const task = readTaskMetadata(getCwd(ctx), driver.taskId);
-		if (!task.ok) {
-			ctx.ui.notify(task.message, task.type);
-			return;
-		}
-		const review = acceptFlowReview({
-			taskId: driver.taskId,
-			runId: driver.runId,
-			runDir: driver.runDir,
-			taskVersion: task.version,
-		});
-		updateFlowTaskStatus(getCwd(ctx), driver.taskId, "verified", {
-			latest_review_run: driver.runId,
-			latest_review_status: review.status,
-			latest_validation: validation.result,
-			next_step: `/flow run ${driver.taskId}`,
-		});
 		if (focusState.focus === "driver") {
 			clearFocusedDriver(ctx);
 		} else {
 			renderMainDriverActivity(ctx);
 		}
 		updateSessionSwitcher(ctx);
-		ctx.ui.notify(`Flow review accepted: ${driver.taskId}/${driver.runId}\nTask status: verified\nNext: /flow run ${driver.taskId}`, "info");
+		ctx.ui.notify(`Flow review accepted: ${driver.taskId}/${driver.runId}\nTask status: ready\nNext: /flow run ${driver.taskId}`, "info");
 		await runStageGate(ctx, { phase: "review-accepted", taskId: driver.taskId, runId: driver.runId });
 	}
 
 	function rejectCompletedFlowReview(ctx: ExtensionContext, runId: string, reason?: string): void {
-		const driver = ensureCompletedDriverForReview(ctx, runId);
+		const driver = findDriverForReview(ctx, runId);
 		if (!driver) {
 			return;
 		}
-		const validation = readFlowRunValidation(driver.runDir);
-		if (!validation || validation.result !== "PASS") {
-			ctx.ui.notify(`Flow review cannot be rejected because validation is not PASS: ${driver.taskId}/${driver.runId}`, "warning");
+		const driverKey = getDriverKey(driver.taskId, driver.runId);
+		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
+		const outcome = rejectReview({ driver, driverLive }, getCwd(ctx), reason);
+		if (!outcome.ok) {
+			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
-		const existingReview = readFlowReview(driver.runDir);
-		if (!existingReview) {
-			ctx.ui.notify(`Flow review has not started for ${driver.taskId}/${driver.runId}. Run /flow task review ${driver.taskId}/${driver.runId} first.`, "warning");
-			return;
-		}
-		const review = rejectFlowReview({
-			taskId: driver.taskId,
-			runId: driver.runId,
-			runDir: driver.runDir,
-			reason,
-		});
-		updateFlowTaskStatus(getCwd(ctx), driver.taskId, "needs-human", {
-			latest_review_run: driver.runId,
-			latest_review_status: review.status,
-			latest_validation: validation?.result,
-			next_step: `fix ${driver.taskId}/${driver.runId} and run /flow task prove ${driver.taskId}`,
-		});
 		if (focusState.focus === "driver") {
 			clearFocusedDriver(ctx);
 		} else {
 			renderMainDriverActivity(ctx);
 		}
 		updateSessionSwitcher(ctx);
-		ctx.ui.notify(`Flow review rejected: ${driver.taskId}/${driver.runId}\nTask status: needs-human`, "warning");
+		ctx.ui.notify(`Flow review rejected: ${driver.taskId}/${driver.runId}\nTask status: needs-work`, "warning");
 	}
 
 	async function deleteCompletedFlowTask(ctx: ExtensionContext, taskId: string): Promise<void> {
@@ -1272,7 +1145,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 				summary,
 				sessionFile: liveDriver.sessionFile,
 			});
-			liveDrivers.delete(getDriverKey(driver.taskId, driver.runId));
+			const failedDriverKey = getDriverKey(driver.taskId, driver.runId);
+			liveDrivers.delete(failedDriverKey);
+			releaseWriteGuard(failedDriverKey);
 			liveDriver.dispose();
 			updateSessionSwitcher(ctx);
 			renderFocus(ctx, { ...driver, status: "failed", summary });
@@ -1309,6 +1184,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 		}
 		liveDrivers.clear();
 		retainedDrivers.clear();
+		// 会话关闭:释放所有未释放的 task 资产只读锁,避免文件永久卡在 0444。
+		for (const key of [...writeGuards.keys()]) {
+			releaseWriteGuard(key);
+		}
 		ctx?.ui && updateSessionSwitcher(ctx);
 	});
 }

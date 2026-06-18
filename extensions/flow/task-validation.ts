@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
+import { isRecord, readJsonStrict } from "./flow-fs.ts";
 import { resolveFlowTaskDir } from "./task-store.ts";
 
 export const REQUIRED_FLOW_TASK_ASSETS = [
@@ -18,14 +19,6 @@ export interface FlowTaskAssetValidation {
 	issues: string[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readJsonFile(filePath: string): unknown {
-	return JSON.parse(readFileSync(filePath, "utf8"));
-}
-
 export function validateFlowTaskAssets(cwd: string, taskId: string): FlowTaskAssetValidation {
 	const taskDir = resolveFlowTaskDir(cwd, taskId);
 	const issues: string[] = [];
@@ -41,7 +34,7 @@ export function validateFlowTaskAssets(cwd: string, taskId: string): FlowTaskAss
 			continue;
 		}
 		try {
-			const parsed = readJsonFile(filePath);
+			const parsed = readJsonStrict(filePath);
 			if (!isRecord(parsed)) {
 				issues.push(`${file} must be a JSON object`);
 			}

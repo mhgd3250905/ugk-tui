@@ -1,13 +1,23 @@
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { isRecord, readJsonOptional, readJsonStrict } from "./flow-fs.ts";
 
 export type FlowValidationResult = "PASS" | "FAIL";
+
+/**
+ * 校验范围。当前只有 structural:证明 run 的产物结构齐全合法(文件存在、JSON 合法、
+ * 满足 schema、有证据、有 progress)。它**不判断业务质量**——业务质量是 review 的
+ * 唯一职责。这个字段让产物的消费者永远清楚一个 PASS 意味着什么,避免把"结构对"
+ * 误读为"结果可接受"。旧 validation.json 没有此字段,读取时默认 structural。
+ */
+export type FlowValidationScope = "structural";
 
 export interface FlowRunValidation {
 	taskId: string;
 	runId: string;
 	phase: "prove" | "run";
 	result: FlowValidationResult;
+	scope: FlowValidationScope;
 	summary: string;
 	issues: string[];
 	outputPreview?: Record<string, unknown>;
@@ -29,14 +39,6 @@ interface ValidateFlowRunArgs {
 	runDir: string;
 	phase: "prove" | "run";
 	now?: Date;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readJsonFile(filePath: string): unknown {
-	return JSON.parse(readFileSync(filePath, "utf8"));
 }
 
 function optionalSchemaIssues(value: unknown, schema: unknown, pathLabel = "result"): string[] {
@@ -121,14 +123,20 @@ function previewOutput(output: unknown): Record<string, unknown> | undefined {
 }
 
 function renderValidationMarkdown(validation: FlowRunValidation): string {
+	const scopeNote = validation.scope === "structural"
+		? "本结果只代表**结构校验**(产物齐全、合法、有证据)。它不判断业务质量——业务可接受性是 review 的唯一职责。"
+		: `Scope: ${validation.scope}`;
 	return [
 		`# Flow Run Validation - ${validation.taskId}/${validation.runId}`,
 		"",
 		`Result: ${validation.result}`,
+		`Scope: ${validation.scope}`,
 		`Summary: ${validation.summary}`,
 		`Phase: ${validation.phase}`,
 		`Created: ${validation.createdAt}`,
 		`Next step: ${validation.nextStep}`,
+		"",
+		`> ${scopeNote}`,
 		"",
 		"## Issues",
 		...(validation.issues.length > 0 ? validation.issues.map((issue) => `- ${issue}`) : ["- none"]),
@@ -155,7 +163,7 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 		issues.push("missing output/result.json");
 	} else {
 		try {
-			output = readJsonFile(resultJson);
+			output = readJsonStrict(resultJson);
 		} catch (error) {
 			issues.push(`output/result.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -163,7 +171,7 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 
 	if (output !== undefined && existsSync(schemaPath)) {
 		try {
-			issues.push(...optionalSchemaIssues(output, readJsonFile(schemaPath)));
+			issues.push(...optionalSchemaIssues(output, readJsonStrict(schemaPath)));
 		} catch (error) {
 			issues.push(`output.schema.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -183,6 +191,7 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 		runId: args.runId,
 		phase: args.phase,
 		result,
+		scope: "structural",
 		summary,
 		issues,
 		outputPreview: previewOutput(output),
@@ -203,10 +212,10 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 }
 
 export function readFlowRunValidation(runDir: string): FlowRunValidation | undefined {
-	try {
-		const parsed = readJsonFile(path.join(runDir, "validation.json"));
-		return isRecord(parsed) ? (parsed as unknown as FlowRunValidation) : undefined;
-	} catch {
+	const parsed = readJsonOptional(path.join(runDir, "validation.json"));
+	if (!isRecord(parsed)) {
 		return undefined;
 	}
+	// 旧 validation.json 没有 scope 字段,统一视为 structural。
+	return { ...(parsed as unknown as FlowRunValidation), scope: "structural" };
 }

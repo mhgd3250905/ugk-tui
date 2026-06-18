@@ -24,82 +24,45 @@ test("builds task create prompt with draft task instructions", () => {
 	assert.match(prompt, /\/flow task prove <task-id>/);
 });
 
-test("builds task prove prompt with driver run instructions", () => {
-	const prompt = buildFlowRequestPrompt({
-		kind: "task-prove",
-		taskId: "x-search-post-collector",
-		input: "keyword=Medtrum",
-	});
-
-	assert.match(prompt, /\[FLOW TASK PROVE\]/);
-	assert.match(prompt, /x-search-post-collector/);
-	assert.match(prompt, /keyword=Medtrum/);
-	assert.match(prompt, /runs\/run-/);
-	assert.match(prompt, /interactive driver|driver/);
-	assert.match(prompt, /读取当前 Task 的 `SKILL\.md`/);
-	assert.match(prompt, /登记为 proving/);
-	assert.match(prompt, /input\.json/);
-	assert.match(prompt, /todo\.template\.md/);
-	assert.match(prompt, /填写 `todo\.md`/);
-	assert.match(prompt, /validator\.md/);
-	assert.match(prompt, /validation\.json/);
-	assert.match(prompt, /validation\.md/);
-	assert.match(prompt, /status\.json/);
-	assert.match(prompt, /输出契约不合规/);
-	assert.match(prompt, /自动修复/);
-	assert.match(prompt, /进入 review/);
+test("runtime-handled kinds throw instead of producing a prompt", () => {
+	// task-prove/task-run/task-review are early-returned by index.ts command
+	// routing and never reach the prompt queue. If they ever do, that is a
+	// routing regression — they must throw, not silently return a stale prompt.
+	const runtimeHandled = [
+		{ kind: "task-prove", taskId: "x", input: "i" },
+		{ kind: "task-run", taskId: "x", input: "i" },
+		{ kind: "task-review", runId: "run-001" },
+	] as const;
+	for (const request of runtimeHandled) {
+		assert.throws(
+			() => buildFlowRequestPrompt(request as never),
+			/runtime-handled kind/,
+		);
+	}
 });
 
-test("builds task run prompt with status guards", () => {
-	const prompt = buildFlowRequestPrompt({
-		kind: "task-run",
-		taskId: "x-search-post-collector",
-		input: "keyword=Medtrum",
-	});
-
-	assert.match(prompt, /\[FLOW TASK RUN\]/);
-	assert.match(prompt, /读取 \.flow\/tasks\/x-search-post-collector\/task\.json/);
-	assert.match(prompt, /status 是 draft/);
-	assert.match(prompt, /\/flow task prove x-search-post-collector/);
-	assert.match(prompt, /status 是 needs-human/);
-	assert.match(prompt, /verified\/active\/approved/);
-	assert.match(prompt, /interactive driver|driver/);
-});
-
-test("builds task review prompt with main-agent review gate", () => {
-	const prompt = buildFlowRequestPrompt({ kind: "task-review", runId: "run-001" });
+test("buildFlowTaskReviewPrompt is the live review gate prompt", () => {
+	// buildFlowRequestPrompt's task-review case was dead (early-returned by
+	// index.ts); the live prompt is buildFlowTaskReviewPrompt. Lock its content.
+	const prompt = buildFlowTaskReviewPrompt({ taskId: "demo-task", runId: "run-001" });
 
 	assert.match(prompt, /\[FLOW TASK REVIEW\]/);
-	assert.match(prompt, /run-001/);
+	assert.match(prompt, /Task ID: demo-task/);
+	assert.match(prompt, /Run ID: run-001/);
 	assert.match(prompt, /不能由 driver subagent 自评/);
-	assert.match(prompt, /\.flow\/tasks\/<task-id>\/runs\/run-001/);
+	assert.match(prompt, /\.flow\/tasks\/demo-task\/runs\/run-001/);
 	assert.match(prompt, /validation\.md/);
-	assert.match(prompt, /validation\.json/);
-	assert.match(prompt, /review\.json/);
-	assert.match(prompt, /status\.json/);
-	assert.match(prompt, /feedback\.md/);
 	assert.match(prompt, /review\.md/);
-	assert.match(prompt, /成功或修复成功/);
 	assert.match(prompt, /SKILL\.md/);
 	assert.match(prompt, /todo\.template\.md/);
 	assert.match(prompt, /validator\.md/);
-	assert.match(prompt, /version/);
-	assert.match(prompt, /用户只判断业务结果和可复用偏好/);
-	assert.match(prompt, /用户说不懂/);
-	assert.match(prompt, /先解释/);
-	assert.match(prompt, /不要在给用户看的问题里出现/);
-	assert.match(prompt, /保存为以后复用的流程/);
-	assert.match(prompt, /回复“接受”/);
-	assert.match(prompt, /回复“拒绝/);
-	assert.match(prompt, /回复“调整/);
-	assert.match(prompt, /用户确认/);
+	assert.match(prompt, /bump `task\.json\.version`/);
+	assert.match(prompt, /你是业务质量的\*\*唯一\*\*关卡/);
+	assert.match(prompt, /结构校验/);
+	assert.match(prompt, /Task 推进为 ready/);
+	assert.match(prompt, /Task 会进入 needs-work/);
 	assert.match(prompt, /\/flow task accept run-001/);
 	assert.match(prompt, /\/flow task reject run-001/);
-	assert.match(prompt, /确认无需修改 Task 资产/);
-	assert.match(prompt, /不要手工修改 `task\.json\.status`/);
-	assert.match(prompt, /只能通过 `\/flow task accept` 或 `\/flow task reject` 改变 Task 生命周期/);
-	assert.doesNotMatch(prompt, /逐环节向用户核对/);
-	assert.doesNotMatch(prompt, /更新 Task 状态/);
 });
 
 test("builds concrete task review prompt with task and run path", () => {
@@ -125,7 +88,7 @@ test("builds concrete task review prompt with task and run path", () => {
 	assert.match(prompt, /\/flow task accept run-001/);
 	assert.match(prompt, /\/flow task reject run-001/);
 	assert.match(prompt, /确认无需修改 Task 资产/);
-	assert.match(prompt, /verified/);
+	assert.match(prompt, /ready/);
 	assert.doesNotMatch(prompt, /逐环节向用户核对/);
 });
 
@@ -138,24 +101,6 @@ test("builds status prompt", () => {
 	assert.match(prompt, /status/);
 	assert.match(prompt, /下一步建议/);
 	assert.match(prompt, /\/flow task create "目标"/);
-});
-
-test("builds placeholder prompts for parsed driver commands", () => {
-	const attachPrompt = buildFlowRequestPrompt({ kind: "attach" });
-	assert.equal(typeof attachPrompt, "string");
-	assert.match(attachPrompt, /attach/);
-
-	const detachPrompt = buildFlowRequestPrompt({ kind: "detach" });
-	assert.equal(typeof detachPrompt, "string");
-	assert.match(detachPrompt, /detach/);
-
-	const statusPrompt = buildFlowRequestPrompt({ kind: "driver-status" });
-	assert.equal(typeof statusPrompt, "string");
-	assert.match(statusPrompt, /driver status/);
-
-	const deletePrompt = buildFlowRequestPrompt({ kind: "task-delete", taskId: "draft-task" });
-	assert.equal(typeof deletePrompt, "string");
-	assert.match(deletePrompt, /delete/i);
 });
 
 test("builds flow help text", () => {

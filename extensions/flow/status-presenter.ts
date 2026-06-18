@@ -1,3 +1,5 @@
+import { isRunnableFlowTaskStatus } from "./flow-console.ts";
+
 export interface FlowActivityViewModel {
 	taskId: string;
 	runId: string;
@@ -26,12 +28,8 @@ function statusIcon(status: string): string {
 	return "●";
 }
 
-function isRunnableTaskStatus(status: string | undefined): boolean {
-	return status === "verified" || status === "active" || status === "approved";
-}
-
 function nextStepForItem(item: FlowActivityViewModel): string | undefined {
-	if (item.review?.status === "accepted" && isRunnableTaskStatus(item.task?.status)) {
+	if (item.review?.status === "accepted" && isRunnableFlowTaskStatus(item.task?.status)) {
 		return `/flow run ${item.taskId}`;
 	}
 	return item.task?.nextStep ?? item.validation?.nextStep ?? (item.preview?.[0] ? undefined : "waiting for driver result");
@@ -43,7 +41,7 @@ export function formatFlowActivityCard(items: FlowActivityViewModel[]): string[]
 		lines.push(`│ ${statusIcon(item.status)} ${item.taskId}/${item.runId}`);
 		lines.push(`│   status: ${[item.status, item.step].filter(Boolean).join(" / ")}`);
 		if (item.validation) {
-			lines.push(`│   result: ${item.validation.result} - ${item.validation.summary}`);
+			lines.push(`│   structure: ${item.validation.result} - ${item.validation.summary}`);
 		}
 		if (item.review) {
 			lines.push(`│   review: ${item.review.status}`);

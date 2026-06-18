@@ -11,18 +11,19 @@ import {
 	startFlowReview,
 } from "../extensions/flow/review-store.ts";
 
-function makeRun(): { taskDir: string; runDir: string } {
+function makeRun(): { cwd: string; taskDir: string; runDir: string } {
 	const cwd = mkdtempSync(path.join(tmpdir(), "flow-review-store-"));
 	const taskDir = path.join(cwd, ".flow", "tasks", "demo-task");
 	const runDir = path.join(taskDir, "runs", "run-001");
 	mkdirSync(runDir, { recursive: true });
-	return { taskDir, runDir };
+	return { cwd, taskDir, runDir };
 }
 
 test("startFlowReview writes review json and markdown scaffold", () => {
-	const { runDir } = makeRun();
+	const { cwd, runDir } = makeRun();
 
 	const review = startFlowReview({
+		cwd,
 		taskId: "demo-task",
 		runId: "run-001",
 		runDir,
@@ -38,7 +39,7 @@ test("startFlowReview writes review json and markdown scaffold", () => {
 });
 
 test("readFlowReview reads accepted review and acceptance predicate validates required fields", () => {
-	const { runDir } = makeRun();
+	const { cwd, runDir } = makeRun();
 	writeFileSync(
 		path.join(runDir, "review.json"),
 		`${JSON.stringify(
@@ -67,16 +68,17 @@ test("readFlowReview reads accepted review and acceptance predicate validates re
 });
 
 test("incomplete review is not accepted", () => {
-	const { runDir } = makeRun();
-	const review = startFlowReview({ taskId: "demo-task", runId: "run-001", runDir });
+	const { cwd, runDir } = makeRun();
+	const review = startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
 
 	assert.equal(isFlowReviewAccepted(review, 1), false);
 	assert.equal(isFlowReviewAccepted(undefined, 1), false);
 });
 
 test("acceptFlowReview records accepted review and renders markdown", () => {
-	const { runDir } = makeRun();
+	const { cwd, runDir } = makeRun();
 	startFlowReview({
+		cwd,
 		taskId: "demo-task",
 		runId: "run-001",
 		runDir,
@@ -84,6 +86,7 @@ test("acceptFlowReview records accepted review and renders markdown", () => {
 	});
 
 	const review = acceptFlowReview({
+		cwd,
 		taskId: "demo-task",
 		runId: "run-001",
 		runDir,
@@ -106,7 +109,7 @@ test("acceptFlowReview records accepted review and renders markdown", () => {
 });
 
 test("accepted no-change reviews satisfy the review gate", () => {
-	const { runDir } = makeRun();
+	const { cwd, runDir } = makeRun();
 	writeFileSync(
 		path.join(runDir, "review.json"),
 		`${JSON.stringify(
@@ -128,7 +131,7 @@ test("accepted no-change reviews satisfy the review gate", () => {
 });
 
 test("acceptFlowReview records updated decision when task assets changed", () => {
-	const { runDir } = makeRun();
+	const { cwd, runDir } = makeRun();
 	writeFileSync(
 		path.join(runDir, "review.json"),
 		`${JSON.stringify(
@@ -146,7 +149,7 @@ test("acceptFlowReview records updated decision when task assets changed", () =>
 		)}\n`,
 	);
 
-	const review = acceptFlowReview({ taskId: "demo-task", runId: "run-001", runDir, taskVersion: 4 });
+	const review = acceptFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir, taskVersion: 4 });
 
 	assert.equal(review.taskDesignUpdated, true);
 	assert.equal(review.taskDesignDecision, "updated");
@@ -154,9 +157,10 @@ test("acceptFlowReview records updated decision when task assets changed", () =>
 });
 
 test("rejectFlowReview records needs-changes reason", () => {
-	const { runDir } = makeRun();
+	const { cwd, runDir } = makeRun();
 
 	const review = rejectFlowReview({
+		cwd,
 		taskId: "demo-task",
 		runId: "run-001",
 		runDir,

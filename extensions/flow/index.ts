@@ -415,6 +415,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 				});
 				let attemptedContractRepair = false;
 				let validation = validateFlowRun({
+					cwd,
 					taskId,
 					runId,
 					taskDir: artifacts.taskDir,
@@ -455,6 +456,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 						sessionFile: liveDriver.sessionFile,
 					});
 					validation = validateFlowRun({
+						cwd,
 						taskId,
 						runId,
 						taskDir: artifacts.taskDir,

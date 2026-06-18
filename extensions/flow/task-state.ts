@@ -1,3 +1,4 @@
+import { CORRUPT_FEEDBACK } from "./flow-signing.ts";
 import { readFlowTask, updateFlowTaskStatus, type FlowTaskMetadata } from "./task-store.ts";
 
 /**
@@ -131,6 +132,12 @@ export function transition(cwd: string, taskId: string, event: FlowTaskEvent): T
 	const existing = readFlowTask(cwd, taskId);
 	if (!existing) {
 		return { ok: false, reason: `Flow task not found: ${taskId}` };
+	}
+
+	// 损坏记录(签名不符)不接受状态转换——防 agent 通过篡改绕过状态机。
+	// 反馈用中性措辞,不提签名机制。
+	if (existing._signatureBroken) {
+		return { ok: false, reason: CORRUPT_FEEDBACK.taskStatus(taskId) };
 	}
 
 	const from = normalizeLegacyState(existing.status);

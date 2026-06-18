@@ -26,6 +26,17 @@ function statusIcon(status: string): string {
 	return "●";
 }
 
+function isRunnableTaskStatus(status: string | undefined): boolean {
+	return status === "verified" || status === "active" || status === "approved";
+}
+
+function nextStepForItem(item: FlowActivityViewModel): string | undefined {
+	if (item.review?.status === "accepted" && isRunnableTaskStatus(item.task?.status)) {
+		return `/flow run ${item.taskId}`;
+	}
+	return item.task?.nextStep ?? item.validation?.nextStep ?? (item.preview?.[0] ? undefined : "waiting for driver result");
+}
+
 export function formatFlowActivityCard(items: FlowActivityViewModel[]): string[] {
 	const lines = ["╭─ Flow Activity ─────────────────────────────"];
 	for (const item of items) {
@@ -40,7 +51,7 @@ export function formatFlowActivityCard(items: FlowActivityViewModel[]): string[]
 		if (item.task?.status) {
 			lines.push(`│   task: ${item.task.status}`);
 		}
-		const next = item.task?.nextStep ?? item.validation?.nextStep ?? (item.preview?.[0] ? undefined : "waiting for driver result");
+		const next = nextStepForItem(item);
 		if (next) {
 			lines.push(`│   next: ${next}`);
 		}

@@ -71,6 +71,15 @@ export function parseFlowCommand(args: string): FlowRequest {
 		return { kind: "task-run", ...parsed };
 	}
 
+	const startPrefix = "task start";
+	if (text === startPrefix) return { kind: "error", message: "Usage: /flow task start <task-id> [--input <inline-input>]" };
+	if (text.startsWith(`${startPrefix} `)) {
+		const parsed = splitInlineInput(text.slice(startPrefix.length));
+		if (!parsed) return { kind: "error", message: "Usage: /flow task start <task-id> [--input <inline-input>]" };
+		if (!isValidFlowTaskId(parsed.taskId)) return { kind: "error", message: invalidFlowTaskIdMessage(parsed.taskId) };
+		return { kind: "task-run", ...parsed };
+	}
+
 	const reviewPrefix = "task review";
 	if (text === reviewPrefix) return { kind: "error", message: "Usage: /flow task review <run-id>" };
 	if (text.startsWith(`${reviewPrefix} `)) {
@@ -94,6 +103,15 @@ export function parseFlowCommand(args: string): FlowRequest {
 		const match = rest.match(/^(\S+)(?:\s+([\s\S]+))?$/);
 		if (!match) return { kind: "error", message: "Usage: /flow task reject <run-id> [reason]" };
 		return { kind: "task-reject", runId: match[1], reason: match[2] ? unquote(match[2]) : undefined };
+	}
+
+	const deletePrefix = "task delete";
+	if (text === deletePrefix) return { kind: "error", message: "Usage: /flow task delete <task-id>" };
+	if (text.startsWith(`${deletePrefix} `)) {
+		const taskId = text.slice(deletePrefix.length).trim();
+		if (!taskId) return { kind: "error", message: "Usage: /flow task delete <task-id>" };
+		if (!isValidFlowTaskId(taskId)) return { kind: "error", message: invalidFlowTaskIdMessage(taskId) };
+		return { kind: "task-delete", taskId };
 	}
 
 	return { kind: "help" };

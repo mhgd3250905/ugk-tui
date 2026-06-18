@@ -62,7 +62,7 @@ test("builds task run prompt with status guards", () => {
 	assert.match(prompt, /status 是 draft/);
 	assert.match(prompt, /\/flow task prove x-search-post-collector/);
 	assert.match(prompt, /status 是 needs-human/);
-	assert.match(prompt, /verified\/active/);
+	assert.match(prompt, /verified\/active\/approved/);
 	assert.match(prompt, /interactive driver|driver/);
 });
 
@@ -152,6 +152,10 @@ test("builds placeholder prompts for parsed driver commands", () => {
 	const statusPrompt = buildFlowRequestPrompt({ kind: "driver-status" });
 	assert.equal(typeof statusPrompt, "string");
 	assert.match(statusPrompt, /driver status/);
+
+	const deletePrompt = buildFlowRequestPrompt({ kind: "task-delete", taskId: "draft-task" });
+	assert.equal(typeof deletePrompt, "string");
+	assert.match(deletePrompt, /delete/i);
 });
 
 test("builds flow help text", () => {
@@ -159,10 +163,12 @@ test("builds flow help text", () => {
 
 	assert.match(help, /\/flow task create "目标"/);
 	assert.match(help, /\/flow task prove <task-id>/);
+	assert.match(help, /\/flow task start <task-id>/);
 	assert.match(help, /\/flow task review <task-id>\/<run-id>/);
 	assert.match(help, /\/flow task accept <task-id>\/<run-id>/);
 	assert.match(help, /确认无需更新/);
 	assert.match(help, /\/flow task reject <task-id>\/<run-id>/);
+	assert.match(help, /\/flow task delete <task-id>/);
 	assert.match(help, /interactive driver|driver/);
 	assert.match(help, /\/flow attach/);
 	assert.match(help, /\/flow attach <task-id>\/<run-id>/);

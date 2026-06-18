@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
 
@@ -9,6 +9,7 @@ export type FlowTaskStatus =
 	| "reviewing"
 	| "verified"
 	| "active"
+	| "approved"
 	| "needs-human";
 
 export interface FlowTaskMetadata {
@@ -94,4 +95,13 @@ export function updateFlowTaskStatus(
 	};
 	writeFlowTask(cwd, taskId, next);
 	return next;
+}
+
+export function deleteFlowTask(cwd: string, taskId: string): boolean {
+	const taskDir = resolveFlowTaskDir(cwd, taskId);
+	if (!existsSync(taskDir)) {
+		return false;
+	}
+	rmSync(taskDir, { recursive: true, force: true });
+	return true;
 }

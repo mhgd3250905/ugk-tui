@@ -51,3 +51,33 @@ test("formatFlowActivityCard renders review state over stale validation next ste
 		"╰─────────────────────────────────────────────",
 	]);
 });
+
+test("formatFlowActivityCard points accepted approved tasks to the next run", () => {
+	const lines = formatFlowActivityCard([
+		{
+			taskId: "x",
+			runId: "run-001",
+			status: "done",
+			step: "validated",
+			summary: "PASS: ok",
+			validation: {
+				result: "PASS",
+				summary: "ok",
+				nextStep: "/flow task review x/run-001",
+			},
+			review: { status: "accepted" },
+			task: { status: "approved", nextStep: "main reviewing x/run-001" },
+		},
+	]);
+
+	assert.deepEqual(lines, [
+		"╭─ Flow Activity ─────────────────────────────",
+		"│ ✓ x/run-001",
+		"│   status: done / validated",
+		"│   result: PASS - ok",
+		"│   review: accepted",
+		"│   task: approved",
+		"│   next: /flow run x",
+		"╰─────────────────────────────────────────────",
+	]);
+});

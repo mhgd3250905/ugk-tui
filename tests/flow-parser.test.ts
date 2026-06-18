@@ -32,6 +32,11 @@ test("parses prove run review and status commands", () => {
 		taskId: "x-search-post-collector",
 		input: undefined,
 	});
+	assert.deepEqual(parseFlowCommand("task start x-search-post-collector"), {
+		kind: "task-run",
+		taskId: "x-search-post-collector",
+		input: undefined,
+	});
 	assert.deepEqual(parseFlowCommand("task review run-001"), {
 		kind: "task-review",
 		runId: "run-001",
@@ -44,6 +49,10 @@ test("parses prove run review and status commands", () => {
 		kind: "task-reject",
 		runId: "run-001",
 		reason: "证据不足",
+	});
+	assert.deepEqual(parseFlowCommand("task delete x-search-post-collector"), {
+		kind: "task-delete",
+		taskId: "x-search-post-collector",
 	});
 	assert.deepEqual(parseFlowCommand("status"), {
 		kind: "status",
@@ -60,6 +69,14 @@ test("returns help for empty or unsupported flow commands", () => {
 	assert.deepEqual(parseFlowCommand("task prove"), {
 		kind: "error",
 		message: "Usage: /flow task prove <task-id> [--input <inline-input>]",
+	});
+	assert.deepEqual(parseFlowCommand("task start"), {
+		kind: "error",
+		message: "Usage: /flow task start <task-id> [--input <inline-input>]",
+	});
+	assert.deepEqual(parseFlowCommand("task delete"), {
+		kind: "error",
+		message: "Usage: /flow task delete <task-id>",
 	});
 });
 
@@ -84,8 +101,11 @@ test("rejects invalid task ids for task prove and run", () => {
 	for (const taskId of ["../x", "..\\x", "x/y", "_x", "x_", "x--y", "X", ""]) {
 		const proveCommand = taskId ? `task prove ${taskId}` : "task prove";
 		const runCommand = taskId ? `run ${taskId}` : "run";
+		const startCommand = taskId ? `task start ${taskId}` : "task start";
 
 		assert.equal(parseFlowCommand(proveCommand).kind, "error");
 		assert.equal(parseFlowCommand(runCommand).kind, "error");
+		assert.equal(parseFlowCommand(startCommand).kind, "error");
+		assert.equal(parseFlowCommand(taskId ? `task delete ${taskId}` : "task delete").kind, "error");
 	}
 });

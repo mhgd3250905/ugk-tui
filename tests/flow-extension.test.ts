@@ -208,6 +208,29 @@ function writePassingValidation(runDir: string, taskId: string, runId = "run-001
 	);
 }
 
+function writeAcceptedReview(runDir: string, taskId: string, runId = "run-001"): void {
+	fs.writeFileSync(
+		path.join(runDir, "review.json"),
+		`${JSON.stringify(
+			{
+				taskId,
+				runId,
+				status: "accepted",
+				userConfirmed: true,
+				taskDesignUpdated: false,
+				taskDesignDecision: "no-change",
+				taskVersion: 1,
+				startedAt: "2026-06-18T01:00:00.000Z",
+				acceptedAt: "2026-06-18T02:00:00.000Z",
+				decisions: [],
+				updatedFiles: [],
+			},
+			null,
+			"\t",
+		)}\n`,
+	);
+}
+
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -325,6 +348,52 @@ test("/flow with no args opens an action menu instead of requiring typed subcomm
 	assert.equal(sentMessages.length, 1);
 	assert.match(sentMessages[0].message.content, /\[FLOW TASK CREATE\]/);
 	assert.match(sentMessages[0].message.content, /整理 README 要点/);
+});
+
+test("/flow task menu lets the user pick a task action and delete after confirmation", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-task-menu-"));
+	writeTempTask(cwd, "draft-task", "draft");
+	writeTempTask(cwd, "verified-task", "verified");
+	const { pi, commands } = makePi();
+	const { ctx, selections, confirms, notifications } = makeCtx(cwd);
+	const selected = ["Tasks", "draft-task [draft]", "Delete draft-task"];
+	ctx.ui.select = (title: string, options: string[]) => {
+		selections.push({ title, options });
+		return selected.shift();
+	};
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("", ctx);
+
+	assert.deepEqual(selections.map((selection) => selection.title), ["Flow", "Flow tasks", "Flow task: draft-task"]);
+	assert.deepEqual(selections[0].options, ["Create task", "Tasks", "Attach driver", "Show status", "Exit"]);
+	assert.deepEqual(selections[1].options, ["draft-task [draft]", "verified-task [verified]", "Back"]);
+	assert.deepEqual(selections[2].options, ["Prove draft-task", "Delete draft-task", "Back"]);
+	assert.equal(confirms.length, 1);
+	assert.match(confirms[0].title, /Delete Flow task/);
+	assert.match(confirms[0].message, /draft-task/);
+	assert.equal(fs.existsSync(path.join(cwd, ".flow", "tasks", "draft-task")), false);
+	assert.match(notifications.at(-1)?.message ?? "", /Flow task deleted: draft-task/);
+});
+
+test("/flow task menu hides accepted reviews and offers run for approved tasks", async () => {
+	const cwd = makeTempFlowProject([
+		{ taskId: "approved-task", runId: "run-001", status: "done", step: "validated" },
+	]);
+	writeTempTask(cwd, "approved-task", "approved");
+	writeAcceptedReview(path.join(cwd, ".flow", "tasks", "approved-task", "runs", "run-001"), "approved-task");
+	const { pi, commands } = makePi();
+	const { ctx, selections } = makeCtx(cwd);
+	const selected = ["Tasks", "approved-task [approved]", "Back"];
+	ctx.ui.select = (title: string, options: string[]) => {
+		selections.push({ title, options });
+		return selected.shift();
+	};
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler("", ctx);
+
+	assert.deepEqual(selections[2].options, ["Run approved-task", "Delete approved-task", "Back"]);
 });
 
 test("flow command does not run while agent is busy", async () => {
@@ -706,6 +775,58 @@ test("/flow run verified task starts only when latest review is accepted", async
 		assert.equal(factoryCalls, 1);
 		assert.deepEqual(sessionViewCalls, []);
 		assert.match(notifications.at(-1)?.message ?? "", /Flow driver running/);
+	} finally {
+		setFlowDriverSessionFactoryForTests(undefined);
+	}
+});
+
+test("/flow run approved task starts when latest review is accepted", async () => {
+	let factoryCalls = 0;
+	setFlowDriverSessionFactoryForTests(async (options) => {
+		factoryCalls += 1;
+		return {
+			taskId: options.taskId,
+			runId: options.runId,
+			runDir: options.runDir,
+			async start() {
+				await new Promise(() => {});
+			},
+			async sendUserInput() {},
+			getTranscriptText() {
+				return "";
+			},
+			getWidgetLines() {
+				return ["driver"];
+			},
+			dispose() {},
+		};
+	});
+	try {
+		const cwd = makeTempTaskProject("approved-task");
+		const taskDir = path.join(cwd, ".flow", "tasks", "approved-task");
+		fs.writeFileSync(
+			path.join(taskDir, "task.json"),
+			`${JSON.stringify(
+				{
+					id: "approved-task",
+					status: "approved",
+					version: 1,
+					latest_review_run: "run-001",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
+		const runDir = path.join(taskDir, "runs", "run-001");
+		fs.mkdirSync(runDir, { recursive: true });
+		writeAcceptedReview(runDir, "approved-task");
+		const { pi, commands } = makePi();
+		const { ctx } = makeCtx(cwd);
+		registerFlow(pi as any);
+
+		await commands.get("flow").handler("run approved-task", ctx);
+
+		assert.equal(factoryCalls, 1);
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}

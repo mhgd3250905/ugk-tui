@@ -64,7 +64,9 @@ export function assertExpectedDriverTools(session: DriverSessionLike, expectedTo
 	const availableToolNames = new Set(session.getAllTools?.().map((tool) => tool.name) ?? []);
 	const missing = expectedToolNames.filter((name) => !availableToolNames.has(name));
 	if (missing.length > 0) {
-		throw new Error(`Flow driver environment is missing expected tools: ${missing.join(", ")}`);
+		throw new Error(
+			`Flow driver environment initialization failed. Missing required capabilities: ${missing.join(", ")}. Please update or restart UGK, then retry.`,
+		);
 	}
 }
 

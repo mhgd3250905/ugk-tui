@@ -8,9 +8,11 @@ export function buildFlowHelpText(): string {
 		'- /flow task create "目标" 生成一个 draft Task 草案',
 		"- /flow task prove <task-id> [--input <inline-input>] 启动 interactive driver 证明 Task 可运行",
 		"- /flow run <task-id> [--input <inline-input>] 启动 interactive driver 运行已证明的 Task",
+		"- /flow task start <task-id> [--input <inline-input>] 同 /flow run，用于再次执行已批准 Task",
 		"- /flow task review <task-id>/<run-id> 由 main agent 主持复盘并等待用户确认",
 		"- /flow task accept <task-id>/<run-id> 用户确认且 Task 设计已更新或确认无需更新后接受 review，推进 Task 为 verified",
 		"- /flow task reject <task-id>/<run-id> [reason] 驳回 review，标记 Task 需要修正",
+		"- /flow task delete <task-id> 删除 Task 和它的所有历史 run",
 		"- /flow attach 选择一个正在运行或可恢复的 driver",
 		"- /flow attach <run-id> 或 /flow attach <task-id>/<run-id> 直接进入指定 driver",
 		"- /flow detach 退出当前 driver focus",
@@ -39,7 +41,7 @@ function buildTaskExecutionPrompt(kind: "task-prove" | "task-run", taskId: strin
 			: [
 					`- 读取 ${taskPath}；如果 status 是 draft，停止执行并提示先运行 \`/flow task prove ${taskId}\`。`,
 					"- 如果 status 是 needs-human，停止执行并提示重新 prove；不要让用户处理内部输出契约。",
-					"- 只有 status 是 verified/active 时，才允许创建新的 `runs/run-<timestamp-or-id>/`。",
+					"- 只有 status 是 verified/active/approved 时，才允许创建新的 `runs/run-<timestamp-or-id>/`。",
 					"- 为本次 run 写入 `input.json`，并从 `todo.template.md` 复制生成本次 `todo.md`。",
 					"- 启动 interactive driver session 执行任务主体；Flow runtime 负责创建 run、维护状态和转发 driver focus 输入。",
 					"- driver 必须读取当前 Task 的 `SKILL.md`、`todo.md` 和 `validator.md`，按最优路径逐项执行并填写证据。",
@@ -120,6 +122,13 @@ export function buildFlowRequestPrompt(request: FlowRequest): string {
 				`Run ID: ${request.runId}`,
 				`Reason: ${request.reason ?? "-"}`,
 				"Review reject command should be handled by Flow runtime.",
+			].join("\n");
+		case "task-delete":
+			return [
+				"[FLOW TASK DELETE]",
+				"",
+				`Task ID: ${request.taskId}`,
+				"Task delete command should be handled by Flow runtime.",
 			].join("\n");
 		case "status":
 			return [

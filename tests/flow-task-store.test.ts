@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { readFlowTask, updateFlowTaskStatus } from "../extensions/flow/task-store.ts";
+import { deleteFlowTask, readFlowTask, updateFlowTaskStatus } from "../extensions/flow/task-store.ts";
 
 function makeTempCwd(): string {
 	return mkdtempSync(path.join(tmpdir(), "flow-task-store-"));
@@ -52,9 +52,19 @@ test("updateFlowTaskStatus preserves metadata and records lifecycle fields", () 
 	assert.equal(saved.next_step, "/flow task review run-001");
 });
 
+test("deleteFlowTask removes a task directory and reports whether it existed", () => {
+	const cwd = makeTempCwd();
+	const taskDir = writeTask(cwd, "demo-task");
+
+	assert.equal(deleteFlowTask(cwd, "demo-task"), true);
+	assert.equal(existsSync(taskDir), false);
+	assert.equal(deleteFlowTask(cwd, "demo-task"), false);
+});
+
 test("task store rejects invalid task ids", () => {
 	const cwd = makeTempCwd();
 
 	assert.throws(() => readFlowTask(cwd, "../../outside"), /Invalid task id/);
 	assert.throws(() => updateFlowTaskStatus(cwd, "../../outside", "proved"), /Invalid task id/);
+	assert.throws(() => deleteFlowTask(cwd, "../../outside"), /Invalid task id/);
 });

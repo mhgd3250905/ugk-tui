@@ -67,7 +67,7 @@ test("driver session fails when an expected tool is missing from the driver envi
 
 	await assert.rejects(
 		() => createFlowDriverSession({ ...createOptions(), expectedToolNames: ["chrome_cdp"] }, factory),
-		/Flow driver environment is missing expected tools: chrome_cdp/,
+		/Flow driver environment initialization failed\. Missing required capabilities: chrome_cdp\. Please update or restart UGK, then retry\./,
 	);
 });
 

@@ -8,11 +8,16 @@ export interface FlowConsoleDriver {
 	runId: string;
 	status: string;
 	step?: string;
+	reviewStatus?: string;
 }
 
 export interface FlowConsoleOption {
 	label: string;
 	command?: string;
+}
+
+export function isRunnableFlowTaskStatus(status: string | undefined): boolean {
+	return status === "verified" || status === "active" || status === "approved";
 }
 
 export type FlowStageGate =
@@ -23,21 +28,10 @@ export type FlowStageGate =
 
 export function buildFlowConsoleOptions(state: {
 	tasks: FlowConsoleTask[];
-	drivers: FlowConsoleDriver[];
 }): FlowConsoleOption[] {
 	const options: FlowConsoleOption[] = [{ label: "Create task", command: "task create" }];
-	for (const task of state.tasks) {
-		if (task.status === "draft" || task.status === "needs-human") {
-			options.push({ label: `Prove ${task.id}`, command: `task prove ${task.id}` });
-		}
-		if (task.status === "verified" || task.status === "active") {
-			options.push({ label: `Run ${task.id}`, command: `run ${task.id}` });
-		}
-	}
-	for (const driver of state.drivers) {
-		if (driver.status === "done") {
-			options.push({ label: `Review ${driver.taskId}/${driver.runId}`, command: `task review ${driver.taskId}/${driver.runId}` });
-		}
+	if (state.tasks.length > 0) {
+		options.push({ label: "Tasks", command: "tasks" });
 	}
 	options.push(
 		{ label: "Attach driver", command: "attach" },
@@ -47,17 +41,53 @@ export function buildFlowConsoleOptions(state: {
 	return options;
 }
 
+export function buildFlowTaskListOptions(tasks: FlowConsoleTask[]): FlowConsoleOption[] {
+	return [
+		...tasks.map((task) => ({
+			label: `${task.id} [${task.status ?? "unknown"}]`,
+			command: `task select ${task.id}`,
+		})),
+		{ label: "Back" },
+	];
+}
+
+export function buildFlowTaskActionOptions(state: {
+	task: FlowConsoleTask;
+	drivers: FlowConsoleDriver[];
+}): FlowConsoleOption[] {
+	const options: FlowConsoleOption[] = [];
+	if (state.task.status === "draft" || state.task.status === "needs-human") {
+		options.push({ label: `Prove ${state.task.id}`, command: `task prove ${state.task.id}` });
+	}
+	if (isRunnableFlowTaskStatus(state.task.status)) {
+		options.push({ label: `Run ${state.task.id}`, command: `run ${state.task.id}` });
+	}
+	for (const driver of state.drivers) {
+		if (driver.taskId === state.task.id && driver.status === "done" && driver.reviewStatus !== "accepted") {
+			options.push({ label: `Review ${driver.taskId}/${driver.runId}`, command: `task review ${driver.taskId}/${driver.runId}` });
+		}
+	}
+	options.push(
+		{ label: `Delete ${state.task.id}`, command: `task delete ${state.task.id}` },
+		{ label: "Back" },
+	);
+	return options;
+}
+
 export function parseFlowConsoleSelection(selection: string | undefined): FlowConsoleOption | undefined {
-	if (!selection || selection === "Exit") return undefined;
+	if (!selection || selection === "Exit" || selection === "Back") return undefined;
 	if (selection === "Show status") return { label: selection, command: "status" };
 	if (selection === "Attach driver") return { label: selection, command: "attach" };
 	if (selection === "Create task") return { label: selection, command: "task create" };
+	if (selection === "Tasks") return { label: selection, command: "tasks" };
 	const prove = selection.match(/^Prove (.+)$/);
 	if (prove) return { label: selection, command: `task prove ${prove[1]}` };
 	const run = selection.match(/^Run (.+)$/);
 	if (run) return { label: selection, command: `run ${run[1]}` };
 	const review = selection.match(/^Review (.+)$/);
 	if (review) return { label: selection, command: `task review ${review[1]}` };
+	const deleted = selection.match(/^Delete (.+)$/);
+	if (deleted) return { label: selection, command: `task delete ${deleted[1]}` };
 	return undefined;
 }
 

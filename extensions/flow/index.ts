@@ -6,7 +6,10 @@ import path from "node:path";
 import { clearFlowDriverBanner, setFlowDriverBanner } from "./driver-banner.ts";
 import {
 	buildFlowConsoleOptions,
+	buildFlowTaskActionOptions,
+	buildFlowTaskListOptions,
 	buildFlowStageGateOptions,
+	isRunnableFlowTaskStatus,
 	parseFlowConsoleSelection,
 	parseFlowStageGateSelection,
 	type FlowStageGate,
@@ -40,7 +43,7 @@ import {
 import { acceptFlowReview, isFlowReviewAccepted, readFlowReview, rejectFlowReview, startFlowReview } from "./review-store.ts";
 import { readFlowRunValidation, validateFlowRun } from "./run-validation.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
-import { readFlowTask, updateFlowTaskStatus } from "./task-store.ts";
+import { deleteFlowTask, readFlowTask, updateFlowTaskStatus } from "./task-store.ts";
 import { formatFlowActivityCard, type FlowActivityViewModel } from "./status-presenter.ts";
 import type { FlowDriverStatus, FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
 
@@ -188,10 +191,10 @@ function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId: strin
 		return task;
 	}
 
-	if (task.status !== "verified" && task.status !== "active") {
+	if (!isRunnableFlowTaskStatus(task.status)) {
 		return {
 			ok: false,
-			message: `Flow task ${taskId} status is ${task.status ?? "unknown"}; /flow run requires verified/active.`,
+			message: `Flow task ${taskId} status is ${task.status ?? "unknown"}; /flow run requires verified/active/approved.`,
 			type: "warning",
 		};
 	}
@@ -274,14 +277,21 @@ export function registerFlow(pi: ExtensionAPI): void {
 			.sort((a, b) => a.id.localeCompare(b.id));
 	}
 
+	function listConsoleDrivers(cwd: string): Array<FlowDriverSummary & { reviewStatus?: string }> {
+		return listDriverSummaries(cwd).map((driver) => ({
+			...driver,
+			reviewStatus: readFlowReview(driver.runDir)?.status,
+		}));
+	}
+
 	async function resolveConsoleCommand(args: string, ctx: ExtensionContext): Promise<string | undefined> {
 		if (args.trim()) {
 			return args;
 		}
 		const cwd = getCwd(ctx);
+		const tasks = listConsoleTasks(cwd);
 		const options = buildFlowConsoleOptions({
-			tasks: listConsoleTasks(cwd),
-			drivers: listDriverSummaries(cwd),
+			tasks,
 		});
 		const selection = await ctx.ui.select("Flow", options.map((option) => option.label));
 		const option = parseFlowConsoleSelection(selection);
@@ -291,6 +301,26 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (option.command === "task create") {
 			const goal = await ctx.ui.input("Create Flow task", "Describe the goal");
 			return goal?.trim() ? `task create ${JSON.stringify(goal.trim())}` : undefined;
+		}
+		if (option.command === "tasks") {
+			const taskOptions = buildFlowTaskListOptions(tasks);
+			const taskSelection = await ctx.ui.select("Flow tasks", taskOptions.map((taskOption) => taskOption.label));
+			const taskOption = taskOptions.find((candidate) => candidate.label === taskSelection && candidate.command);
+			const taskId = taskOption?.command?.match(/^task select (.+)$/)?.[1];
+			if (!taskId) {
+				return undefined;
+			}
+			const task = tasks.find((candidate) => candidate.id === taskId);
+			if (!task) {
+				ctx.ui.notify(`Flow task not found: ${taskId}`, "warning");
+				return undefined;
+			}
+			const actionOptions = buildFlowTaskActionOptions({
+				task,
+				drivers: listConsoleDrivers(cwd),
+			});
+			const actionSelection = await ctx.ui.select(`Flow task: ${task.id}`, actionOptions.map((actionOption) => actionOption.label));
+			return parseFlowConsoleSelection(actionSelection)?.command;
 		}
 		return option.command;
 	}
@@ -966,6 +996,40 @@ export function registerFlow(pi: ExtensionAPI): void {
 		ctx.ui.notify(`Flow review rejected: ${driver.taskId}/${driver.runId}\nTask status: needs-human`, "warning");
 	}
 
+	async function deleteCompletedFlowTask(ctx: ExtensionContext, taskId: string): Promise<void> {
+		const hasLiveDriver = [...liveDrivers.values()].some((driver) => driver.taskId === taskId);
+		if (hasLiveDriver) {
+			ctx.ui.notify(`Flow task cannot be deleted while a driver is running: ${taskId}`, "warning");
+			return;
+		}
+		const confirmed = await ctx.ui.confirm(
+			"Delete Flow task",
+			`Delete ${taskId} and all recorded runs? This cannot be undone.`,
+		);
+		if (!confirmed) {
+			ctx.ui.notify(`Flow task delete cancelled: ${taskId}`, "info");
+			return;
+		}
+		const deleted = deleteFlowTask(getCwd(ctx), taskId);
+		if (!deleted) {
+			ctx.ui.notify(`Flow task not found: ${taskId}`, "warning");
+			return;
+		}
+		for (const [driverKey, driver] of retainedDrivers) {
+			if (driver.taskId === taskId) {
+				driver.dispose();
+				retainedDrivers.delete(driverKey);
+			}
+		}
+		if (focusState.focus === "driver" && focusState.taskId === taskId) {
+			clearFocusedDriver(ctx);
+		} else {
+			renderMainDriverActivity(ctx);
+		}
+		updateSessionSwitcher(ctx);
+		ctx.ui.notify(`Flow task deleted: ${taskId}`, "info");
+	}
+
 	pi.registerCommand("flow", {
 		description: "Queue Flow task workflow requests",
 		handler: async (args, ctx) => {
@@ -1063,6 +1127,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 			}
 			if (request.kind === "task-reject") {
 				rejectCompletedFlowReview(ctx, request.runId, request.reason);
+				return;
+			}
+			if (request.kind === "task-delete") {
+				await deleteCompletedFlowTask(ctx, request.taskId);
 				return;
 			}
 

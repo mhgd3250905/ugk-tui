@@ -41,7 +41,7 @@ export function formatFlowActivityCard(items: FlowActivityViewModel[]): string[]
 		lines.push(`│ ${statusIcon(item.status)} ${item.taskId}/${item.runId}`);
 		lines.push(`│   status: ${[item.status, item.step].filter(Boolean).join(" / ")}`);
 		if (item.validation) {
-			lines.push(`│   result: ${item.validation.result} - ${item.validation.summary}`);
+			lines.push(`│   structure: ${item.validation.result} - ${item.validation.summary}`);
 		}
 		if (item.review) {
 			lines.push(`│   review: ${item.review.status}`);

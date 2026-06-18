@@ -1357,7 +1357,7 @@ test("main view shows running driver activity and completed driver result", asyn
 			"╭─ Flow Activity ─────────────────────────────",
 			"│ ✓ x/run-001",
 			"│   status: done / validated",
-			"│   result: PASS - 最终结果：找到 3 条 medtrum 相关帖子",
+			"│   structure: PASS - 最终结果：找到 3 条 medtrum 相关帖子",
 			"│   task: proved",
 			"│   next: /flow task review x/run-001",
 			"╰─────────────────────────────────────────────",

@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { isRecord, readJsonStrict } from "./flow-fs.ts";
-import { signRecord, TASK_SIGNED_FIELDS, REVIEW_SIGNED_FIELDS, VALIDATION_SIGNED_FIELDS, STATUS_SIGNED_FIELDS } from "./flow-signing.ts";
+import { signRecord, verifyRecord, TASK_SIGNED_FIELDS, REVIEW_SIGNED_FIELDS, VALIDATION_SIGNED_FIELDS, STATUS_SIGNED_FIELDS } from "./flow-signing.ts";
 import { getProjectKey, isInMigrationWindow, closeMigrationWindow } from "./task-store.ts";
 
 /**
@@ -168,4 +168,46 @@ export function autoMigrateIfNeeded(cwd: string): ResignResult | undefined {
 	const result = resignAllRecords(cwd, "auto-migrate on first run");
 	closeMigrationWindow(cwd);
 	return result;
+}
+
+/**
+ * 扫描所有 run 的 status.json,只重签**无签名或签名不符**的(已签的跳过,不重复写)。
+ *
+ * 升级兼容:PR #9 之前 status.json 从不签名,PR #9 引入签名后,历史 run 的 unsigned
+ * status.json 会在窗口外被 readDriverStatus 拒绝,导致 run 从菜单/review 入口消失。
+ * 本函数在启动期(无论窗口状态)一次性补签这些旧记录,让升级不破坏现有数据。
+ *
+ * 区别于 resignAllRecords(重签所有记录,含已签的);本函数只补漏 status,不动
+ * task/review/validation(它们在 PR #9 之前就已签名,无升级兼容问题)。
+ */
+export function resignUnsignedStatusRecords(cwd: string): number {
+	const tasksDir = path.join(cwd, ".flow", "tasks");
+	if (!existsSync(tasksDir)) {
+		return 0;
+	}
+	const projectKey = getProjectKey(cwd);
+	let resigned = 0;
+
+	for (const taskEntry of readdirSync(tasksDir, { withFileTypes: true })) {
+		if (!taskEntry.isDirectory()) continue;
+		const runsDir = path.join(tasksDir, taskEntry.name, "runs");
+		if (!existsSync(runsDir)) continue;
+		for (const runEntry of readdirSync(runsDir, { withFileTypes: true })) {
+			if (!runEntry.isDirectory()) continue;
+			const statusPath = path.join(runsDir, runEntry.name, "status.json");
+			if (!existsSync(statusPath)) continue;
+			try {
+				const parsed = readJsonStrict(statusPath);
+				if (!isRecord(parsed)) continue;
+				// 已签名且验过 → 跳过(不重复写,保留原 mtime)。
+				if (verifyRecord(projectKey, parsed).verified) continue;
+				const sig = signRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);
+				writeFileSync(statusPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
+				resigned++;
+			} catch {
+				// 解析/写入失败:跳过该文件,不阻断其他 run 的恢复。
+			}
+		}
+	}
+	return resigned;
 }

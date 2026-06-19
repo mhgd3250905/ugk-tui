@@ -27,7 +27,7 @@ import {
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
 import { lockTaskAssets, lockTaskStateRecords, type FlowWriteGuard } from "./flow-write-guard.ts";
-import { autoMigrateIfNeeded, resignAllRecords, resignTaskRecords } from "./flow-resign.ts";
+import { autoMigrateIfNeeded, resignAllRecords, resignTaskRecords, resignUnsignedStatusRecords } from "./flow-resign.ts";
 import { closeMigrationWindow } from "./task-store.ts";
 import {
 	isTransientDriverStatus,
@@ -838,10 +838,12 @@ export function registerFlow(pi: ExtensionAPI): void {
 					ctx.ui.notify("Flow repair-signing cancelled.", "info");
 					return;
 				}
+				// 先解锁再重签:review 期间 .json 被 lockTaskStateRecords 设为只读,
+				// 不先解锁会让 resignTaskRecords 写失败(skipped)。repair 是异常恢复路径,
+				// 重签后不再重新加锁(重签可能改了内容,锁已无意义;要继续 review 重新 /flow task review)。
+				releaseReviewGuard(taskId);
 				const result = resignTaskRecords(getCwd(ctx), taskId);
 				closeMigrationWindow(getCwd(ctx));
-				// 若该 task 正处于 review(有 guard),重签后释放锁——重签可能改了内容,锁已无意义。
-				releaseReviewGuard(taskId);
 				ctx.ui.notify(
 					`Flow records repaired for ${taskId}: ${result.tasks} tasks, ${result.reviews} reviews, ${result.validations} validations, ${result.statuses} statuses (${result.skipped} skipped).`,
 					"info",
@@ -920,6 +922,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 		// driver session 不做迁移,避免在 driver cwd 下产生多余的 migrated marker。
 		if (ctx.mode !== "print") {
 			autoMigrateIfNeeded(getCwd(ctx));
+			// 升级兼容:PR #9 之前 status.json 不签名,引入签名后旧 run 的 unsigned
+			// status 会被 readDriverStatus 拒绝→run 从菜单消失。启动期一次性补签。
+			// 独立于迁移窗口(窗口已关也要跑),只重签 unsigned 的,已签的跳过。
+			resignUnsignedStatusRecords(getCwd(ctx));
 		}
 		const entries = ctx.sessionManager?.getEntries?.() ?? [];
 		driverView.restoreFromEntries(entries);

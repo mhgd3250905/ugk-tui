@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { autoMigrateIfNeeded, resignAllRecords, resignTaskRecords } from "../extensions/flow/flow-resign.ts";
+import { autoMigrateIfNeeded, resignAllRecords, resignTaskRecords, resignUnsignedStatusRecords } from "../extensions/flow/flow-resign.ts";
 import { readFlowTask, writeFlowTask, getProjectKey } from "../extensions/flow/task-store.ts";
 import { verifyRecord } from "../extensions/flow/flow-signing.ts";
+import { readDriverStatus, writeDriverStatus } from "../extensions/flow/driver-store.ts";
 
 function makeTempCwd(): string {
 	return mkdtempSync(path.join(tmpdir(), "flow-resign-"));
@@ -145,4 +146,51 @@ test("resignTaskRecords returns empty counts for missing task", () => {
 	const result = resignTaskRecords(cwd, "nonexistent");
 	assert.equal(result.tasks, 0);
 	assert.equal(result.reviews, 0);
+});
+
+// P1 回归:升级兼容。PR #9 之前 status.json 不签名,引入签名后旧 run 的 unsigned
+// status 在窗口外被 readDriverStatus 拒绝→run 从菜单消失。resignUnsignedStatusRecords
+// 在启动期一次性补签,让升级不破坏现有数据。已签的跳过(不重复写)。
+test("resignUnsignedStatusRecords re-signs legacy unsigned status.json (upgrade compat)", () => {
+	const cwd = makeTempCwd();
+	// 模拟升级前用户:writeFlowTask 关窗口(有签名记录),但 status.json 是旧的 unsigned。
+	writeFlowTask(cwd, "legacy-task", { id: "legacy-task", version: 1, status: "ready" });
+	const runDir = path.join(cwd, ".flow", "tasks", "legacy-task", "runs", "run-001");
+	mkdirSync(runDir, { recursive: true });
+	writeFileSync(path.join(runDir, "status.json"), `${JSON.stringify({
+		taskId: "legacy-task",
+		runId: "run-001",
+		status: "done",
+		updatedAt: "2026-06-01T00:00:00.000Z",
+	}, null, "\t")}\n`);
+
+	// 升级前(窗口已关):unsigned status 读不出来→run 不可见。
+	assert.equal(readDriverStatus(runDir, cwd), undefined);
+
+	// 启动期补签。
+	const resigned = resignUnsignedStatusRecords(cwd);
+	assert.equal(resigned, 1);
+
+	// 补签后:status 可读,run 恢复可见。
+	const status = readDriverStatus(runDir, cwd);
+	assert.equal(status?.status, "done");
+	assert.equal(status?.runId, "run-001");
+});
+
+test("resignUnsignedStatusRecords skips already-signed status (no rewrite)", () => {
+	const cwd = makeTempCwd();
+	writeFlowTask(cwd, "signed-task", { id: "signed-task", version: 1, status: "ready" });
+	const runDir = path.join(cwd, ".flow", "tasks", "signed-task", "runs", "run-001");
+	mkdirSync(runDir, { recursive: true });
+	// 用 writeDriverStatus 写一个已签名的 status。
+	writeDriverStatus(runDir, { taskId: "signed-task", runId: "run-001", status: "done" }, cwd);
+	const beforeMtime = statSync(path.join(runDir, "status.json")).mtimeMs;
+
+	// 补签:已签的应跳过(mtime 不变)。
+	const resigned = resignUnsignedStatusRecords(cwd);
+	assert.equal(resigned, 0);
+	const afterMtime = statSync(path.join(runDir, "status.json")).mtimeMs;
+	assert.equal(afterMtime, beforeMtime);
+	// 仍可读。
+	assert.equal(readDriverStatus(runDir, cwd)?.status, "done");
 });

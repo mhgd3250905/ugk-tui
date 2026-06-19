@@ -178,20 +178,22 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 
 	function enqueueWakeup(reason: string, toolName?: string): void {
 		if (!watching || disposed) return;
+		const snapshot = cloneSummary(summary);
+		const tail = extractTail(transcriptEvents);
+		const transcript = driver?.getTranscriptText() ?? "";
+		const decidePrompt = buildDecidePrompt(opts.spec, snapshot, tail);
 		wakeupQueue = wakeupQueue
 			.catch(() => undefined)
 			.then(async () => {
 				if (!watching || disposed) return;
 				try {
-					const snapshot = cloneSummary(summary);
-					const tail = extractTail(transcriptEvents);
 					const verdict = await decide({
 						reason,
 						toolName,
 						summary: snapshot,
 						tail,
-						transcript: driver?.getTranscriptText() ?? "",
-						decidePrompt: buildDecidePrompt(opts.spec, snapshot, tail),
+						transcript,
+						decidePrompt,
 					});
 
 					if (verdict.action === "pass") {
@@ -207,7 +209,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 								reason: `maxSteer reached (${summary.steerCount}/${maxSteer})`,
 								summary: escalationSummary,
 								tail,
-								transcript: driver?.getTranscriptText() ?? "",
+								transcript,
 							});
 							return;
 						}
@@ -235,6 +237,8 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 
 		if (event.type === "agent_start") {
 			summary.turnCount += 1;
+			completionStarted = false;
+			summary.completed = false;
 			return;
 		}
 		if (event.type === "agent_end") {

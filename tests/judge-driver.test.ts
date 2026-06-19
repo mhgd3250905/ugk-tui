@@ -356,3 +356,30 @@ test("agent_end does not wake Judge again after judge_complete completed", async
 
 	assert.deepEqual(wakeupReasons, ["judge_complete"]);
 });
+
+test("agent_end wakes on the next turn after a completed turn is steered back", async () => {
+	const harness = makeDriverHarness();
+	const wakeups: Array<{ reason: string; completed: boolean }> = [];
+	await createJudgeDriver(createOptions({
+		sessionFactory: harness.sessionFactory,
+		onWakeup: async ({ reason, summary }) => {
+			wakeups.push({ reason, completed: summary.completed });
+			return reason === "judge_complete"
+				? { action: "steer", direction: "继续补齐验收证据。", keepWatching: true }
+				: { action: "pass", keepWatching: true };
+		},
+	}));
+
+	harness.emit({ type: "agent_start" });
+	harness.emit({ type: "tool_execution_start", toolName: "judge_complete" });
+	harness.emit({ type: "tool_execution_end", toolName: "judge_complete", isError: false });
+	harness.emit({ type: "agent_start" });
+	harness.emit({ type: "agent_end" });
+	await harness.flush();
+
+	assert.deepEqual(wakeups, [
+		{ reason: "judge_complete", completed: true },
+		{ reason: "agent_end", completed: false },
+	]);
+	assert.deepEqual(harness.userInputs, ["继续补齐验收证据。"]);
+});

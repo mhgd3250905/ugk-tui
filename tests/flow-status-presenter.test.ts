@@ -81,3 +81,22 @@ test("formatFlowActivityCard points accepted approved tasks to the next run", ()
 		"╰─────────────────────────────────────────────",
 	]);
 });
+
+test("activity card truncates overly long validation summary", () => {
+	const longSummary = "x".repeat(6513);
+	const lines = formatFlowActivityCard([
+		{
+			taskId: "zhihu-hot-list",
+			runId: "run-001",
+			status: "done",
+			step: "validated",
+			validation: { result: "PASS", summary: longSummary, nextStep: "review" },
+			review: { status: "in-review" },
+			task: { status: "reviewing", nextStep: "reviewing" },
+		},
+	]);
+	const summaryLine = lines.find((l) => l.includes("structure: PASS"));
+	assert.ok(summaryLine, "structure line must exist");
+	assert.ok(summaryLine.length < 150, `summary line must be short, got ${summaryLine.length} chars`);
+	assert.ok(summaryLine.endsWith("…"), "truncated summary must end with ellipsis");
+});

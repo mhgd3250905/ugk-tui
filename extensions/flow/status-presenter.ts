@@ -41,7 +41,12 @@ export function formatFlowActivityCard(items: FlowActivityViewModel[]): string[]
 		lines.push(`│ ${statusIcon(item.status)} ${item.taskId}/${item.runId}`);
 		lines.push(`│   status: ${[item.status, item.step].filter(Boolean).join(" / ")}`);
 		if (item.validation) {
-			lines.push(`│   structure: ${item.validation.result} - ${item.validation.summary}`);
+			// summary 可能很长(driver 有时把整个 result 塞进来),截断防止卡片撑爆屏幕、
+			// 把 review 提问等后续内容顶出可视区。
+			const summary = item.validation.summary.length > 80
+				? `${item.validation.summary.slice(0, 80)}…`
+				: item.validation.summary;
+			lines.push(`│   structure: ${item.validation.result} - ${summary}`);
 		}
 		if (item.review) {
 			lines.push(`│   review: ${item.review.status}`);

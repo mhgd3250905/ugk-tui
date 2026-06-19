@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { readFlowRunValidation } from "./run-validation.ts";
 import {
 	acceptFlowReview,
@@ -6,6 +8,7 @@ import {
 	startFlowReview,
 	type FlowReviewRecord,
 } from "./review-store.ts";
+import { CORRUPT_FEEDBACK } from "./flow-signing.ts";
 import { normalizeLegacyState, transition } from "./task-state.ts";
 import { readFlowTask, writeFlowTask } from "./task-store.ts";
 import type { FlowDriverSummary } from "./types.ts";
@@ -58,12 +61,23 @@ function checkReviewPrerequisites(
 		return fail(`Flow task review cannot ${wording.liveVerb} while the Flow driver is still running.`);
 	}
 	const validation = readFlowRunValidation(driver.runDir, cwd);
-	if (!validation || validation.result !== "PASS") {
+	if (!validation) {
+		// 读不出 validation:区分"没跑过"vs"记录损坏"。文件存在但读不出 = 损坏,引导 repair。
+		if (existsSync(path.join(driver.runDir, "validation.json"))) {
+			return fail(CORRUPT_FEEDBACK.validation(driver.runId));
+		}
+		return fail(`Flow review cannot be ${wording.validationPhase} because validation is not PASS: ${driver.taskId}/${driver.runId}`);
+	}
+	if (validation.result !== "PASS") {
 		return fail(`Flow review cannot be ${wording.validationPhase} because validation is not PASS: ${driver.taskId}/${driver.runId}`);
 	}
 	if (requireExistingReview) {
 		const existingReview = readFlowReview(driver.runDir, cwd);
 		if (!existingReview) {
+			// 区分"没开始 review"vs"review 记录损坏":文件存在但读不出 = 损坏,引导 repair。
+			if (existsSync(path.join(driver.runDir, "review.json"))) {
+				return fail(CORRUPT_FEEDBACK.review(driver.taskId, driver.runId));
+			}
 			return fail(`Flow review has not started for ${driver.taskId}/${driver.runId}. Run /flow task review ${driver.taskId}/${driver.runId} first.`);
 		}
 	}

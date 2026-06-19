@@ -142,10 +142,16 @@ export function signRecord(
  *
  * 返回中性结果:verified(可信)或 broken(不可信)。调用方对 broken 的反馈
  * 必须遵守设计文档的反馈安全要求——中性措辞,不提签名/密钥。
+ *
+ * requiredCovered(可选):当前记录类型**必须**覆盖的判定字段集。传入时,校验记录
+ * 自带的 _sig.covered 是否包含全部 requiredCovered——防止旧签名(covered 字段少)
+ * 被用来给 agent 补写的新字段背书(如旧 review 不含 taskDesignDecision,agent 补写
+ * 后验签仍过 → 绕过 isFlowReviewAccepted gate)。covered 不足返回 mismatch。
  */
 export function verifyRecord(
 	projectKey: Buffer,
 	record: Record<string, unknown>,
+	requiredCovered?: readonly string[],
 ): SignatureCheck {
 	const sig = record["_sig"];
 	if (!sig || typeof sig !== "object") {
@@ -154,6 +160,11 @@ export function verifyRecord(
 	const sigObj = sig as Partial<RecordSignature>;
 	if (!Array.isArray(sigObj.covered) || typeof sigObj.value !== "string") {
 		return { verified: false, reason: "malformed" };
+	}
+	// covered 完整性:记录自带 covered 必须包含当前类型应有的全部判定字段。
+	// 旧签名(字段集小)不能给新字段背书——缺字段 = 不可信(mismatch)。
+	if (requiredCovered && !requiredCovered.every((field) => (sigObj.covered as string[]).includes(field))) {
+		return { verified: false, reason: "mismatch" };
 	}
 	const coveredFields = extractCovered(record, sigObj.covered);
 	const expected = computeSignatureValue(projectKey, coveredFields);

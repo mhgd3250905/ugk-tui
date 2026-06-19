@@ -229,7 +229,7 @@ export function readFlowReview(runDir: string, cwd: string): FlowReviewRecord | 
 		return undefined;
 	}
 	if (!isInMigrationWindow(cwd)) {
-		const check = verifyRecord(getProjectKey(cwd), parsed);
+		const check = verifyRecord(getProjectKey(cwd), parsed, REVIEW_SIGNED_FIELDS);
 		if (!check.verified) {
 			return undefined;
 		}

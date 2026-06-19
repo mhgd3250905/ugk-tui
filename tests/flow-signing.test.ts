@@ -155,3 +155,29 @@ test("CORRUPT_FEEDBACK gives a safe recovery action, not destructive", () => {
 	assert.ok(!taskMsg.includes("删除"));
 	assert.ok(!taskMsg.includes("手动修复"));
 });
+
+// P1-b 回归:verifyRecord 的 requiredCovered 参数防止旧签名(covered 字段少)给 agent
+// 补写的新字段背书。例如旧 review 签名不含 taskDesignDecision,agent 补写后若不校验
+// covered 完整性,验签仍过 → isFlowReviewAccepted gate 被绕过。
+test("verifyRecord rejects records whose covered does not include all required fields", () => {
+	const masterKey = getOrCreateMasterKey();
+	const projectKey = deriveProjectKey({ cwd: "/test-project" }, masterKey);
+
+	// 造一个"旧签名":只覆盖 status,不含 taskDesignDecision。
+	const record = { status: "accepted", taskDesignDecision: "no-change" };
+	const oldSig = signRecord(projectKey, record, ["status"]);
+	const withOldSig = { ...record, _sig: oldSig };
+
+	// 不传 requiredCovered:旧签名验过(向后兼容裸 verifyRecord)。
+	assert.equal(verifyRecord(projectKey, withOldSig).verified, true);
+
+	// 传 requiredCovered(含 taskDesignDecision):covered 不足 → mismatch(拒读)。
+	const check = verifyRecord(projectKey, withOldSig, ["status", "taskDesignDecision"]);
+	assert.equal(check.verified, false);
+	assert.equal((check as { reason: string }).reason, "mismatch");
+
+	// 对照:用完整 covered 重签后,requiredCovered 校验通过。
+	const fullSig = signRecord(projectKey, record, ["status", "taskDesignDecision"]);
+	const withFullSig = { ...record, _sig: fullSig };
+	assert.equal(verifyRecord(projectKey, withFullSig, ["status", "taskDesignDecision"]).verified, true);
+});

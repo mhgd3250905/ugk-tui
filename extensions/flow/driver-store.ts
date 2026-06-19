@@ -96,7 +96,7 @@ export function readDriverStatus(runDir: string, cwd: string): FlowDriverStatusF
 		return undefined;
 	}
 	if (!isInMigrationWindow(cwd)) {
-		const check = verifyRecord(getProjectKey(cwd), parsed);
+		const check = verifyRecord(getProjectKey(cwd), parsed, STATUS_SIGNED_FIELDS);
 		if (!check.verified) {
 			return undefined;
 		}

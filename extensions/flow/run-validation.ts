@@ -229,7 +229,7 @@ export function readFlowRunValidation(runDir: string, cwd: string): FlowRunValid
 		return undefined;
 	}
 	if (!isInMigrationWindow(cwd)) {
-		const check = verifyRecord(getProjectKey(cwd), parsed);
+		const check = verifyRecord(getProjectKey(cwd), parsed, VALIDATION_SIGNED_FIELDS);
 		if (!check.verified) {
 			return undefined;
 		}

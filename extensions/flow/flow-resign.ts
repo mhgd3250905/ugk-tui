@@ -45,7 +45,8 @@ export function resignTaskRecords(cwd: string, taskId: string): ResignResult {
 		return result;
 	}
 
-	resignOneTask(projectKey, taskDir, result);
+	// 用户显式确认 repair-signing:信任当前内容,无条件重签(含 mismatch 的)。
+	resignOneTask(projectKey, taskDir, result, "all");
 	return result;
 }
 
@@ -72,7 +73,15 @@ export function resignAllRecords(cwd: string, reason: string): ResignResult {
 }
 
 /** 重签单个 task 目录下的所有判定记录(task.json + 各 run 的 review/validation/status)。 */
-function resignOneTask(projectKey: Buffer, taskDir: string, result: ResignResult): void {
+/**
+ * 重签单个 task 目录下的所有判定记录。
+ * statusStrategy:
+ * - "unsigned-only":status.json 只补 no-signature 的(mismatch/malformed 跳过)。
+ *   用于 autoMigrate/resignAllRecords——自动跑,不洗白篡改。
+ * - "all":status.json 无条件重签。用于 resignTaskRecords(/flow repair-signing)——
+ *   用户显式确认"信任当前内容",可以恢复 mismatch 的记录。
+ */
+function resignOneTask(projectKey: Buffer, taskDir: string, result: ResignResult, statusStrategy: "unsigned-only" | "all" = "unsigned-only"): void {
 	// task.json
 	const taskJsonPath = path.join(taskDir, "task.json");
 	if (existsSync(taskJsonPath)) {
@@ -128,9 +137,16 @@ function resignOneTask(projectKey: Buffer, taskDir: string, result: ResignResult
 			try {
 				const parsed = readJsonStrict(statusPath);
 				if (isRecord(parsed)) {
-					const sig = signRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);
-					writeFileSync(statusPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
-					result.statuses++;
+					// status.json 是 PR #9 才加签名的。
+					// unsigned-only(autoMigrate):只补 no-signature,mismatch/malformed 跳过(不洗白篡改)。
+					// all(repair-signing,用户确认):无条件重签。
+					const check = verifyRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);
+					const shouldResign = statusStrategy === "all" || check.reason === "no-signature";
+					if (shouldResign) {
+						const sig = signRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);
+						writeFileSync(statusPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
+						result.statuses++;
+					}
 				}
 			} catch {
 				result.skipped++;
@@ -202,7 +218,7 @@ export function resignUnsignedStatusRecords(cwd: string): number {
 				// 只补"完全没有 _sig"的旧版 status(PR #9 之前从不签名)。
 				// 对已有 _sig 但 mismatch/malformed 的记录(被篡改/损坏)**绝不自动补签**——
 				// 那会把检测到的篡改洗白成可信。交给显式 /flow repair-signing(用户确认)。
-				const check = verifyRecord(projectKey, parsed);
+				const check = verifyRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);
 				if (check.verified) continue; // 已验过 → 跳过
 				if (check.reason !== "no-signature") continue; // mismatch/malformed → 保持拒读
 				const sig = signRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);

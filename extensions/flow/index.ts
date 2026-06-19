@@ -47,7 +47,7 @@ import { acceptReview, rejectReview, startReview, type ReviewActionOutcome } fro
 import { isFlowReviewAccepted, readFlowReview } from "./review-store.ts";
 import { readFlowRunValidation, validateFlowRun } from "./run-validation.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
-import { deleteFlowTask, readFlowTask, signFlowTaskOnDisk, updateFlowTaskStatus } from "./task-store.ts";
+import { deleteFlowTask, readFlowTask, signFlowTaskOnDisk, signFlowTaskOnDiskIfUnsigned, updateFlowTaskStatus } from "./task-store.ts";
 import { transition } from "./task-state.ts";
 import type { FlowDriverStatus, FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
 
@@ -630,12 +630,15 @@ export function registerFlow(pi: ExtensionAPI): void {
 			return;
 		}
 		// accept 前 unlock:runtime 要写 task.json(transition + version bump)和
-		// review.json(acceptFlowReview)。accept 后不再锁(终态)。
+		// review.json(acceptFlowReview)。若 accept 失败(前置校验/状态机拒),重新加锁——
+		// 否则 review 期间 .json 原件保护失效。
 		releaseReviewGuard(driver.taskId);
 		const driverKey = getDriverKey(driver.taskId, driver.runId);
 		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
 		const outcome = acceptReview({ driver, driverLive }, getCwd(ctx));
 		if (!outcome.ok) {
+			// 失败:重新加锁,保持原件保护。accept 后(成功)不再锁(终态)。
+			reviewWriteGuards.set(driver.taskId, lockTaskStateRecords(getCwd(ctx), driver.taskId));
 			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
@@ -655,11 +658,13 @@ export function registerFlow(pi: ExtensionAPI): void {
 			return;
 		}
 		// reject 前 unlock:runtime 要写 task.json(transition)和 review.json(rejectFlowReview)。
+		// 若 reject 失败,重新加锁保持原件保护。
 		releaseReviewGuard(driver.taskId);
 		const driverKey = getDriverKey(driver.taskId, driver.runId);
 		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
 		const outcome = rejectReview({ driver, driverLive }, getCwd(ctx), reason);
 		if (!outcome.ok) {
+			reviewWriteGuards.set(driver.taskId, lockTaskStateRecords(getCwd(ctx), driver.taskId));
 			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
@@ -865,9 +870,13 @@ export function registerFlow(pi: ExtensionAPI): void {
 			const validation = validateFlowTaskAssets(getCwd(ctx), repair.taskId);
 			if (validation.ok) {
 				pendingTaskAssetRepair = undefined;
-				// 修复后的 task.json 同样是 agent 手写的(无 _sig)。推进 stage 前,
-				// runtime 把它重签为可信记录——否则窗口外读取会报"记录不可用"。
-				signFlowTaskOnDisk(getCwd(ctx), repair.taskId);
+				// asset repair 只补缺失的设计资产(SKILL.md/schema 等)。task.json 的签名
+				// 状态不在此重置——既有 task 本就有有效签名,repair 期间 agent 若改了
+				// task.json 的 status/version 等生命周期字段,验签会挡住(readTaskMetadata
+				// 报不可用),交给显式 /flow repair-signing 恢复,不在此洗白。
+				// 仅当 task.json 完全无签名(新建 task 首签未完成)时才首签,且强制 status=draft
+				// (create 阶段 agent 不该写非 draft 状态;写了一律归一为 draft)。
+				signFlowTaskOnDiskIfUnsigned(getCwd(ctx), repair.taskId);
 				await runStageGate(ctx, { phase: "create", taskId: repair.taskId });
 				return;
 			}

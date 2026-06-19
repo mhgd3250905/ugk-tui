@@ -30,6 +30,26 @@ export interface ResignResult {
 }
 
 /**
+ * 重签单个 task 的所有判定记录:task.json + 该 task 所有 runs 目录下的
+ * review.json/validation.json/status.json。用当前 projectKey 签名(信任当前内容)。
+ *
+ * 用途:/flow repair-signing <task-id>——agent 把 task.json 写脏后,用户用它恢复,
+ * 不用删 task 重建。区别于 resignAllRecords(重签所有 task,密钥丢失场景)。
+ */
+export function resignTaskRecords(cwd: string, taskId: string): ResignResult {
+	const result: ResignResult = { tasks: 0, reviews: 0, validations: 0, statuses: 0, skipped: 0 };
+	const projectKey = getProjectKey(cwd);
+	const tasksDir = path.join(cwd, ".flow", "tasks");
+	const taskDir = path.join(tasksDir, taskId);
+	if (!existsSync(taskDir)) {
+		return result;
+	}
+
+	resignOneTask(projectKey, taskDir, result);
+	return result;
+}
+
+/**
  * 扫描项目所有判定记录并用当前 projectKey 重签。
  * 写 reset log(留痕)。调用方负责在合适时机调用(手动命令 / 启动期)。
  */
@@ -44,76 +64,79 @@ export function resignAllRecords(cwd: string, reason: string): ResignResult {
 
 	for (const taskEntry of readdirSync(tasksDir, { withFileTypes: true })) {
 		if (!taskEntry.isDirectory()) continue;
-		const taskDir = path.join(tasksDir, taskEntry.name);
+		resignOneTask(projectKey, path.join(tasksDir, taskEntry.name), result);
+	}
 
-		// task.json
-		const taskJsonPath = path.join(taskDir, "task.json");
-		if (existsSync(taskJsonPath)) {
+	writeResetLog(cwd, reason, result);
+	return result;
+}
+
+/** 重签单个 task 目录下的所有判定记录(task.json + 各 run 的 review/validation/status)。 */
+function resignOneTask(projectKey: Buffer, taskDir: string, result: ResignResult): void {
+	// task.json
+	const taskJsonPath = path.join(taskDir, "task.json");
+	if (existsSync(taskJsonPath)) {
+		try {
+			const parsed = readJsonStrict(taskJsonPath);
+			if (isRecord(parsed)) {
+				const sig = signRecord(projectKey, parsed, TASK_SIGNED_FIELDS);
+				writeFileSync(taskJsonPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
+				result.tasks++;
+			}
+		} catch {
+			result.skipped++;
+		}
+	}
+
+	// runs/*/review.json + validation.json + status.json
+	const runsDir = path.join(taskDir, "runs");
+	if (!existsSync(runsDir)) return;
+	for (const runEntry of readdirSync(runsDir, { withFileTypes: true })) {
+		if (!runEntry.isDirectory()) continue;
+		const runDir = path.join(runsDir, runEntry.name);
+
+		const reviewPath = path.join(runDir, "review.json");
+		if (existsSync(reviewPath)) {
 			try {
-				const parsed = readJsonStrict(taskJsonPath);
+				const parsed = readJsonStrict(reviewPath);
 				if (isRecord(parsed)) {
-					const sig = signRecord(projectKey, parsed, TASK_SIGNED_FIELDS);
-					writeFileSync(taskJsonPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
-					result.tasks++;
+					const sig = signRecord(projectKey, parsed, REVIEW_SIGNED_FIELDS);
+					writeFileSync(reviewPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
+					result.reviews++;
 				}
 			} catch {
 				result.skipped++;
 			}
 		}
 
-		// runs/*/review.json + validation.json
-		const runsDir = path.join(taskDir, "runs");
-		if (!existsSync(runsDir)) continue;
-		for (const runEntry of readdirSync(runsDir, { withFileTypes: true })) {
-			if (!runEntry.isDirectory()) continue;
-			const runDir = path.join(runsDir, runEntry.name);
-
-			const reviewPath = path.join(runDir, "review.json");
-			if (existsSync(reviewPath)) {
-				try {
-					const parsed = readJsonStrict(reviewPath);
-					if (isRecord(parsed)) {
-						const sig = signRecord(projectKey, parsed, REVIEW_SIGNED_FIELDS);
-						writeFileSync(reviewPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
-						result.reviews++;
-					}
-				} catch {
-					result.skipped++;
+		const validationPath = path.join(runDir, "validation.json");
+		if (existsSync(validationPath)) {
+			try {
+				const parsed = readJsonStrict(validationPath);
+				if (isRecord(parsed)) {
+					const sig = signRecord(projectKey, parsed, VALIDATION_SIGNED_FIELDS);
+					writeFileSync(validationPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
+					result.validations++;
 				}
+			} catch {
+				result.skipped++;
 			}
+		}
 
-			const validationPath = path.join(runDir, "validation.json");
-			if (existsSync(validationPath)) {
-				try {
-					const parsed = readJsonStrict(validationPath);
-					if (isRecord(parsed)) {
-						const sig = signRecord(projectKey, parsed, VALIDATION_SIGNED_FIELDS);
-						writeFileSync(validationPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
-						result.validations++;
-					}
-				} catch {
-					result.skipped++;
+		const statusPath = path.join(runDir, "status.json");
+		if (existsSync(statusPath)) {
+			try {
+				const parsed = readJsonStrict(statusPath);
+				if (isRecord(parsed)) {
+					const sig = signRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);
+					writeFileSync(statusPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
+					result.statuses++;
 				}
-			}
-
-			const statusPath = path.join(runDir, "status.json");
-			if (existsSync(statusPath)) {
-				try {
-					const parsed = readJsonStrict(statusPath);
-					if (isRecord(parsed)) {
-						const sig = signRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);
-						writeFileSync(statusPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
-						result.statuses++;
-					}
-				} catch {
-					result.skipped++;
-				}
+			} catch {
+				result.skipped++;
 			}
 		}
 	}
-
-	writeResetLog(cwd, reason, result);
-	return result;
 }
 
 /** 写 reset log(留痕)。记录时间、原因、重签数量。 */

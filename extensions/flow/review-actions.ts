@@ -114,32 +114,32 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 	if (!transitionResult.ok) {
 		return fail(transitionResult.reason, "error");
 	}
-	// version bump 由 runtime 独占:若本次 review 沉淀了 task 设计更新(SKILL/skill
-	// 资产写回),version +1。判断依据与 acceptFlowReview 内部一致——existing review
-	// 的 taskDesignDecision,或 updatedFiles 非空。直接用 writeFlowTask 写回(带签名);
-	// updateFlowTaskStatus 会用 existing.version 强制覆盖,无法 bump。agent 永不手改
-	// task.json(那会破坏签名)。
-	const existingReview = readFlowReview(driver.runDir, cwd);
-	const designUpdated =
-		existingReview?.taskDesignDecision === "updated" ||
-		existingReview?.taskDesignUpdated === true ||
-		(existingReview?.updatedFiles.length ?? 0) > 0;
-	const nextVersion = designUpdated ? task.version + 1 : task.version;
-	if (designUpdated) {
-		// transition 已把 task.json 写成 ready;这里读最新值,只改 version,原样重签。
-		const currentTask = readFlowTask(cwd, driver.taskId);
-		if (currentTask) {
-			const { taskDir: _td, _signatureBroken: _broken, ...fields } = currentTask;
-			writeFlowTask(cwd, driver.taskId, { ...fields, version: nextVersion });
-		}
-	}
+	// acceptFlowReview 内部扫描设计资产 mtime 变化,决定 taskDesignUpdated/updatedFiles。
+	// 先用当前 version 写 review;若检测到设计更新,再 bump version 并回写 task.json +
+	// review.json 的 taskVersion(均带签名)。agent 永不手改 task.json(那会破坏签名)。
 	const review = acceptFlowReview({
 		cwd,
 		taskId: driver.taskId,
 		runId: driver.runId,
 		runDir: driver.runDir,
-		taskVersion: nextVersion,
+		taskVersion: task.version,
 	});
+	if (review.taskDesignUpdated) {
+		const nextVersion = task.version + 1;
+		const currentTask = readFlowTask(cwd, driver.taskId);
+		if (currentTask) {
+			const { taskDir: _td, _signatureBroken: _broken, ...fields } = currentTask;
+			writeFlowTask(cwd, driver.taskId, { ...fields, version: nextVersion });
+		}
+		// 回写 review 的 taskVersion 为 bump 后的值(重签)。
+		return { ok: true, kind: "accepted", review: acceptFlowReview({
+			cwd,
+			taskId: driver.taskId,
+			runId: driver.runId,
+			runDir: driver.runDir,
+			taskVersion: nextVersion,
+		}) };
+	}
 	return { ok: true, kind: "accepted", review };
 }
 

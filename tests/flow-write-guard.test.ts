@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync, writeFileSync as writeSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { lockTaskAssets } from "../extensions/flow/flow-write-guard.ts";
+import { lockTaskAssets, lockTaskStateRecords } from "../extensions/flow/flow-write-guard.ts";
 import { writeFlowTask } from "../extensions/flow/task-store.ts";
 
 const PROTECTED_ASSETS = ["SKILL.md", "todo.template.md", "validator.md", "input.schema.json", "output.schema.json"];
@@ -92,4 +92,47 @@ test("lockTaskAssets skips missing assets without throwing", () => {
 	const guard = lockTaskAssets(cwd, "partial-task");
 	assert.equal(guard.lockedPaths.length, 0); // 没有设计资产可锁
 	guard.unlock();
+});
+
+// review 阶段原件保护:lockTaskStateRecords 锁 .json 状态记录(task/review/
+// validation/status),但不锁 .md 设计资产(agent 仍可写回 SKILL.md 等复印件)。
+test("lockTaskStateRecords locks json state records but not md design assets", () => {
+	const cwd = makeTempCwd();
+	const taskDir = path.join(cwd, ".flow", "tasks", "demo-task");
+	const runDir = path.join(taskDir, "runs", "run-001");
+	mkdirSync(runDir, { recursive: true });
+	writeFlowTask(cwd, "demo-task", { id: "demo-task", version: 1, status: "reviewing" });
+	// run 级 json 状态记录
+	writeFileSync(path.join(runDir, "review.json"), "{}\n");
+	writeFileSync(path.join(runDir, "validation.json"), "{}\n");
+	writeFileSync(path.join(runDir, "status.json"), "{}\n");
+	// 设计资产(.md/schema)——这些不该被锁
+	writeFileSync(path.join(taskDir, "SKILL.md"), "# skill\n");
+	writeFileSync(path.join(taskDir, "todo.template.md"), "# todo\n");
+
+	const guard = lockTaskStateRecords(cwd, "demo-task");
+	try {
+		// task.json + 3 个 run json = 4 个锁定
+		assert.ok(guard.lockedPaths.length >= 4, `expected >=4 locked, got ${guard.lockedPaths.length}`);
+		// .json 写不进(原件保护)
+		for (const jsonFile of ["task.json"]) {
+			assert.throws(
+				() => writeFileSync(path.join(taskDir, jsonFile), "tampered"),
+				(err) => (err as NodeJS.ErrnoException).code === "EPERM" || (err as NodeJS.ErrnoException).code === "EACCES",
+			);
+		}
+		for (const jsonFile of ["review.json", "validation.json", "status.json"]) {
+			assert.throws(
+				() => writeFileSync(path.join(runDir, jsonFile), "tampered"),
+				(err) => (err as NodeJS.ErrnoException).code === "EPERM" || (err as NodeJS.ErrnoException).code === "EACCES",
+			);
+		}
+		// .md 设计资产仍可写(复印件,agent 可填)
+		assert.doesNotThrow(() => writeFileSync(path.join(taskDir, "SKILL.md"), "# updated\n"));
+		assert.doesNotThrow(() => writeFileSync(path.join(taskDir, "todo.template.md"), "# updated\n"));
+	} finally {
+		guard.unlock();
+	}
+	// unlock 后 .json 恢复可写
+	assert.doesNotThrow(() => writeFileSync(path.join(taskDir, "task.json"), "restored\n"));
 });

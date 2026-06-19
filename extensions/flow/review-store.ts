@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { readJsonRecord } from "./flow-fs.ts";
 import { signRecord, verifyRecord, REVIEW_SIGNED_FIELDS } from "./flow-signing.ts";
-import { getProjectKey, isInMigrationWindow } from "./task-store.ts";
+import { getProjectKey, isInMigrationWindow, resolveFlowTaskDir } from "./task-store.ts";
+import { REQUIRED_FLOW_TASK_ASSETS } from "./task-validation.ts";
 
 export type FlowReviewStatus = "in-review" | "accepted" | "rejected" | "needs-changes";
 export type FlowTaskDesignDecision = "updated" | "no-change";
@@ -100,6 +101,38 @@ function renderReviewMarkdown(review: FlowReviewRecord): string {
 	].filter((line): line is string => line !== undefined).join("\n");
 }
 
+/**
+ * 扫描 task 设计资产(SKILL.md/todo.template.md/validator.md/schema),找出 review 期间
+ * (mtime 晚于 review.startedAt)被修改的文件。
+ *
+ * updatedFiles 不再由 agent 填进 review.json(那会破坏签名);改由 runtime 在 accept 时
+ * 扫描决定。agent 只需正常写回 SKILL.md 等,runtime 自动检测变化。
+ */
+function detectUpdatedDesignAssets(cwd: string, taskId: string, startedAt: string): string[] {
+	const taskDir = resolveFlowTaskDir(cwd, taskId);
+	const startedMs = Date.parse(startedAt);
+	if (Number.isNaN(startedMs)) {
+		return [];
+	}
+	const updated: string[] = [];
+	// 设计资产 = REQUIRED_FLOW_TASK_ASSETS 去掉 task.json(那是状态记录,不是设计资产)。
+	const designAssets = REQUIRED_FLOW_TASK_ASSETS.filter((asset) => asset !== "task.json");
+	for (const asset of designAssets) {
+		const filePath = path.join(taskDir, asset);
+		if (!existsSync(filePath)) {
+			continue;
+		}
+		try {
+			if (statSync(filePath).mtimeMs > startedMs) {
+				updated.push(asset);
+			}
+		} catch {
+			// stat 失败(并发删除等)按"未改"处理。
+		}
+	}
+	return updated;
+}
+
 /** 写 review.json(带签名)+ review.md。签名由 runtime 独占(agent 拿不到密钥)。 */
 function writeSignedReview(cwd: string, runDir: string, review: FlowReviewRecord): void {
 	mkdirSync(runDir, { recursive: true });
@@ -137,9 +170,12 @@ export function startFlowReview(args: StartFlowReviewArgs): FlowReviewRecord {
 export function acceptFlowReview(args: AcceptFlowReviewArgs): FlowReviewRecord {
 	mkdirSync(args.runDir, { recursive: true });
 	const existing = readFlowReview(args.runDir, args.cwd);
+	const startedAt = existing?.startedAt ?? (args.now ?? new Date()).toISOString();
+	// updatedFiles 由 runtime 扫描设计资产的 mtime 变化决定,不信 agent 填的字段
+	// (agent 写 review.json 会破坏签名)。详见 detectUpdatedDesignAssets。
+	const updatedFiles = detectUpdatedDesignAssets(args.cwd, args.taskId, startedAt);
 	const taskDesignDecision: FlowTaskDesignDecision =
-		existing?.taskDesignDecision ??
-		(existing?.taskDesignUpdated || (existing?.updatedFiles.length ?? 0) > 0 ? "updated" : "no-change");
+		existing?.taskDesignDecision ?? (updatedFiles.length > 0 ? "updated" : "no-change");
 	const review: FlowReviewRecord = {
 		taskId: args.taskId,
 		runId: args.runId,
@@ -148,14 +184,14 @@ export function acceptFlowReview(args: AcceptFlowReviewArgs): FlowReviewRecord {
 		taskDesignUpdated: taskDesignDecision === "updated",
 		taskDesignDecision,
 		taskVersion: args.taskVersion,
-		startedAt: existing?.startedAt ?? (args.now ?? new Date()).toISOString(),
+		startedAt,
 		acceptedAt: (args.now ?? new Date()).toISOString(),
 		decisions: existing?.decisions.length
 			? existing.decisions
 			: [taskDesignDecision === "updated"
 					? "用户已确认本次 prove 输出、证据和任务设计沉淀可以进入 verified。"
 					: "用户已确认本次 prove 输出和证据可接受，Task 设计无需修改。"],
-		updatedFiles: existing?.updatedFiles.length ? existing.updatedFiles : [],
+		updatedFiles,
 	};
 	writeSignedReview(args.cwd, args.runDir, review);
 	return review;

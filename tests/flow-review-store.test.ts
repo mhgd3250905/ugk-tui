@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -132,28 +132,24 @@ test("accepted no-change reviews satisfy the review gate", () => {
 });
 
 test("acceptFlowReview records updated decision when task assets changed", () => {
-	const { cwd, runDir } = makeRun();
-	writeFileSync(
-		path.join(runDir, "review.json"),
-		`${JSON.stringify(
-			{
-				taskId: "demo-task",
-				runId: "run-001",
-				status: "in-review",
-				userConfirmed: false,
-				taskDesignUpdated: false,
-				updatedFiles: ["SKILL.md"],
-				decisions: ["固化路径 A"],
-			},
-			null,
-			"\t",
-		)}\n`,
-	);
+	const { cwd, taskDir, runDir } = makeRun();
+	// 设计资产在 taskDir 根(SKILL.md 等),accept 时扫描它们的 mtime 变化。
+	// 先建一个旧的 SKILL.md(mtime 早于 review start),再 start review,再 touch 改 mtime。
+	writeFileSync(path.join(taskDir, "SKILL.md"), "# old skill\n");
+	// 回退 SKILL.md mtime 到 1 秒前,确保 start review 时它"尚未改"。
+	const oldTime = new Date(Date.now() - 1000);
+	utimesSync(path.join(taskDir, "SKILL.md"), oldTime, oldTime);
+
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
+
+	// 模拟 agent 在 review 期间写回 SKILL.md(mtime 变新)。
+	writeFileSync(path.join(taskDir, "SKILL.md"), "# updated skill\n");
 
 	const review = acceptFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir, taskVersion: 4 });
 
 	assert.equal(review.taskDesignUpdated, true);
 	assert.equal(review.taskDesignDecision, "updated");
+	assert.deepEqual(review.updatedFiles, ["SKILL.md"]);
 	assert.equal(isFlowReviewAccepted(review, 4), true);
 });
 

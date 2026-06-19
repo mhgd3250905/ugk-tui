@@ -135,9 +135,9 @@ export function transition(cwd: string, taskId: string, event: FlowTaskEvent): T
 	}
 
 	// 损坏记录(签名不符)不接受状态转换——防 agent 通过篡改绕过状态机。
-	// 反馈用中性措辞,不提签名机制。
+	// 反馈告知 agent 正确路径(/flow task accept 或 /flow repair-signing),不提签名机制。
 	if (existing._signatureBroken) {
-		return { ok: false, reason: CORRUPT_FEEDBACK.taskStatus(taskId) };
+		return { ok: false, reason: CORRUPT_FEEDBACK.taskStatus(taskId, existing.latest_review_run) };
 	}
 
 	const from = normalizeLegacyState(existing.status);

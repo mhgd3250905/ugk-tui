@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { autoMigrateIfNeeded, resignAllRecords } from "../extensions/flow/flow-resign.ts";
+import { autoMigrateIfNeeded, resignAllRecords, resignTaskRecords } from "../extensions/flow/flow-resign.ts";
 import { readFlowTask, writeFlowTask, getProjectKey } from "../extensions/flow/task-store.ts";
 import { verifyRecord } from "../extensions/flow/flow-signing.ts";
 
@@ -104,4 +104,45 @@ test("autoMigrateIfNeeded is a no-op when no tasks exist", () => {
 	mkdirSync(path.join(cwd, ".flow"), { recursive: true });
 	const result = autoMigrateIfNeeded(cwd);
 	assert.equal(result, undefined);
+});
+
+// repair-signing 核心:agent 把 task.json 写脏(签名 mismatch)后,单 task 重签恢复。
+// 不用删 task 重建。resignTaskRecords 只重签指定 task,不动其他 task。
+test("resignTaskRecords recovers a single tampered task without touching others", () => {
+	const cwd = makeTempCwd();
+	// 两个 task,都用 writeFlowTask 正常签名 + 关窗
+	writeFlowTask(cwd, "task-a", { id: "task-a", version: 1, status: "reviewing" });
+	writeFlowTask(cwd, "task-b", { id: "task-b", version: 1, status: "ready" });
+
+	// 模拟 agent 把 task-a 的 status 写脏(无签名/签名 mismatch)
+	const taskADir = path.join(cwd, ".flow", "tasks", "task-a");
+	writeFileSync(
+		path.join(taskADir, "task.json"),
+		`${JSON.stringify({ id: "task-a", version: 1, status: "active" }, null, "\t")}\n`,
+	);
+
+	// task-a 现在验不过(窗口已关)
+	const brokenTask = readFlowTask(cwd, "task-a");
+	assert.equal(brokenTask?._signatureBroken, true);
+
+	// repair:只重签 task-a
+	const result = resignTaskRecords(cwd, "task-a");
+	assert.equal(result.tasks, 1);
+
+	// task-a 恢复:验过,且信任当前内容(status: active,但归一后等价 ready)
+	const recovered = readFlowTask(cwd, "task-a");
+	assert.equal(recovered?._signatureBroken, undefined);
+	const onDisk = JSON.parse(readFileSync(path.join(taskADir, "task.json"), "utf8"));
+	assert.equal(verifyRecord(getProjectKey(cwd), onDisk).verified, true);
+
+	// task-b 不受影响(仍验过)
+	const taskB = readFlowTask(cwd, "task-b");
+	assert.equal(taskB?._signatureBroken, undefined);
+});
+
+test("resignTaskRecords returns empty counts for missing task", () => {
+	const cwd = makeTempCwd();
+	const result = resignTaskRecords(cwd, "nonexistent");
+	assert.equal(result.tasks, 0);
+	assert.equal(result.reviews, 0);
 });

@@ -26,8 +26,8 @@ import {
 	writeDriverStatus,
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
-import { lockTaskAssets, type FlowWriteGuard } from "./flow-write-guard.ts";
-import { autoMigrateIfNeeded, resignAllRecords } from "./flow-resign.ts";
+import { lockTaskAssets, lockTaskStateRecords, type FlowWriteGuard } from "./flow-write-guard.ts";
+import { autoMigrateIfNeeded, resignAllRecords, resignTaskRecords } from "./flow-resign.ts";
 import { closeMigrationWindow } from "./task-store.ts";
 import {
 	isTransientDriverStatus,
@@ -119,6 +119,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 	// driver 执行期间的 task 资产只读锁,按 driverKey 索引。
 	// 所有 driver 终态(dispose/clear/shutdown)都必须释放对应 guard,否则文件永久只读。
 	const writeGuards = new Map<string, FlowWriteGuard>();
+	// review 期间的 .json 状态记录只读锁(原件保护),按 taskId 索引。
+	// startReview 时锁定(防 agent 手写 .json);accept/reject 前解锁(runtime 要写)。
+	// shutdown 也要释放,否则 .json 永久只读。
+	const reviewWriteGuards = new Map<string, FlowWriteGuard>();
 	let pendingCreateTaskIds: Set<string> | undefined;
 	let pendingTaskAssetRepair: { taskId: string; attempts: number } | undefined;
 
@@ -136,6 +140,15 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (guard) {
 			guard.unlock();
 			writeGuards.delete(driverKey);
+		}
+	}
+
+	/** 释放某 task 的 review .json 只读锁。幂等;accept/reject/shutdown 都应调用。 */
+	function releaseReviewGuard(taskId: string): void {
+		const guard = reviewWriteGuards.get(taskId);
+		if (guard) {
+			guard.unlock();
+			reviewWriteGuards.delete(taskId);
 		}
 	}
 
@@ -601,6 +614,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
+		// review 期间锁定 .json 状态记录(原件保护):agent 物理写不进 task/review/
+		// validation/status.json,只能改 SKILL.md 等设计资产。accept/reject 前解锁。
+		reviewWriteGuards.set(driver.taskId, lockTaskStateRecords(getCwd(ctx), driver.taskId));
 		if (driverView.focusState.focus === "driver") {
 			clearFocusedDriver(ctx);
 		}
@@ -613,6 +629,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (!driver) {
 			return;
 		}
+		// accept 前 unlock:runtime 要写 task.json(transition + version bump)和
+		// review.json(acceptFlowReview)。accept 后不再锁(终态)。
+		releaseReviewGuard(driver.taskId);
 		const driverKey = getDriverKey(driver.taskId, driver.runId);
 		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
 		const outcome = acceptReview({ driver, driverLive }, getCwd(ctx));
@@ -635,6 +654,8 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (!driver) {
 			return;
 		}
+		// reject 前 unlock:runtime 要写 task.json(transition)和 review.json(rejectFlowReview)。
+		releaseReviewGuard(driver.taskId);
 		const driverKey = getDriverKey(driver.taskId, driver.runId);
 		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
 		const outcome = rejectReview({ driver, driverLive }, getCwd(ctx), reason);
@@ -801,7 +822,28 @@ export function registerFlow(pi: ExtensionAPI): void {
 				const result = resignAllRecords(getCwd(ctx), "manual /flow reset-signing");
 				closeMigrationWindow(getCwd(ctx));
 				ctx.ui.notify(
-					`Flow records re-signed: ${result.tasks} tasks, ${result.reviews} reviews, ${result.validations} validations (${result.skipped} skipped).`,
+					`Flow records re-signed: ${result.tasks} tasks, ${result.reviews} reviews, ${result.validations} validations, ${result.statuses} statuses (${result.skipped} skipped).`,
+					"info",
+				);
+				return;
+			}
+
+			if (request.kind === "repair-signing") {
+				const taskId = request.taskId;
+				const confirmed = await ctx.ui.confirm(
+					`Repair Flow records for ${taskId}`,
+					`This re-signs ${taskId}'s task/review/validation/status records with the current key (trusts current content). Use after records become unusable. Continue?`,
+				);
+				if (!confirmed) {
+					ctx.ui.notify("Flow repair-signing cancelled.", "info");
+					return;
+				}
+				const result = resignTaskRecords(getCwd(ctx), taskId);
+				closeMigrationWindow(getCwd(ctx));
+				// 若该 task 正处于 review(有 guard),重签后释放锁——重签可能改了内容,锁已无意义。
+				releaseReviewGuard(taskId);
+				ctx.ui.notify(
+					`Flow records repaired for ${taskId}: ${result.tasks} tasks, ${result.reviews} reviews, ${result.validations} validations, ${result.statuses} statuses (${result.skipped} skipped).`,
 					"info",
 				);
 				return;
@@ -999,6 +1041,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 		// 会话关闭:释放所有未释放的 task 资产只读锁,避免文件永久卡在 0444。
 		for (const key of [...writeGuards.keys()]) {
 			releaseWriteGuard(key);
+		}
+		// 同样释放 review 期间的 .json 只读锁(若 review 未完成就被关)。
+		for (const taskId of [...reviewWriteGuards.keys()]) {
+			releaseReviewGuard(taskId);
 		}
 		ctx?.ui && updateSessionSwitcher(ctx);
 	});

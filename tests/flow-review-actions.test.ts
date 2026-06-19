@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { acceptReview, rejectReview, startReview } from "../extensions/flow/review-actions.ts";
@@ -128,17 +128,19 @@ test("acceptReview succeeds and transitions task to ready", () => {
 });
 
 // version bump 由 runtime 接管:agent 不再手改 task.json.version(那会破坏签名)。
-// 当 review 沉淀了 task 设计更新(updatedFiles 非空)时,runtime 在 accept 时 version+1;
-// 无更新时 version 不变。见 prompts.ts review 指令 + acceptReview 实现。
+// 当 review 期间设计资产(SKILL.md 等)被修改时,runtime 扫描 mtime 检测到,accept 时 version+1;
+// 无修改时 version 不变。updatedFiles 由 runtime 扫描决定,不信 agent 填的(那会破坏签名)。
 test("acceptReview bumps task version when task design assets were updated", () => {
 	const cwd = makeTempCwd();
-	const { driver, runDir } = makePassRun(cwd);
-	// 先 start 一个 in-review review,再手写 updatedFiles(模拟 agent 写回了 SKILL.md)。
+	const { driver, taskDir, runDir } = makePassRun(cwd);
+	// 建一个旧 mtime 的 SKILL.md,确保 review start 时它"尚未改"。
+	writeFileSync(path.join(taskDir, "SKILL.md"), "# old\n");
+	const oldTime = new Date(Date.now() - 1000);
+	utimesSync(path.join(taskDir, "SKILL.md"), oldTime, oldTime);
+
 	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
-	const reviewPath = path.join(runDir, "review.json");
-	const reviewOnDisk = JSON.parse(readFileSync(reviewPath, "utf8"));
-	reviewOnDisk.updatedFiles = ["SKILL.md"];
-	writeFileSync(reviewPath, `${JSON.stringify(reviewOnDisk, null, "\t")}\n`);
+	// 模拟 agent 在 review 期间写回 SKILL.md(mtime 变新)。
+	writeFileSync(path.join(taskDir, "SKILL.md"), "# updated\n");
 	seedTask(cwd, "demo-task", "reviewing");
 
 	const outcome = acceptReview({ driver, driverLive: false }, cwd);
@@ -147,7 +149,6 @@ test("acceptReview bumps task version when task design assets were updated", () 
 	const task = readFlowTask(cwd, "demo-task");
 	assert.equal(task?.version, 2);
 	assert.equal(task?._signatureBroken, undefined);
-	// review 记录的 taskVersion 也是 bump 后的值。
 	assert.equal((outcome as { review?: { taskVersion?: number } }).review?.taskVersion, 2);
 });
 

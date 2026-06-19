@@ -216,10 +216,14 @@ export const STATUS_SIGNED_FIELDS = [
  * 保证措辞统一、不泄露签名机制。每条都是中性"记录不可用"+ 安全恢复动作。
  */
 export const CORRUPT_FEEDBACK = {
-	taskStatus: (taskId: string) =>
-		`Flow task ${taskId} 的状态记录不可用,建议从证明阶段重新开始(/flow task prove ${taskId})`,
-	review: (taskId: string) =>
-		`task ${taskId} 的复盘记录不可用;请告诉用户这次 run 需要重新复盘`,
+	taskStatus: (taskId: string, runId?: string) =>
+		runId
+			? `Flow task ${taskId} 的状态记录不可用(被手写或损坏)。推进状态的唯一合法路径是 /flow task accept ${runId}(runtime 会写入),不要手写 task.json。若记录已损坏到无法 accept,用 /flow repair-signing ${taskId} 恢复。`
+			: `Flow task ${taskId} 的状态记录不可用(被手写或损坏)。状态记录由 runtime 独占写入,不要手写 task.json。用 /flow repair-signing ${taskId} 恢复,或从证明阶段重新开始(/flow task prove ${taskId})。`,
+	review: (taskId: string, runId?: string) =>
+		runId
+			? `task ${taskId} 的复盘记录不可用(被手写或损坏)。复盘记录由 runtime 在 /flow task accept ${runId} 时写入,不要手写 review.json。`
+			: `task ${taskId} 的复盘记录不可用(被手写或损坏)。复盘记录由 runtime 在 /flow task accept 时写入,不要手写 review.json。`,
 	validation: (runId: string) =>
-		`run ${runId} 的校验记录不可用,runtime 将重新校验产出`,
+		`run ${runId} 的校验记录不可用(被手写或损坏)。校验记录由 runtime 重新校验产出时写入,不要手写 validation.json。`,
 } as const;

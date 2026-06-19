@@ -61,13 +61,14 @@ export function readTaskMetadata(cwd: string, taskId: string): TaskGuardResult {
 	}
 
 	// 签名校验:迁移窗口外,无 _sig 或签名不符 = 记录被篡改。
-	// 反馈用中性措辞(CORRUPT_FEEDBACK),不提签名/密钥——见设计文档反馈安全要求。
+	// 反馈告知 agent 正确路径(/flow task accept 或 /flow repair-signing),不提签名/密钥。
 	if (!isInMigrationWindow(cwd) && isRecord(parsed)) {
 		const sigCheck = verifyRecord(getProjectKey(cwd), parsed);
 		if (!sigCheck.verified) {
+			const reviewRun = typeof parsed.latest_review_run === "string" ? parsed.latest_review_run : undefined;
 			return {
 				ok: false,
-				message: CORRUPT_FEEDBACK.taskStatus(taskId),
+				message: CORRUPT_FEEDBACK.taskStatus(taskId, reviewRun),
 				type: "warning",
 			};
 		}

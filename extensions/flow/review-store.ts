@@ -116,7 +116,7 @@ function writeSignedReview(cwd: string, runDir: string, review: FlowReviewRecord
 
 export function startFlowReview(args: StartFlowReviewArgs): FlowReviewRecord {
 	mkdirSync(args.runDir, { recursive: true });
-	const existing = readFlowReview(args.runDir);
+	const existing = readFlowReview(args.runDir, args.cwd);
 	if (existing?.status === "accepted") {
 		return existing;
 	}
@@ -139,7 +139,7 @@ export function startFlowReview(args: StartFlowReviewArgs): FlowReviewRecord {
 
 export function acceptFlowReview(args: AcceptFlowReviewArgs): FlowReviewRecord {
 	mkdirSync(args.runDir, { recursive: true });
-	const existing = readFlowReview(args.runDir);
+	const existing = readFlowReview(args.runDir, args.cwd);
 	const taskDesignDecision: FlowTaskDesignDecision =
 		existing?.taskDesignDecision ??
 		(existing?.taskDesignUpdated || (existing?.updatedFiles.length ?? 0) > 0 ? "updated" : "no-change");
@@ -166,7 +166,7 @@ export function acceptFlowReview(args: AcceptFlowReviewArgs): FlowReviewRecord {
 
 export function rejectFlowReview(args: RejectFlowReviewArgs): FlowReviewRecord {
 	mkdirSync(args.runDir, { recursive: true });
-	const existing = readFlowReview(args.runDir);
+	const existing = readFlowReview(args.runDir, args.cwd);
 	const review: FlowReviewRecord = {
 		taskId: args.taskId,
 		runId: args.runId,
@@ -183,16 +183,14 @@ export function rejectFlowReview(args: RejectFlowReviewArgs): FlowReviewRecord {
 	return review;
 }
 
-export function readFlowReview(runDir: string): FlowReviewRecord | undefined {
-	const parsed = readJsonRecord(path.join(runDir, "review.json"));
-	return parsed ? normalizeReview(parsed, runDir) : undefined;
-}
-
 /**
- * 读 review.json 并验签(决策点用)。迁移窗口外,签名不符返回 undefined。
- * 展示用 readFlowReview(不验签);决策点(checkReviewPrerequisites/lifecycle-gates)用这个。
+ * 读 review.json 并验签。迁移窗口外,签名不符(被篡改/无 _sig)返回 undefined。
+ *
+ * 展示与决策路径统一走这一个——凡 agent 能手写、且会误导 runtime 判断的字段,
+ * 读取时必须验签,没有例外(见 docs/handoff/2026-06-19-unsigned-read-paths.md)。
+ * cwd 为必填:不接受"可选 cwd 为空则跳过验签",那是同一个漏洞。
  */
-export function readFlowReviewVerified(runDir: string, cwd: string): FlowReviewRecord | undefined {
+export function readFlowReview(runDir: string, cwd: string): FlowReviewRecord | undefined {
 	const parsed = readJsonRecord(path.join(runDir, "review.json"));
 	if (!parsed) {
 		return undefined;

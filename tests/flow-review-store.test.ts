@@ -10,6 +10,7 @@ import {
 	rejectFlowReview,
 	startFlowReview,
 } from "../extensions/flow/review-store.ts";
+import { closeMigrationWindow } from "../extensions/flow/task-store.ts";
 
 function makeRun(): { cwd: string; taskDir: string; runDir: string } {
 	const cwd = mkdtempSync(path.join(tmpdir(), "flow-review-store-"));
@@ -57,7 +58,7 @@ test("readFlowReview reads accepted review and acceptance predicate validates re
 		)}\n`,
 	);
 
-	const review = readFlowReview(runDir);
+	const review = readFlowReview(runDir, cwd);
 
 	assert.equal(review?.status, "accepted");
 	assert.equal(isFlowReviewAccepted(review, 2), true);
@@ -99,7 +100,7 @@ test("acceptFlowReview records accepted review and renders markdown", () => {
 	assert.equal(review.taskDesignUpdated, false);
 	assert.equal(review.taskDesignDecision, "no-change");
 	assert.equal(review.taskVersion, 3);
-	assert.equal(isFlowReviewAccepted(readFlowReview(runDir), 3), true);
+	assert.equal(isFlowReviewAccepted(readFlowReview(runDir, cwd), 3), true);
 	const markdown = readFileSync(path.join(runDir, "review.md"), "utf8");
 	assert.match(markdown, /Status: accepted/);
 	assert.match(markdown, /Task version: 3/);
@@ -127,7 +128,7 @@ test("accepted no-change reviews satisfy the review gate", () => {
 		)}\n`,
 	);
 
-	assert.equal(isFlowReviewAccepted(readFlowReview(runDir), 2), true);
+	assert.equal(isFlowReviewAccepted(readFlowReview(runDir, cwd), 2), true);
 });
 
 test("acceptFlowReview records updated decision when task assets changed", () => {
@@ -170,6 +171,43 @@ test("rejectFlowReview records needs-changes reason", () => {
 	assert.equal(review.status, "needs-changes");
 	assert.equal(review.userConfirmed, false);
 	assert.equal(review.decisions[0], "输出字段缺失");
-	assert.equal(isFlowReviewAccepted(readFlowReview(runDir), 1), false);
+	assert.equal(isFlowReviewAccepted(readFlowReview(runDir, cwd), 1), false);
 	assert.match(readFileSync(path.join(runDir, "review.md"), "utf8"), /输出字段缺失/);
+});
+
+// 回归:状态分裂 bug(见 docs/handoff/2026-06-19-unsigned-read-paths.md)。
+// agent 手写无签名 review.json 伪造 accepted → 迁移窗口关闭后,readFlowReview 必须返回
+// undefined(不返回假 accepted)。对照:runtime 用 acceptFlowReview 写的带签名 review 正常返回。
+test("readFlowReview rejects unsigned forged review after migration window closes (state-split regression)", () => {
+	const { cwd, runDir } = makeRun();
+	closeMigrationWindow(cwd);
+
+	// 模拟 agent 手写伪造 review.json(无 _sig,status: accepted)
+	writeFileSync(
+		path.join(runDir, "review.json"),
+		`${JSON.stringify(
+			{
+				taskId: "demo-task",
+				runId: "run-001",
+				status: "accepted",
+				userConfirmed: true,
+				taskDesignUpdated: true,
+				taskVersion: 2,
+				acceptedAt: "2026-06-18T02:00:00.000Z",
+			},
+			null,
+			"\t",
+		)}\n`,
+	);
+
+	// 伪造记录被挡:不返回假 accepted,而是 undefined。
+	assert.equal(readFlowReview(runDir, cwd), undefined);
+	assert.equal(isFlowReviewAccepted(readFlowReview(runDir, cwd), 2), false);
+
+	// 对照:runtime 通过 acceptFlowReview 写的带签名 review 正常返回 accepted——
+	// 证明验签是"挡伪造"而非"全挡"。
+	const signed = acceptFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir, taskVersion: 2 });
+	assert.equal(readFlowReview(runDir, cwd)?.status, "accepted");
+	assert.equal(isFlowReviewAccepted(readFlowReview(runDir, cwd), 2), true);
+	assert.equal(signed.status, "accepted");
 });

@@ -179,7 +179,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 	function listConsoleDrivers(cwd: string): Array<FlowDriverSummary & { reviewStatus?: string }> {
 		return listDriverSummaries(cwd).map((driver) => ({
 			...driver,
-			reviewStatus: readFlowReview(driver.runDir)?.status,
+			reviewStatus: readFlowReview(driver.runDir, cwd)?.status,
 		}));
 	}
 

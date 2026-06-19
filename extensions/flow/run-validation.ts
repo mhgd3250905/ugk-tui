@@ -220,19 +220,13 @@ export function validateFlowRun(args: ValidateFlowRunArgs): FlowRunValidation {
 	return validation;
 }
 
-export function readFlowRunValidation(runDir: string): FlowRunValidation | undefined {
-	const parsed = readJsonOptional(path.join(runDir, "validation.json"));
-	if (!isRecord(parsed)) {
-		return undefined;
-	}
-	// 旧 validation.json 没有 scope 字段,统一视为 structural。
-	return { ...(parsed as unknown as FlowRunValidation), scope: "structural" };
-}
-
 /**
- * 读 validation.json 并验签(决策点用)。迁移窗口外,签名不符返回 undefined。
+ * 读 validation.json 并验签。迁移窗口外,签名不符(被篡改/无 _sig)返回 undefined。
+ *
+ * 展示与决策路径统一走这一个——防 agent 把 FAIL 改成 PASS 伪造 PASS。cwd 为必填,
+ * 不接受"可选 cwd 为空则跳过验签"(见 docs/handoff/2026-06-19-unsigned-read-paths.md)。
  */
-export function readFlowRunValidationVerified(runDir: string, cwd: string): FlowRunValidation | undefined {
+export function readFlowRunValidation(runDir: string, cwd: string): FlowRunValidation | undefined {
 	const parsed = readJsonOptional(path.join(runDir, "validation.json"));
 	if (!isRecord(parsed)) {
 		return undefined;
@@ -243,5 +237,6 @@ export function readFlowRunValidationVerified(runDir: string, cwd: string): Flow
 			return undefined;
 		}
 	}
+	// 旧 validation.json 没有 scope 字段,统一视为 structural。
 	return { ...(parsed as unknown as FlowRunValidation), scope: "structural" };
 }

@@ -1,7 +1,7 @@
-import { readFlowRunValidationVerified } from "./run-validation.ts";
+import { readFlowRunValidation } from "./run-validation.ts";
 import {
 	acceptFlowReview,
-	readFlowReviewVerified,
+	readFlowReview,
 	rejectFlowReview,
 	startFlowReview,
 	type FlowReviewRecord,
@@ -52,17 +52,17 @@ function checkReviewPrerequisites(
 	cwd: string,
 	wording: { liveVerb: "start" | "change"; validationPhase: "start" | "accepted" | "rejected" },
 	requireExistingReview: boolean,
-): ReviewActionOutcome | { ok: true; validation: ReturnType<typeof readFlowRunValidationVerified> } {
+): ReviewActionOutcome | { ok: true; validation: ReturnType<typeof readFlowRunValidation> } {
 	const { driver, driverLive } = ctx;
 	if (driverLive) {
 		return fail(`Flow task review cannot ${wording.liveVerb} while the Flow driver is still running.`);
 	}
-	const validation = readFlowRunValidationVerified(driver.runDir, cwd);
+	const validation = readFlowRunValidation(driver.runDir, cwd);
 	if (!validation || validation.result !== "PASS") {
 		return fail(`Flow review cannot be ${wording.validationPhase} because validation is not PASS: ${driver.taskId}/${driver.runId}`);
 	}
 	if (requireExistingReview) {
-		const existingReview = readFlowReviewVerified(driver.runDir, cwd);
+		const existingReview = readFlowReview(driver.runDir, cwd);
 		if (!existingReview) {
 			return fail(`Flow review has not started for ${driver.taskId}/${driver.runId}. Run /flow task review ${driver.taskId}/${driver.runId} first.`);
 		}

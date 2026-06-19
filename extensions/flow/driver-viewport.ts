@@ -109,8 +109,8 @@ function buildActivityLines(
 	const items: FlowActivityViewModel[] = [];
 	for (const driver of drivers) {
 		const status = readDriverStatus(driver.runDir);
-		const validation = readFlowRunValidation(driver.runDir);
-		const review = readFlowReview(driver.runDir);
+		const validation = readFlowRunValidation(driver.runDir, cwd);
+		const review = readFlowReview(driver.runDir, cwd);
 		const task = readFlowTask(cwd, driver.taskId);
 		const item: FlowActivityViewModel = {
 			taskId: driver.taskId,

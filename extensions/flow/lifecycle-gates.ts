@@ -3,7 +3,7 @@ import path from "node:path";
 import { isRecord, readJsonStrict } from "./flow-fs.ts";
 import { CORRUPT_FEEDBACK } from "./flow-signing.ts";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
-import { acceptFlowReview, isFlowReviewAccepted, readFlowReviewVerified } from "./review-store.ts";
+import { acceptFlowReview, isFlowReviewAccepted, readFlowReview } from "./review-store.ts";
 import { getProjectKey } from "./task-store.ts";
 import { isRunnable, normalizeLegacyState } from "./task-state.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
@@ -116,7 +116,7 @@ export function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId
 		};
 	}
 	const reviewRunDir = path.join(task.taskDir, "runs", task.latestReviewRun);
-	let review = readFlowReviewVerified(reviewRunDir, cwd);
+	let review = readFlowReview(reviewRunDir, cwd);
 	const expectedReview = { taskId, runId: task.latestReviewRun };
 	if (
 		!isFlowReviewAccepted(review, task.version, expectedReview) &&

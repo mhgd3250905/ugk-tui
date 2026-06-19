@@ -247,12 +247,41 @@ test("final PASS without user ack can be accepted later with /judge ack", async 
 	}
 
 	assert.equal(entries.at(-1)?.data.phase, "delivering");
+	assert.equal(entries.at(-1)?.data.pendingAckStatus, "pass");
 	assert.notEqual(entries.at(-1)?.data.phase, "done");
 	assert.match(notifications.map((entry) => entry.message).join("\n"), /\/judge ack/);
 
 	await commands.get("judge").handler("ack", ctx);
 
 	assert.equal(entries.at(-1)?.data.phase, "done");
+	assert.match(notifications.map((entry) => entry.message).join("\n"), /accepted/i);
+});
+
+test("/judge ack accepts restored pending PASS delivery without parsing report text", async () => {
+	const { pi, commands, handlers, entries } = makePi();
+	const { ctx, notifications } = makeCtx(false);
+	ctx.sessionManager.getEntries = () => [
+		{
+			type: "custom",
+			customType: "judge-state",
+			data: {
+				phase: "delivering",
+				spec: null,
+				summary: "交付报告文案以后可以改,这里故意不包含固定 PASS 首行。",
+				steerCount: 0,
+				maxSteer: 5,
+				keepWatching: false,
+				pendingAckStatus: "pass",
+			},
+		},
+	];
+	registerJudge(pi as any);
+
+	await handlers.get("session_start")![0]({ reason: "resume" }, ctx);
+	await commands.get("judge").handler("ack", ctx);
+
+	assert.equal(entries.at(-1)?.data.phase, "done");
+	assert.equal(entries.at(-1)?.data.pendingAckStatus, undefined);
 	assert.match(notifications.map((entry) => entry.message).join("\n"), /accepted/i);
 });
 

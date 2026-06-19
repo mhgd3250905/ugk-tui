@@ -15,6 +15,7 @@ import {
 	createJudgeState,
 	enterDelivering,
 	enterAligning,
+	markPendingAck,
 	recordJudgeEscalation,
 	recordJudgeSteer,
 	setRequirementsSpec,
@@ -279,11 +280,8 @@ function persistState(pi: ExtensionAPI, state: JudgeState): void {
 		steerCount: state.steerCount,
 		maxSteer: state.maxSteer,
 		keepWatching: state.keepWatching,
+		pendingAckStatus: state.pendingAckStatus,
 	});
-}
-
-function isPassDeliverySummary(summary: string): boolean {
-	return /^Judge final verdict: PASS$/m.test(summary);
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -312,6 +310,13 @@ function restoreJudgeState(data: unknown): JudgeState | undefined {
 	if (typeof record.steerCount !== "number") return undefined;
 	if (typeof record.maxSteer !== "number") return undefined;
 	if (typeof record.keepWatching !== "boolean") return undefined;
+	if (
+		record.pendingAckStatus !== undefined &&
+		record.pendingAckStatus !== "pass" &&
+		record.pendingAckStatus !== "fail"
+	) {
+		return undefined;
+	}
 
 	return {
 		phase: record.phase as JudgeState["phase"],
@@ -320,6 +325,7 @@ function restoreJudgeState(data: unknown): JudgeState | undefined {
 		steerCount: record.steerCount,
 		maxSteer: record.maxSteer,
 		keepWatching: record.keepWatching,
+		pendingAckStatus: record.pendingAckStatus as JudgeState["pendingAckStatus"],
 	};
 }
 
@@ -359,7 +365,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 		description: "Enter Judge aligning mode",
 		handler: async (args, ctx) => {
 			if (String(args ?? "").trim().toLowerCase() === "ack") {
-				if (state.phase === "delivering" && isPassDeliverySummary(state.summary)) {
+				if (state.phase === "delivering" && state.pendingAckStatus === "pass") {
 					state = completeJudge(state);
 					persistState(pi, state);
 					ctx.ui.notify("Judge delivery accepted.", "info");
@@ -521,7 +527,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 								ctx.ui.notify("Judge delivery accepted.", "info");
 								return { action: "pass", keepWatching: false };
 							}
-							state = enterDelivering({ ...state, summary: deliveryReport });
+							state = markPendingAck(enterDelivering({ ...state, summary: deliveryReport }), "pass");
 							persistState(pi, state);
 							ctx.ui.notify("Judge delivery is waiting for user acknowledgement. Run /judge ack to accept it later.", "warning");
 							return { action: "pass", keepWatching: false };

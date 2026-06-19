@@ -56,3 +56,12 @@ test("abortJudge and completeJudge produce terminal phases", () => {
 	assert.equal(abortJudge(enterAligning(createJudgeState())).phase, "aborted");
 	assert.equal(completeJudge(enterAligning(createJudgeState())).phase, "done");
 });
+
+test("terminal and active phases clear pending delivery acknowledgement", () => {
+	const pending = { ...enterAligning(createJudgeState()), pendingAckStatus: "pass" as const };
+
+	assert.equal(completeJudge(pending).pendingAckStatus, undefined);
+	assert.equal(abortJudge(pending).pendingAckStatus, undefined);
+	assert.equal(startDriving(pending).pendingAckStatus, undefined);
+	assert.equal(enterAligning(pending).pendingAckStatus, undefined);
+});

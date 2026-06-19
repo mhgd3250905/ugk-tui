@@ -38,6 +38,7 @@ export interface JudgeState {
 	steerCount: number;
 	maxSteer: number;
 	keepWatching: boolean;
+	pendingAckStatus?: "pass" | "fail";
 }
 
 export function createJudgeState(): JudgeState {
@@ -48,6 +49,7 @@ export function createJudgeState(): JudgeState {
 		steerCount: 0,
 		maxSteer: 5,
 		keepWatching: false,
+		pendingAckStatus: undefined,
 	};
 }
 
@@ -57,6 +59,7 @@ export function enterAligning(state: JudgeState): JudgeState {
 		phase: "aligning",
 		steerCount: 0,
 		keepWatching: true,
+		pendingAckStatus: undefined,
 	};
 }
 
@@ -72,6 +75,7 @@ export function startDriving(state: JudgeState): JudgeState {
 		...state,
 		phase: "driving",
 		keepWatching: true,
+		pendingAckStatus: undefined,
 	};
 }
 
@@ -80,6 +84,14 @@ export function enterDelivering(state: JudgeState): JudgeState {
 		...state,
 		phase: "delivering",
 		keepWatching: false,
+		pendingAckStatus: undefined,
+	};
+}
+
+export function markPendingAck(state: JudgeState, status: "pass" | "fail"): JudgeState {
+	return {
+		...state,
+		pendingAckStatus: status,
 	};
 }
 
@@ -103,6 +115,7 @@ export function abortJudge(state: JudgeState): JudgeState {
 		...state,
 		phase: "aborted",
 		keepWatching: false,
+		pendingAckStatus: undefined,
 	};
 }
 
@@ -111,5 +124,6 @@ export function completeJudge(state: JudgeState): JudgeState {
 		...state,
 		phase: "done",
 		keepWatching: false,
+		pendingAckStatus: undefined,
 	};
 }

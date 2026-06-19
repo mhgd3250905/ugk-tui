@@ -34,6 +34,10 @@ export type JudgeVerdict =
 	| { action: "steer"; direction: string; keepWatching: boolean }
 	| { action: "abort"; reason: string };
 
+export type JudgeFinalVerdict =
+	| { status: "pass"; reason: string; evidence: string[] }
+	| { status: "fail"; reason: string; evidence: string[] };
+
 const SUMMARY_KEYS = [
 	"url",
 	"href",
@@ -293,6 +297,52 @@ export function parseJudgeVerdict(text: string): JudgeVerdict | undefined {
 	const lastBrace = trimmed.lastIndexOf("}");
 	if (firstBrace >= 0 && lastBrace > firstBrace) {
 		return parseVerdictCandidate(trimmed.slice(firstBrace, lastBrace + 1));
+	}
+
+	return undefined;
+}
+
+function normalizeFinalVerdict(value: unknown): JudgeFinalVerdict | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const record = value as Record<string, unknown>;
+	if (
+		(record.status === "pass" || record.status === "fail") &&
+		typeof record.reason === "string" &&
+		record.reason.trim().length > 0 &&
+		isStringArray(record.evidence)
+	) {
+		return {
+			status: record.status,
+			reason: record.reason.trim(),
+			evidence: record.evidence.map((item) => item.trim()).filter(Boolean),
+		};
+	}
+	return undefined;
+}
+
+function parseFinalVerdictCandidate(candidate: string): JudgeFinalVerdict | undefined {
+	try {
+		return normalizeFinalVerdict(JSON.parse(candidate));
+	} catch {
+		return undefined;
+	}
+}
+
+export function parseJudgeFinalVerdict(text: string): JudgeFinalVerdict | undefined {
+	const fencedPattern = /```(?:json)?\s*([\s\S]*?)```/gi;
+	for (const match of text.matchAll(fencedPattern)) {
+		const verdict = parseFinalVerdictCandidate(match[1].trim());
+		if (verdict) return verdict;
+	}
+
+	const trimmed = text.trim();
+	const direct = parseFinalVerdictCandidate(trimmed);
+	if (direct) return direct;
+
+	const firstBrace = trimmed.indexOf("{");
+	const lastBrace = trimmed.lastIndexOf("}");
+	if (firstBrace >= 0 && lastBrace > firstBrace) {
+		return parseFinalVerdictCandidate(trimmed.slice(firstBrace, lastBrace + 1));
 	}
 
 	return undefined;

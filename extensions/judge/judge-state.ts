@@ -75,6 +75,14 @@ export function startDriving(state: JudgeState): JudgeState {
 	};
 }
 
+export function enterDelivering(state: JudgeState): JudgeState {
+	return {
+		...state,
+		phase: "delivering",
+		keepWatching: false,
+	};
+}
+
 export function recordJudgeSteer(state: JudgeState): JudgeState {
 	return {
 		...state,

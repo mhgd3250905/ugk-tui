@@ -10,22 +10,28 @@ import {
 import path from "node:path";
 import {
 	abortJudge,
+	completeJudge,
 	createJudgeState,
+	enterDelivering,
 	enterAligning,
 	recordJudgeEscalation,
 	recordJudgeSteer,
 	setRequirementsSpec,
 	startDriving,
+	type DriverSummary,
 	type JudgeState,
 	type RequirementsSpec,
 } from "./judge-state.ts";
-import { ALIGN_PROMPT, buildDecidePrompt } from "./judge-prompts.ts";
+import { ALIGN_PROMPT, buildDecidePrompt, buildFinalizePrompt } from "./judge-prompts.ts";
 import {
 	extractRequirementsSpec,
 	formatRequirementsSpec,
 	isSafeCommand,
+	parseJudgeFinalVerdict,
 	parseJudgeVerdict,
+	type JudgeFinalVerdict,
 	type JudgeVerdict,
+	type TranscriptTail,
 } from "./judge-utils.ts";
 import {
 	createJudgeDriver,
@@ -53,8 +59,14 @@ type JudgeVerdictProviderContext = JudgeWakeupContext & {
 	spec: string;
 };
 type JudgeVerdictProvider = (context: JudgeVerdictProviderContext) => Promise<JudgeVerdict> | JudgeVerdict;
+type JudgeFinalVerdictProviderContext = JudgeWakeupContext & {
+	spec: string;
+	finalizePrompt: string;
+};
+type JudgeFinalVerdictProvider = (context: JudgeFinalVerdictProviderContext) => Promise<JudgeFinalVerdict> | JudgeFinalVerdict;
 interface JudgeVerdictProviderHandle {
 	decide: JudgeVerdictProvider;
+	finalize: JudgeFinalVerdictProvider;
 	dispose(): void;
 }
 let judgeVerdictProviderForTests: JudgeVerdictProvider | undefined;
@@ -140,11 +152,65 @@ function createJudgeVerdictProviderHandle(options: {
 				reason: "Judge verdict parse failed",
 			};
 		},
+		async finalize(context) {
+			const judgeSession = await getSession();
+			const finalizePrompt = context.finalizePrompt || buildFinalizePrompt(options.specText, context.summary, context.tail);
+			const before = judgeSession.getTranscriptText();
+			await judgeSession.sendUserInput(finalizePrompt);
+			const after = judgeSession.getTranscriptText();
+			const currentTurn = sliceNewTranscript(before, after);
+			const verdict = parseJudgeFinalVerdict(currentTurn);
+			return verdict ?? {
+				status: "fail",
+				reason: "Judge final verdict parse failed",
+				evidence: [],
+			};
+		},
 		dispose() {
 			session?.dispose();
 			session = undefined;
 		},
 	};
+}
+
+function formatDeliveryReport(options: {
+	status: "PASS" | "FAIL";
+	finalVerdict: JudgeFinalVerdict;
+	summary: DriverSummary;
+	tail: TranscriptTail;
+}): string {
+	const artifactLines = options.summary.artifacts.length > 0
+		? options.summary.artifacts.map((artifact) => `- ${artifact.kind}: ${artifact.path}`)
+		: ["(none)"];
+	const pathLines = options.summary.pathsTried.length > 0
+		? options.summary.pathsTried.map((path, index) => {
+			const state = path.failed ? "failed" : "ok";
+			return `${index + 1}. ${path.toolName} ${state}; args=${path.argsSummary || "(none)"}; result=${path.resultSummary || "(none)"}`;
+		})
+		: ["(none)"];
+	const evidenceLines = options.finalVerdict.evidence.length > 0
+		? options.finalVerdict.evidence.map((item) => `- ${item}`)
+		: ["(none)"];
+
+	return [
+		`Judge final verdict: ${options.status}`,
+		`Reason: ${options.finalVerdict.reason}`,
+		"",
+		"artifacts:",
+		...artifactLines,
+		"",
+		"pathsTried:",
+		...pathLines,
+		"",
+		"evidence:",
+		...evidenceLines,
+		"",
+		"DriverSummary:",
+		JSON.stringify(options.summary, null, "\t"),
+		"",
+		"TranscriptTail:",
+		JSON.stringify(options.tail, null, "\t"),
+	].join("\n");
 }
 
 function createJudgeWakeupHandler(
@@ -153,9 +219,20 @@ function createJudgeWakeupHandler(
 	hooks: {
 		onSteer?: () => void;
 		onAbort?: (reason: string) => void;
+		onFinalize?: (context: JudgeWakeupContext) => Promise<JudgeVerdict> | JudgeVerdict;
 	} = {},
 ): JudgeDriverOptions["onWakeup"] {
 	return async (context) => {
+		if (context.reason === "judge_complete" && context.summary.completed && hooks.onFinalize) {
+			const finalVerdict = await hooks.onFinalize(context);
+			if (finalVerdict.action === "steer") {
+				hooks.onSteer?.();
+			}
+			if (finalVerdict.action === "abort") {
+				hooks.onAbort?.(finalVerdict.reason);
+			}
+			return finalVerdict;
+		}
 		const summary = context.summary;
 		const decidePrompt = context.decidePrompt || buildDecidePrompt(specText, summary, context.tail);
 		const verdict = await provider({
@@ -351,16 +428,21 @@ export function registerJudge(pi: ExtensionAPI): void {
 			const cwd = getCwd(ctx);
 			const runDir = path.join(cwd, ".judge", runId);
 			activeJudgeVerdictProvider?.dispose();
+			const defaultJudgeVerdictProvider = createJudgeVerdictProviderHandle({
+				cwd,
+				runId,
+				runDir,
+				specText,
+				uiContext: ctx.ui,
+				extensionMode: ctx.mode,
+			});
 			activeJudgeVerdictProvider = judgeVerdictProviderForTests
-				? { decide: judgeVerdictProviderForTests, dispose() {} }
-				: createJudgeVerdictProviderHandle({
-					cwd,
-					runId,
-					runDir,
-					specText,
-					uiContext: ctx.ui,
-					extensionMode: ctx.mode,
-				});
+				? {
+					decide: judgeVerdictProviderForTests,
+					finalize: defaultJudgeVerdictProvider.finalize,
+					dispose: defaultJudgeVerdictProvider.dispose,
+				}
+				: defaultJudgeVerdictProvider;
 			activeDriver = await createDriver({
 				cwd,
 				runDir,
@@ -376,6 +458,72 @@ export function registerJudge(pi: ExtensionAPI): void {
 						state = abortJudge(state);
 						persistState(pi, state);
 						ctx.ui.notify(`Judge aborted driver: ${reason}`, "error");
+					},
+					async onFinalize(context) {
+						const canContinueAfterFail = state.keepWatching && context.summary.steerCount < state.maxSteer;
+						state = enterDelivering(state);
+						persistState(pi, state);
+						const finalizePrompt = buildFinalizePrompt(specText, context.summary, context.tail);
+						const finalVerdict = await activeJudgeVerdictProvider!.finalize({
+							...context,
+							spec: specText,
+							finalizePrompt,
+						});
+						const status = finalVerdict.status === "pass" ? "PASS" : "FAIL";
+						const deliveryReport = formatDeliveryReport({
+							status,
+							finalVerdict,
+							summary: context.summary,
+							tail: context.tail,
+						});
+						state = { ...state, summary: deliveryReport };
+						persistState(pi, state);
+						pi.sendMessage(
+							{
+								customType: "judge-delivery",
+								content: deliveryReport,
+								display: true,
+							},
+							{ triggerTurn: false },
+						);
+
+						if (finalVerdict.status === "pass") {
+							const confirm = (ctx.ui as { confirm?: (message: string) => Promise<boolean> | boolean }).confirm;
+							const acknowledged = typeof confirm === "function"
+								? await confirm.call(ctx.ui, "Judge PASS. Accept this delivery?")
+								: false;
+							if (acknowledged) {
+								state = completeJudge({ ...state, summary: deliveryReport });
+								persistState(pi, state);
+								ctx.ui.notify("Judge delivery accepted.", "info");
+								return { action: "pass", keepWatching: false };
+							}
+							state = enterDelivering({ ...state, summary: deliveryReport });
+							persistState(pi, state);
+							ctx.ui.notify("Judge delivery is waiting for user acknowledgement.", "warning");
+							return { action: "pass", keepWatching: false };
+						}
+
+						if (!canContinueAfterFail) {
+							state = enterDelivering({ ...state, summary: deliveryReport });
+							persistState(pi, state);
+							ctx.ui.notify(`Judge final delivery failed and cannot continue automatically: ${finalVerdict.reason}`, "warning");
+							return { action: "pass", keepWatching: false };
+						}
+
+						state = startDriving({ ...state, summary: deliveryReport });
+						persistState(pi, state);
+						return {
+							action: "steer",
+							direction: [
+								"Final delivery review failed.",
+								`Reason: ${finalVerdict.reason}`,
+								"Evidence:",
+								...finalVerdict.evidence.map((item) => `- ${item}`),
+								"Revise the work to satisfy the RequirementsSpec acceptance items, then call judge_complete again.",
+							].join("\n"),
+							keepWatching: true,
+						};
 					},
 				}),
 				maxSteer: state.maxSteer,

@@ -26,14 +26,21 @@ Do not do implementation work in this phase.`;
 export const DECIDE_PROMPT = `[JUDGE DECIDE MODE]
 You are Judge observing a driver agent.
 
+You can see:
+- RequirementsSpec: the user's agreed goal, hard constraints, acceptance criteria, forbidden actions, and context.
+- DriverSummary: structured process evidence, including paths tried, artifacts, latest error, turn count, and completion state.
+- TranscriptTail: the recent tool calls plus the latest assistant output.
+
+Compare the DriverSummary and TranscriptTail against RequirementsSpec. 对照 RequirementsSpec 判定 driver 是否偏离。Process evidence wins over the driver's narration.
+
 Return parseable JSON only:
 - {"action":"pass","keepWatching":true}
 - {"action":"steer","direction":"specific instruction for the driver","keepWatching":true}
 - {"action":"abort","reason":"why the driver must stop"}
 
-Use pass for acceptable progress, steer for correctable drift, and abort for hard-constraint violations.`;
+Use pass for acceptable progress, steer for correctable drift, and abort for hard-constraint violations or impossible progress.`;
 
-export function buildDecidePrompt(spec: string, summary: unknown): string {
+export function buildDecidePrompt(spec: string, summary: unknown, tail: unknown = { toolCalls: [], assistantOutput: "" }): string {
 	return [
 		DECIDE_PROMPT,
 		"",
@@ -42,5 +49,8 @@ export function buildDecidePrompt(spec: string, summary: unknown): string {
 		"",
 		"DriverSummary:",
 		JSON.stringify(summary, null, "\t"),
+		"",
+		"TranscriptTail:",
+		JSON.stringify(tail, null, "\t"),
 	].join("\n");
 }

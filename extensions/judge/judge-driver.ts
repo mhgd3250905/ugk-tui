@@ -8,7 +8,14 @@ import {
 } from "../shared/driver-session.ts";
 import { buildDecidePrompt } from "./judge-prompts.ts";
 import type { DriverSummary } from "./judge-state.ts";
-import type { JudgeVerdict } from "./judge-utils.ts";
+import {
+	extractArtifactsFromToolInput,
+	extractTail,
+	summarizeToolArgs,
+	summarizeToolResult,
+	type JudgeVerdict,
+	type TranscriptTail,
+} from "./judge-utils.ts";
 
 type DriverSessionEvent = {
 	type?: string;
@@ -18,12 +25,16 @@ type DriverSessionEvent = {
 	};
 	toolName?: string;
 	isError?: boolean;
+	input?: unknown;
+	result?: unknown;
+	output?: unknown;
 };
 
 export interface JudgeWakeupContext {
 	reason: string;
 	toolName?: string;
 	summary: DriverSummary;
+	tail: TranscriptTail;
 	transcript: string;
 	decidePrompt: string;
 }
@@ -51,13 +62,47 @@ export const JUDGE_WAKEUP_TOOL_NAMES = new Set(["chrome_cdp", "bash", "write", "
 
 function cloneSummary(summary: DriverSummary): DriverSummary {
 	return {
-		pathsTried: [...summary.pathsTried],
+		pathsTried: summary.pathsTried.map((path) => ({ ...path })),
+		artifacts: summary.artifacts.map((artifact) => ({ ...artifact })),
 		lastError: summary.lastError,
 		turnCount: summary.turnCount,
 		completed: summary.completed,
 		aborted: summary.aborted,
 		abortReason: summary.abortReason,
 	};
+}
+
+function addArtifacts(summary: DriverSummary, artifacts: Array<{ path: string; kind: string }>): void {
+	const existing = new Set(summary.artifacts.map((artifact) => `${artifact.kind}:${artifact.path}`));
+	for (const artifact of artifacts) {
+		const key = `${artifact.kind}:${artifact.path}`;
+		if (existing.has(key)) continue;
+		existing.add(key);
+		summary.artifacts.push(artifact);
+	}
+}
+
+function findLatestPath(summary: DriverSummary, toolName: string): DriverSummary["pathsTried"][number] | undefined {
+	for (let index = summary.pathsTried.length - 1; index >= 0; index -= 1) {
+		const path = summary.pathsTried[index];
+		if (path.toolName === toolName && path.resultSummary === "") return path;
+	}
+	return undefined;
+}
+
+function upsertToolResult(summary: DriverSummary, event: DriverSessionEvent): void {
+	if (!event.toolName) return;
+	const path = findLatestPath(summary, event.toolName) ?? {
+		toolName: event.toolName,
+		argsSummary: "",
+		resultSummary: "",
+		failed: false,
+	};
+	if (!summary.pathsTried.includes(path)) {
+		summary.pathsTried.push(path);
+	}
+	path.resultSummary = summarizeToolResult(event.result ?? event.output);
+	path.failed = event.isError === true;
 }
 
 function defaultWakeup(): JudgeVerdict {
@@ -98,6 +143,7 @@ function wrapFactoryForJudgeEvents(
 export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<JudgeDriverHandle> {
 	const summary: DriverSummary = {
 		pathsTried: [],
+		artifacts: [],
 		turnCount: 0,
 		completed: false,
 	};
@@ -105,6 +151,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 	let disposed = false;
 	let watching = true;
 	let completionStarted = false;
+	const transcriptEvents: DriverSessionEvent[] = [];
 	let wakeupQueue = Promise.resolve();
 	const decide = opts.onWakeup ?? defaultWakeup;
 
@@ -116,12 +163,14 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 				if (!watching || disposed) return;
 				try {
 					const snapshot = cloneSummary(summary);
+					const tail = extractTail(transcriptEvents);
 					const verdict = await decide({
 						reason,
 						toolName,
 						summary: snapshot,
+						tail,
 						transcript: driver?.getTranscriptText() ?? "",
-						decidePrompt: buildDecidePrompt(opts.spec, snapshot),
+						decidePrompt: buildDecidePrompt(opts.spec, snapshot, tail),
 					});
 
 					if (verdict.action === "pass") {
@@ -146,6 +195,11 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 	}
 
 	function handleEvent(event: DriverSessionEvent): void {
+		transcriptEvents.push(event);
+		if (transcriptEvents.length > 200) {
+			transcriptEvents.splice(0, transcriptEvents.length - 200);
+		}
+
 		if (event.type === "agent_start") {
 			summary.turnCount += 1;
 			return;
@@ -159,7 +213,13 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 		if (!event.toolName) return;
 
 		if (event.type === "tool_execution_start") {
-			summary.pathsTried.push(event.toolName);
+			summary.pathsTried.push({
+				toolName: event.toolName,
+				argsSummary: summarizeToolArgs(event.input),
+				resultSummary: "",
+				failed: false,
+			});
+			addArtifacts(summary, extractArtifactsFromToolInput(event.toolName, event.input));
 			if (event.toolName === "judge_complete") {
 				completionStarted = true;
 				return;
@@ -171,6 +231,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 		}
 
 		if (event.type === "tool_execution_end") {
+			upsertToolResult(summary, event);
 			if (event.toolName === "judge_complete") {
 				completionStarted = false;
 				if (event.isError) {

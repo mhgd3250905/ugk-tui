@@ -108,7 +108,7 @@ function createJudgeVerdictProviderHandle(options: {
 	return {
 		async decide(context) {
 			const judgeSession = await getSession();
-			const decidePrompt = context.decidePrompt || buildDecidePrompt(options.specText, context.summary);
+			const decidePrompt = context.decidePrompt || buildDecidePrompt(options.specText, context.summary, context.tail);
 			const before = judgeSession.getTranscriptText();
 			await judgeSession.sendUserInput(decidePrompt);
 			const after = judgeSession.getTranscriptText();
@@ -129,7 +129,7 @@ function createJudgeVerdictProviderHandle(options: {
 function createJudgeWakeupHandler(specText: string, provider: JudgeVerdictProvider): JudgeDriverOptions["onWakeup"] {
 	return async (context) => {
 		const summary = context.summary;
-		const decidePrompt = context.decidePrompt || buildDecidePrompt(specText, summary);
+		const decidePrompt = context.decidePrompt || buildDecidePrompt(specText, summary, context.tail);
 		return provider({
 			...context,
 			spec: specText,

@@ -7,6 +7,8 @@ type DriverEvent = {
 	type?: string;
 	toolName?: string;
 	isError?: boolean;
+	input?: unknown;
+	result?: unknown;
 };
 
 function makeDriverHarness() {
@@ -75,17 +77,42 @@ test("wakes up when the driver starts a guarded network or write-capable tool", 
 	const driver = await createJudgeDriver(createOptions({
 		sessionFactory: harness.sessionFactory,
 		onWakeup: async ({ summary }) => {
-			wakeups.push(summary.pathsTried.at(-1) ?? "");
+			wakeups.push(summary.pathsTried.at(-1)?.toolName ?? "");
 			return { action: "pass", keepWatching: true };
 		},
 	}));
 	await driver.start();
 
-	harness.emit({ type: "tool_execution_start", toolName: "chrome_cdp" });
+	harness.emit({ type: "tool_execution_start", toolName: "chrome_cdp", input: { url: "https://www.zhihu.com/hot" } });
 	await harness.flush();
 
 	assert.deepEqual(wakeups, ["chrome_cdp"]);
-	assert.deepEqual(driver.getSummary().pathsTried, ["chrome_cdp"]);
+	assert.deepEqual(driver.getSummary().pathsTried, [
+		{
+			toolName: "chrome_cdp",
+			argsSummary: "url=https://www.zhihu.com/hot",
+			resultSummary: "",
+			failed: false,
+		},
+	]);
+});
+
+test("wakeup summary snapshots do not mutate the driver summary", async () => {
+	const harness = makeDriverHarness();
+	const driver = await createJudgeDriver(createOptions({
+		sessionFactory: harness.sessionFactory,
+		onWakeup: async ({ summary }) => {
+			summary.pathsTried[0].toolName = "mutated";
+			summary.artifacts.push({ path: "E:/tmp/mutated.md", kind: "file" });
+			return { action: "pass", keepWatching: true };
+		},
+	}));
+
+	harness.emit({ type: "tool_execution_start", toolName: "write", input: { path: "E:/tmp/out.md" } });
+	await harness.flush();
+
+	assert.equal(driver.getSummary().pathsTried[0].toolName, "write");
+	assert.deepEqual(driver.getSummary().artifacts, [{ path: "E:/tmp/out.md", kind: "file" }]);
 });
 
 test("requires the delegated driver environment to expose judge_complete", async () => {
@@ -202,11 +229,12 @@ test("onWakeup errors are recorded and the wakeup queue continues", async () => 
 	await harness.flush();
 	assert.match(driver.getSummary().lastError ?? "", /judge decide failed/);
 
-	harness.emit({ type: "tool_execution_start", toolName: "write" });
+	harness.emit({ type: "tool_execution_start", toolName: "write", input: { path: "E:/tmp/out.md" } });
 	await harness.flush();
 
 	assert.deepEqual(wakeupReasons, ["guarded_tool_start", "guarded_tool_start"]);
-	assert.deepEqual(driver.getSummary().pathsTried, ["bash", "write"]);
+	assert.deepEqual(driver.getSummary().pathsTried.map((entry) => entry.toolName), ["bash", "write"]);
+	assert.equal(driver.getSummary().pathsTried[1].argsSummary, "path=E:/tmp/out.md");
 });
 
 test("judge_complete end error wakes through tool_error and does not mark completed", async () => {

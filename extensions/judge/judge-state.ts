@@ -6,8 +6,21 @@ export interface RequirementsSpec {
 	context: string;
 }
 
+export interface DriverPathTried {
+	toolName: string;
+	argsSummary: string;
+	resultSummary: string;
+	failed: boolean;
+}
+
+export interface DriverArtifact {
+	path: string;
+	kind: string;
+}
+
 export interface DriverSummary {
-	pathsTried: string[];
+	pathsTried: DriverPathTried[];
+	artifacts: DriverArtifact[];
 	lastError?: string;
 	turnCount: number;
 	completed: boolean;

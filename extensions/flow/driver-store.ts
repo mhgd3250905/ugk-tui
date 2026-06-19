@@ -9,7 +9,8 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { isRecord, readJsonOptional } from "./flow-fs.ts";
-import { resolveFlowTaskDir } from "./task-store.ts";
+import { signRecord, verifyRecord, STATUS_SIGNED_FIELDS } from "./flow-signing.ts";
+import { closeMigrationWindow, getProjectKey, isInMigrationWindow, resolveFlowTaskDir } from "./task-store.ts";
 import type { FlowDriverStatus, FlowDriverSummary } from "./types.ts";
 
 export interface FlowDriverStatusFile {
@@ -82,10 +83,23 @@ function optionalString(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
 
-export function readDriverStatus(runDir: string): FlowDriverStatusFile | undefined {
+/**
+ * 读 status.json 并验签。迁移窗口外,签名不符(被篡改/无 _sig)返回 undefined。
+ *
+ * status.json 是 driver 生命周期的判定记录:driverLive 判定、session_shutdown 的
+ * paused 改写、driver picker 排序都读它。agent 可手写(driver 工作区够得着),所以
+ * 必须验签——见 docs/handoff/2026-06-19-unsigned-read-paths.md 的铁律。cwd 必填。
+ */
+export function readDriverStatus(runDir: string, cwd: string): FlowDriverStatusFile | undefined {
 	const parsed = readJsonOptional(path.join(runDir, "status.json"));
 	if (!isRecord(parsed)) {
 		return undefined;
+	}
+	if (!isInMigrationWindow(cwd)) {
+		const check = verifyRecord(getProjectKey(cwd), parsed);
+		if (!check.verified) {
+			return undefined;
+		}
 	}
 
 	const taskId = optionalString(parsed.taskId) ?? inferTaskId(runDir);
@@ -105,13 +119,21 @@ export function readDriverStatus(runDir: string): FlowDriverStatusFile | undefin
 	};
 }
 
-export function writeDriverStatus(runDir: string, status: WritableDriverStatus): void {
+/**
+ * 写 status.json(带签名)。签名由 runtime 独占(agent 拿不到密钥)。
+ * 首次签名即关闭迁移窗口(经由 writeFlowTask 同款 closeMigrationWindow)。
+ */
+export function writeDriverStatus(runDir: string, status: WritableDriverStatus, cwd: string): void {
 	mkdirSync(runDir, { recursive: true });
 	const statusFile: FlowDriverStatusFile = {
 		...status,
 		updatedAt: status.updatedAt ?? new Date().toISOString(),
 	};
-	writeFileSync(path.join(runDir, "status.json"), `${JSON.stringify(statusFile, null, "\t")}\n`);
+	const record = statusFile as unknown as Record<string, unknown>;
+	const sig = signRecord(getProjectKey(cwd), record, STATUS_SIGNED_FIELDS);
+	const withSig = { ...record, _sig: sig };
+	writeFileSync(path.join(runDir, "status.json"), `${JSON.stringify(withSig, null, "\t")}\n`);
+	closeMigrationWindow(cwd);
 }
 
 export function createRunArtifacts(
@@ -145,7 +167,7 @@ export function createRunArtifacts(
 		status: "starting",
 		step: "not started",
 		summary: "driver created",
-	});
+	}, cwd);
 
 	return { taskId, runId, taskDir, runDir };
 }
@@ -188,7 +210,7 @@ export function listDriverSummaries(cwd: string): FlowDriverSummary[] {
 				continue;
 			}
 			const runDir = path.join(runsDir, runEntry.name);
-			const status = readDriverStatus(runDir);
+			const status = readDriverStatus(runDir, cwd);
 			if (!status) {
 				continue;
 			}

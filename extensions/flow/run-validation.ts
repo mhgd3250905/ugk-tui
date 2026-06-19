@@ -1,11 +1,8 @@
 import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isRecord, readJsonOptional, readJsonStrict } from "./flow-fs.ts";
-import { signRecord, verifyRecord } from "./flow-signing.ts";
+import { signRecord, verifyRecord, VALIDATION_SIGNED_FIELDS } from "./flow-signing.ts";
 import { getProjectKey, isInMigrationWindow } from "./task-store.ts";
-
-/** validation.json 签名覆盖的关键字段:防 agent 把 FAIL 改成 PASS。 */
-const VALIDATION_SIGNED_FIELDS = ["taskId", "runId", "result", "scope", "createdAt"];
 
 export type FlowValidationResult = "PASS" | "FAIL";
 

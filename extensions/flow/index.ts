@@ -378,7 +378,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 				status: "failed",
 				step: "driver session",
 				summary,
-			});
+			}, cwd);
 			ctx.ui.notify(`Flow driver failed: ${driverKey}\n${summary}`, "error");
 			return;
 		}
@@ -395,9 +395,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 			step: "starting",
 			summary: `${kind} driver running`,
 			sessionFile: liveDriver.sessionFile,
-		});
+		}, cwd);
 		if (driverView.focusState.focus === "driver") {
-			renderFocus(ctx, readDriverStatus(artifacts.runDir)!);
+			renderFocus(ctx, readDriverStatus(artifacts.runDir, cwd)!);
 		} else {
 			renderMainDriverActivity(ctx);
 		}
@@ -414,7 +414,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 					step: "validating output",
 					summary: "validating driver output",
 					sessionFile: liveDriver.sessionFile,
-				});
+				}, cwd);
 				let attemptedContractRepair = false;
 				let validation = validateFlowRun({
 					cwd,
@@ -433,9 +433,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 						step: "repairing output contract",
 						summary: `${validation.result}: ${validation.summary}`,
 						sessionFile: liveDriver.sessionFile,
-					});
+					}, cwd);
 					if (isCurrentFocusedDriver()) {
-						renderFocus(ctx, readDriverStatus(artifacts.runDir)!);
+						renderFocus(ctx, readDriverStatus(artifacts.runDir, cwd)!);
 					} else {
 						renderMainDriverActivity(ctx);
 					}
@@ -456,7 +456,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 						step: "validating repaired output",
 						summary: "validating repaired driver output",
 						sessionFile: liveDriver.sessionFile,
-					});
+					}, cwd);
 					validation = validateFlowRun({
 						cwd,
 						taskId,
@@ -475,8 +475,8 @@ export function registerFlow(pi: ExtensionAPI): void {
 					step: validation.result === "PASS" ? "validated" : "validation failed",
 					summary: `${validation.result}: ${validation.summary}`,
 					sessionFile: liveDriver.sessionFile,
-				});
-				const status = readDriverStatus(artifacts.runDir)!;
+				}, cwd);
+				const status = readDriverStatus(artifacts.runDir, cwd)!;
 				if (kind === "prove") {
 					const event = validation.result === "PASS"
 						? { kind: "prove-pass" as const, runId, validatedAt: validation.createdAt, nextStep: validation.nextStep }
@@ -539,7 +539,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 					step: "driver start",
 					summary,
 					sessionFile: liveDriver.sessionFile,
-				});
+				}, cwd);
 				if (isCurrentFocusedDriver()) {
 					clearFocusedDriver(ctx);
 				}
@@ -950,7 +950,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 				step: driver.step ?? "input delivery",
 				summary,
 				sessionFile: liveDriver.sessionFile,
-			});
+			}, getCwd(ctx));
 			const failedDriverKey = getDriverKey(driver.taskId, driver.runId);
 			liveDrivers.delete(failedDriverKey);
 			releaseWriteGuard(failedDriverKey);
@@ -969,17 +969,23 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (ctx) {
 			driverView.detachSessionView(ctx);
 		}
+		// session_shutdown 写 status.json 需要正确的 cwd 才能验签。真实场景下 pi 总是
+		// 传 ctx;若 ctx 缺失,跳过 status 重写(只 dispose),绝不用 process.cwd() 兜底
+		// —— 那会跨 workspace 用错 projectKey,把签名写坏。
+		const shutdownCwd = ctx ? getCwd(ctx) : undefined;
 		for (const driver of liveDrivers.values()) {
-			const status = readDriverStatus(driver.runDir);
-			if (status && isTransientDriverStatus(status.status)) {
-				writeDriverStatus(driver.runDir, {
-					taskId: status.taskId,
-					runId: status.runId,
-					status: "paused",
-					step: status.step,
-					summary: "driver paused because session shut down",
-					sessionFile: status.sessionFile ?? driver.sessionFile,
-				});
+			if (shutdownCwd) {
+				const status = readDriverStatus(driver.runDir, shutdownCwd);
+				if (status && isTransientDriverStatus(status.status)) {
+					writeDriverStatus(driver.runDir, {
+						taskId: status.taskId,
+						runId: status.runId,
+						status: "paused",
+						step: status.step,
+						summary: "driver paused because session shut down",
+						sessionFile: status.sessionFile ?? driver.sessionFile,
+					}, shutdownCwd);
+				}
 			}
 			driver.dispose();
 		}

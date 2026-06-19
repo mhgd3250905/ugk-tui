@@ -1,11 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { readJsonRecord } from "./flow-fs.ts";
-import { signRecord, verifyRecord } from "./flow-signing.ts";
+import { signRecord, verifyRecord, REVIEW_SIGNED_FIELDS } from "./flow-signing.ts";
 import { getProjectKey, isInMigrationWindow } from "./task-store.ts";
-
-/** review.json 签名覆盖的关键字段:防 agent 把 rejected 改 accepted,或伪造 acceptedAt。 */
-const REVIEW_SIGNED_FIELDS = ["taskId", "runId", "status", "taskVersion", "acceptedAt"];
 
 export type FlowReviewStatus = "in-review" | "accepted" | "rejected" | "needs-changes";
 export type FlowTaskDesignDecision = "updated" | "no-change";

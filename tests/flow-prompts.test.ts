@@ -56,7 +56,7 @@ test("buildFlowTaskReviewPrompt is the live review gate prompt", () => {
 	assert.match(prompt, /SKILL\.md/);
 	assert.match(prompt, /todo\.template\.md/);
 	assert.match(prompt, /validator\.md/);
-	assert.match(prompt, /bump `task\.json\.version`/);
+	assert.match(prompt, /runtime 在 accept 时自动 bump/);
 	assert.match(prompt, /你是业务质量的\*\*唯一\*\*关卡/);
 	assert.match(prompt, /结构校验/);
 	assert.match(prompt, /Task 推进为 ready/);

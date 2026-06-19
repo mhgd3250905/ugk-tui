@@ -88,7 +88,7 @@ export function buildFlowTaskReviewPrompt(args: { taskId: string; runId: string 
 		"- 如果用户说不懂，先解释这个问题和用户决策有什么关系，再给出可选的业务判断；不能跳过或替用户沉默处理。",
 		"- 把复盘问答、是否修改旧方案、修正过程和用户确认结果写入 `review.md`。",
 		"- 只有 run 成功或修复成功，并且用户确认后，才能把经验写回 `SKILL.md`、`todo.template.md`、`validator.md` 或 schema。",
-		"- 写回成功经验时必须 bump `task.json.version`，记录变更原因；不要手工把 Task 标记为可运行。",
+		"- 写回成功经验时，在 `review.md` 记录变更原因，并在 review.json 的 updatedFiles 列出改动的文件；`task.json.version` 由 runtime 在 accept 时自动 bump，不要手工改 task.json。",
 		`- 用户确认并完成写回，或确认无需修改 Task 资产后，调用 \`/flow task accept ${args.runId}\`；runtime 会写入 accepted review 并把 Task 推进为 ready。`,
 		`- 如果用户不同意或证据不足，调用 \`/flow task reject ${args.runId} "原因"\`，Task 会进入 needs-work。`,
 		"- failed 或被 review reject 且问题未解决时不能写回 skill，也不能把 Task 推进为可复用状态。",

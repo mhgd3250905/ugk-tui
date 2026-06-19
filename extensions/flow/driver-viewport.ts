@@ -108,7 +108,7 @@ function buildActivityLines(
 
 	const items: FlowActivityViewModel[] = [];
 	for (const driver of drivers) {
-		const status = readDriverStatus(driver.runDir);
+		const status = readDriverStatus(driver.runDir, cwd);
 		const validation = readFlowRunValidation(driver.runDir, cwd);
 		const review = readFlowReview(driver.runDir, cwd);
 		const task = readFlowTask(cwd, driver.taskId);
@@ -308,7 +308,7 @@ export function createDriverView(deps: DriverViewDeps): DriverView {
 
 		for (const viewDriver of viewable) {
 			const driverKey = deps.getDriverKey(viewDriver.taskId, viewDriver.runId);
-			const status = readDriverStatus(viewDriver.runDir);
+			const status = readDriverStatus(viewDriver.runDir, cwd);
 			items.push({
 				id: driverKey,
 				label: driverKey,

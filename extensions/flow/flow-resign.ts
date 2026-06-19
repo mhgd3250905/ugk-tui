@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { isRecord, readJsonStrict } from "./flow-fs.ts";
-import { signRecord } from "./flow-signing.ts";
+import { signRecord, TASK_SIGNED_FIELDS, REVIEW_SIGNED_FIELDS, VALIDATION_SIGNED_FIELDS, STATUS_SIGNED_FIELDS } from "./flow-signing.ts";
 import { getProjectKey, isInMigrationWindow, closeMigrationWindow } from "./task-store.ts";
 
 /**
@@ -17,10 +17,6 @@ import { getProjectKey, isInMigrationWindow, closeMigrationWindow } from "./task
  * 用于恢复(密钥丢失)或迁移(旧数据/换机器),不用于正常流程。
  */
 
-const TASK_SIGNED_FIELDS = ["id", "status", "version", "latest_review_run", "ready_origin"];
-const REVIEW_SIGNED_FIELDS = ["taskId", "runId", "status", "taskVersion", "acceptedAt"];
-const VALIDATION_SIGNED_FIELDS = ["taskId", "runId", "result", "scope", "createdAt"];
-
 const RESET_LOG = ".flow/.signing-reset-log";
 
 export interface ResignResult {
@@ -28,6 +24,7 @@ export interface ResignResult {
 	tasks: number;
 	reviews: number;
 	validations: number;
+	statuses: number;
 	/** 跳过的记录(无法解析的)。 */
 	skipped: number;
 }
@@ -37,7 +34,7 @@ export interface ResignResult {
  * 写 reset log(留痕)。调用方负责在合适时机调用(手动命令 / 启动期)。
  */
 export function resignAllRecords(cwd: string, reason: string): ResignResult {
-	const result: ResignResult = { tasks: 0, reviews: 0, validations: 0, skipped: 0 };
+	const result: ResignResult = { tasks: 0, reviews: 0, validations: 0, statuses: 0, skipped: 0 };
 	const projectKey = getProjectKey(cwd);
 	const tasksDir = path.join(cwd, ".flow", "tasks");
 	if (!existsSync(tasksDir)) {
@@ -98,6 +95,20 @@ export function resignAllRecords(cwd: string, reason: string): ResignResult {
 					result.skipped++;
 				}
 			}
+
+			const statusPath = path.join(runDir, "status.json");
+			if (existsSync(statusPath)) {
+				try {
+					const parsed = readJsonStrict(statusPath);
+					if (isRecord(parsed)) {
+						const sig = signRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);
+						writeFileSync(statusPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
+						result.statuses++;
+					}
+				} catch {
+					result.skipped++;
+				}
+			}
 		}
 	}
 
@@ -111,7 +122,7 @@ function writeResetLog(cwd: string, reason: string, result: ResignResult): void 
 	const entry = [
 		`## ${new Date().toISOString()}`,
 		`reason: ${reason}`,
-		`tasks: ${result.tasks}  reviews: ${result.reviews}  validations: ${result.validations}  skipped: ${result.skipped}`,
+		`tasks: ${result.tasks}  reviews: ${result.reviews}  validations: ${result.validations}  statuses: ${result.statuses}  skipped: ${result.skipped}`,
 		"",
 	].join("\n");
 	mkdirSync(path.dirname(logPath), { recursive: true });

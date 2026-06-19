@@ -31,7 +31,7 @@ const MASTER_KEY_PERMS = 0o600;
 export interface RecordSignature {
 	alg: "hmac-sha256";
 	/** 被签名的字段名列表。验签时按此取字段,防"加了字段没签"的漏签。 */
-	covered: string[];
+	covered: readonly string[];
 	/** HMAC-SHA256(projectKey, canonicalJSON(coveredFields)) 的 base64。 */
 	value: string;
 	/** runtime 签名的时间(ISO),用于内部诊断,不暴露给 agent。 */
@@ -103,7 +103,7 @@ export function canonicalJson(value: unknown): string {
  * 从记录里取出要签的字段,算签名值。
  * covered 里列出的字段缺失时按 null 签(防"删字段绕过签名")。
  */
-function extractCovered(record: Record<string, unknown>, covered: string[]): Record<string, unknown> {
+function extractCovered(record: Record<string, unknown>, covered: readonly string[]): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 	for (const key of covered) {
 		// undefined 和缺失统一当 null,避免"签时 undefined、验时缺失"的不一致
@@ -125,7 +125,7 @@ function computeSignatureValue(projectKey: Buffer, covered: Record<string, unkno
 export function signRecord(
 	projectKey: Buffer,
 	record: Record<string, unknown>,
-	covered: string[],
+	covered: readonly string[],
 	now = new Date(),
 ): RecordSignature {
 	const coveredFields = extractCovered(record, covered);
@@ -168,6 +168,48 @@ export function verifyRecord(
 	}
 	return { verified: true };
 }
+
+/**
+ * 各判定记录被签名覆盖的字段名。集中定义一处,所有写/读/重签路径共用——
+ * 防止"改了 task-store 忘改 flow-resign"的漏签。
+ *
+ * 原则:凡 agent 能手写、且会误导 runtime 判断的字段,都必须在此列。
+ * 非判定性的展示字段(如 summary、issues、decisions)不在此列——它们不影响
+ * 状态机决策,且其上游结论(如 result/status)已签。
+ */
+export const TASK_SIGNED_FIELDS = [
+	"id",
+	"status",
+	"version",
+	"latest_review_run",
+	"ready_origin",
+	"next_step", // 被 activity card 读为"下一步建议",agent 手写会误导
+] as const;
+
+export const REVIEW_SIGNED_FIELDS = [
+	"taskId",
+	"runId",
+	"status",
+	"taskVersion",
+	"acceptedAt",
+	"taskDesignUpdated", // isFlowReviewAccepted 的 hasSettledTaskDesign 用它判定
+	"taskDesignDecision",
+] as const;
+
+export const VALIDATION_SIGNED_FIELDS = [
+	"taskId",
+	"runId",
+	"result",
+	"scope",
+	"createdAt",
+] as const;
+
+export const STATUS_SIGNED_FIELDS = [
+	"taskId",
+	"runId",
+	"status", // driverLive / session_shutdown / picker 排序都依赖它
+	"updatedAt", // 防回滚到旧状态
+] as const;
 
 /**
  * 标准损坏反馈文案。调用方在 agent 可见的反馈里用这些,**不自己编**——

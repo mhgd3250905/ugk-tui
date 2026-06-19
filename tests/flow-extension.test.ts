@@ -1079,7 +1079,7 @@ test("driver factory failure marks the run failed without registering a live dri
 		await commands.get("flow").handler("task prove x --input keyword=Medtrum", ctx);
 
 		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
-		const status = readDriverStatus(runDir);
+		const status = readDriverStatus(runDir, cwd);
 		assert.equal(status?.status, "failed");
 		assert.match(status?.summary ?? "", /session create failed/);
 		assert.equal(notifications.at(-1)?.type, "error");
@@ -1130,7 +1130,7 @@ test("driver start failure disposes and removes the live driver", async () => {
 		await sleep(10);
 
 		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
-		const status = readDriverStatus(runDir);
+		const status = readDriverStatus(runDir, cwd);
 		assert.equal(status?.status, "failed");
 		assert.match(status?.summary ?? "", /driver start failed/);
 		assert.equal(disposed, true);
@@ -1186,7 +1186,7 @@ test("driver terminal completion keeps the driver retained and advances to revie
 		releaseStart();
 		await sleep(10);
 
-		const runStatus = readDriverStatus(runDir);
+		const runStatus = readDriverStatus(runDir, cwd);
 		assert.equal(disposed, false);
 		assert.equal(runStatus?.status, "done");
 		assert.equal(runStatus?.step, "validated");
@@ -1562,7 +1562,7 @@ test("/flow task review opens a completed focused driver run and marks task revi
 		step: "validated",
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	writePassingRunOutput(runDir, "ok");
 	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	fs.writeFileSync(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
@@ -1593,7 +1593,7 @@ test("/flow task review blocks runs without PASS runtime validation", async () =
 		step: "validated",
 		summary: "FAIL: missing output/result.json",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	const { pi, commands, sentMessages } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
 	registerFlow(pi as any);
@@ -1615,7 +1615,7 @@ test("/flow task accept requires a started review", async () => {
 		step: "validated",
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	writePassingRunOutput(runDir, "ok");
 	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
@@ -1662,7 +1662,7 @@ test("/flow task accept marks a reviewed PASS prove as verified and unblocks run
 			step: "validated",
 			summary: "PASS: ok",
 			updatedAt: "2026-06-18T01:00:00.000Z",
-		});
+		}, cwd);
 		writePassingRunOutput(runDir, "ok");
 		writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 		const { pi, commands, sentMessages } = makePi();
@@ -1699,7 +1699,7 @@ test("/flow task reject requires a started PASS review", async () => {
 		step: "validated",
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
@@ -1724,7 +1724,7 @@ test("/flow task reject blocks started review when validation is not PASS", asyn
 		step: "validated",
 		summary: "FAIL: missing output/result.json",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	fs.mkdirSync(runDir, { recursive: true });
 	fs.writeFileSync(
 		path.join(runDir, "review.json"),
@@ -1768,7 +1768,7 @@ test("/flow task reject marks task needs-work after started PASS review", async 
 		step: "validated",
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	writePassingRunOutput(runDir, "ok");
 	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
@@ -2349,7 +2349,7 @@ test("driver focus input delivery failure is handled and marks the run failed", 
 		});
 
 		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
-		const status = readDriverStatus(runDir);
+		const status = readDriverStatus(runDir, cwd);
 		const feedback = fs.readFileSync(path.join(runDir, "feedback.md"), "utf8");
 		assert.deepEqual(result, { action: "handled" });
 		assert.equal(status?.status, "failed");
@@ -2440,17 +2440,17 @@ test("session_shutdown pauses transient live drivers and disposes them", async (
 		await commands.get("flow").handler("task prove task-b --input b", ctx);
 		const taskARunDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
 		const taskBRunDir = path.join(cwd, ".flow", "tasks", "task-b", "runs", "run-001");
-		assert.equal(readDriverStatus(taskARunDir)?.status, "running");
-		assert.equal(readDriverStatus(taskBRunDir)?.status, "running");
+		assert.equal(readDriverStatus(taskARunDir, cwd)?.status, "running");
+		assert.equal(readDriverStatus(taskBRunDir, cwd)?.status, "running");
 
 		for (const handler of handlers.get("session_shutdown") ?? []) {
-			await handler();
+			await handler({}, ctx);
 		}
 
 		assert.deepEqual(disposed.sort(), ["task-a", "task-b"]);
-		assert.equal(readDriverStatus(taskARunDir)?.status, "paused");
-		assert.match(readDriverStatus(taskARunDir)?.summary ?? "", /session shut down/);
-		assert.equal(readDriverStatus(taskBRunDir)?.status, "paused");
+		assert.equal(readDriverStatus(taskARunDir, cwd)?.status, "paused");
+		assert.match(readDriverStatus(taskARunDir, cwd)?.summary ?? "", /session shut down/);
+		assert.equal(readDriverStatus(taskBRunDir, cwd)?.status, "paused");
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -2490,13 +2490,13 @@ test("session_shutdown preserves terminal live driver status", async () => {
 			step: "complete",
 			summary: "completed before shutdown",
 			sessionFile: "driver.jsonl",
-		});
+		}, cwd);
 
 		for (const handler of handlers.get("session_shutdown") ?? []) {
-			await handler();
+			await handler({}, ctx);
 		}
 
-		const status = readDriverStatus(runDir);
+		const status = readDriverStatus(runDir, cwd);
 		assert.deepEqual(disposed, ["task-done"]);
 		assert.equal(status?.status, "done");
 		assert.equal(status?.summary, "completed before shutdown");

@@ -2,10 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import path from "node:path";
 import { isRecord, readJsonStrict } from "./flow-fs.ts";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
-import { deriveProjectKey, getOrCreateMasterKey, signRecord, verifyRecord } from "./flow-signing.ts";
-
-/** task.json 状态机关键字段——这些字段的篡改会被签名检测到。 */
-const TASK_SIGNED_FIELDS = ["id", "status", "version", "latest_review_run", "ready_origin"];
+import { deriveProjectKey, getOrCreateMasterKey, signRecord, verifyRecord, TASK_SIGNED_FIELDS } from "./flow-signing.ts";
 
 /**
  * task.json 可能出现的所有 status 值。

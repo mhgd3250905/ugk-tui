@@ -127,6 +127,44 @@ test("acceptReview succeeds and transitions task to ready", () => {
 	assert.equal((readFlowTask(cwd, "demo-task") as { ready_origin?: string }).ready_origin, "local-proved");
 });
 
+// version bump 由 runtime 接管:agent 不再手改 task.json.version(那会破坏签名)。
+// 当 review 沉淀了 task 设计更新(updatedFiles 非空)时,runtime 在 accept 时 version+1;
+// 无更新时 version 不变。见 prompts.ts review 指令 + acceptReview 实现。
+test("acceptReview bumps task version when task design assets were updated", () => {
+	const cwd = makeTempCwd();
+	const { driver, runDir } = makePassRun(cwd);
+	// 先 start 一个 in-review review,再手写 updatedFiles(模拟 agent 写回了 SKILL.md)。
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
+	const reviewPath = path.join(runDir, "review.json");
+	const reviewOnDisk = JSON.parse(readFileSync(reviewPath, "utf8"));
+	reviewOnDisk.updatedFiles = ["SKILL.md"];
+	writeFileSync(reviewPath, `${JSON.stringify(reviewOnDisk, null, "\t")}\n`);
+	seedTask(cwd, "demo-task", "reviewing");
+
+	const outcome = acceptReview({ driver, driverLive: false }, cwd);
+	assert.equal(outcome.ok, true);
+	// version 被 runtime bump:1 → 2,且带签名(readFlowTask 验过)。
+	const task = readFlowTask(cwd, "demo-task");
+	assert.equal(task?.version, 2);
+	assert.equal(task?._signatureBroken, undefined);
+	// review 记录的 taskVersion 也是 bump 后的值。
+	assert.equal((outcome as { review?: { taskVersion?: number } }).review?.taskVersion, 2);
+});
+
+test("acceptReview does not bump version when task design was not updated", () => {
+	const cwd = makeTempCwd();
+	const { driver, runDir } = makePassRun(cwd);
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
+	seedTask(cwd, "demo-task", "reviewing");
+
+	const outcome = acceptReview({ driver, driverLive: false }, cwd);
+	assert.equal(outcome.ok, true);
+	// 无 updatedFiles → version 不变。
+	const task = readFlowTask(cwd, "demo-task");
+	assert.equal(task?.version, 1);
+	assert.equal((outcome as { review?: { taskVersion?: number } }).review?.taskVersion, 1);
+});
+
 test("acceptReview fails when task metadata is unreadable", () => {
 	const cwd = makeTempCwd();
 	const { driver, runDir } = makePassRun(cwd);

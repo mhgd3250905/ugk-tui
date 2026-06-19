@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
 	createDriverSession,
@@ -7,6 +9,7 @@ import {
 	type DriverSessionFactory,
 	type DriverSessionOptions,
 	createFlowDriverResourceLoaderOptions,
+	defaultDriverSessionFactory,
 } from "../extensions/shared/driver-session.ts";
 
 function createOptions(): DriverSessionOptions {
@@ -69,4 +72,39 @@ test("driver resource loader can inject an explicit agent definition", () => {
 	assert.equal(overridden.agentsFiles.at(-1)?.path, agentDefinitionPath);
 	assert.match(overridden.agentsFiles.at(-1)?.content ?? "", /^---\nname: driver/m);
 	assert.match(overridden.agentsFiles.at(-1)?.content ?? "", /model: deepseek-v4-pro/);
+});
+
+test("real default driver session factory injects isolated Driver and Judge definitions into the system prompt", async () => {
+	const cases = [
+		{
+			name: "driver",
+			agentDefinitionPath: path.resolve("agents/driver.md"),
+			expectedPromptText: "你是 Judge 模式里的 Driver",
+		},
+		{
+			name: "judge",
+			agentDefinitionPath: path.resolve("agents/judge.md"),
+			expectedPromptText: "你是 Judge 模式里的 Judge",
+		},
+	];
+
+	for (const entry of cases) {
+		const runDir = mkdtempSync(path.join(os.tmpdir(), `ugk-${entry.name}-agent-smoke-`));
+		const { session } = await defaultDriverSessionFactory({
+			cwd: path.resolve("."),
+			taskId: `${entry.name}-agent-smoke`,
+			runId: "run-001",
+			runDir,
+			initialPrompt: "",
+			agentDefinitionPath: entry.agentDefinitionPath,
+			extensionMode: "print",
+		});
+		try {
+			assert.match((session as any).systemPrompt, new RegExp(entry.expectedPromptText));
+			assert.match((session as any).systemPrompt, new RegExp(entry.agentDefinitionPath.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")));
+		} finally {
+			session.dispose();
+			rmSync(runDir, { recursive: true, force: true });
+		}
+	}
 });

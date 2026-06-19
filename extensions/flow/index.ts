@@ -867,9 +867,11 @@ export function registerFlow(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		// 启动期自动迁移:迁移窗口内,一次性重签所有旧记录 + 关窗口。
-		// 解决多 task / 跨机器场景(第一个 task 关窗口前,其他旧 task 无签名被拒)。
-		autoMigrateIfNeeded(getCwd(ctx));
+		// 启动期自动迁移:仅在主 session 触发(driver session 的 mode 是 "print")。
+		// driver session 不做迁移,避免在 driver cwd 下产生多余的 migrated marker。
+		if (ctx.mode !== "print") {
+			autoMigrateIfNeeded(getCwd(ctx));
+		}
 		const entries = ctx.sessionManager?.getEntries?.() ?? [];
 		driverView.restoreFromEntries(entries);
 		if (driverView.focusState.focus === "driver") {

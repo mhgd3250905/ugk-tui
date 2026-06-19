@@ -109,3 +109,14 @@ test("rejects invalid task ids for task prove and run", () => {
 		assert.equal(parseFlowCommand(taskId ? `task delete ${taskId}` : "task delete").kind, "error");
 	}
 });
+
+test("parses repair-signing with task id", () => {
+	assert.deepEqual(parseFlowCommand("repair-signing my-task"), {
+		kind: "repair-signing",
+		taskId: "my-task",
+	});
+	// 无参数报 usage
+	assert.equal(parseFlowCommand("repair-signing").kind, "error");
+	// 非法 task id 报错
+	assert.equal(parseFlowCommand("repair-signing ../x").kind, "error");
+});

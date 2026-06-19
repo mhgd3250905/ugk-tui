@@ -1,13 +1,16 @@
-import { readFlowRunValidationVerified } from "./run-validation.ts";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { readFlowRunValidation } from "./run-validation.ts";
 import {
 	acceptFlowReview,
-	readFlowReviewVerified,
+	readFlowReview,
 	rejectFlowReview,
 	startFlowReview,
 	type FlowReviewRecord,
 } from "./review-store.ts";
+import { CORRUPT_FEEDBACK } from "./flow-signing.ts";
 import { normalizeLegacyState, transition } from "./task-state.ts";
-import { readFlowTask } from "./task-store.ts";
+import { readFlowTask, writeFlowTask } from "./task-store.ts";
 import type { FlowDriverSummary } from "./types.ts";
 
 /**
@@ -52,18 +55,29 @@ function checkReviewPrerequisites(
 	cwd: string,
 	wording: { liveVerb: "start" | "change"; validationPhase: "start" | "accepted" | "rejected" },
 	requireExistingReview: boolean,
-): ReviewActionOutcome | { ok: true; validation: ReturnType<typeof readFlowRunValidationVerified> } {
+): ReviewActionOutcome | { ok: true; validation: ReturnType<typeof readFlowRunValidation> } {
 	const { driver, driverLive } = ctx;
 	if (driverLive) {
 		return fail(`Flow task review cannot ${wording.liveVerb} while the Flow driver is still running.`);
 	}
-	const validation = readFlowRunValidationVerified(driver.runDir, cwd);
-	if (!validation || validation.result !== "PASS") {
+	const validation = readFlowRunValidation(driver.runDir, cwd);
+	if (!validation) {
+		// 读不出 validation:区分"没跑过"vs"记录损坏"。文件存在但读不出 = 损坏,引导 repair。
+		if (existsSync(path.join(driver.runDir, "validation.json"))) {
+			return fail(CORRUPT_FEEDBACK.validation(driver.runId));
+		}
+		return fail(`Flow review cannot be ${wording.validationPhase} because validation is not PASS: ${driver.taskId}/${driver.runId}`);
+	}
+	if (validation.result !== "PASS") {
 		return fail(`Flow review cannot be ${wording.validationPhase} because validation is not PASS: ${driver.taskId}/${driver.runId}`);
 	}
 	if (requireExistingReview) {
-		const existingReview = readFlowReviewVerified(driver.runDir, cwd);
+		const existingReview = readFlowReview(driver.runDir, cwd);
 		if (!existingReview) {
+			// 区分"没开始 review"vs"review 记录损坏":文件存在但读不出 = 损坏,引导 repair。
+			if (existsSync(path.join(driver.runDir, "review.json"))) {
+				return fail(CORRUPT_FEEDBACK.review(driver.taskId, driver.runId));
+			}
 			return fail(`Flow review has not started for ${driver.taskId}/${driver.runId}. Run /flow task review ${driver.taskId}/${driver.runId} first.`);
 		}
 	}
@@ -114,6 +128,9 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 	if (!transitionResult.ok) {
 		return fail(transitionResult.reason, "error");
 	}
+	// acceptFlowReview 内部扫描设计资产 mtime 变化,决定 taskDesignUpdated/updatedFiles。
+	// 先用当前 version 写 review;若检测到设计更新,再 bump version 并回写 task.json +
+	// review.json 的 taskVersion(均带签名)。agent 永不手改 task.json(那会破坏签名)。
 	const review = acceptFlowReview({
 		cwd,
 		taskId: driver.taskId,
@@ -121,6 +138,22 @@ export function acceptReview(ctx: ReviewDriverContext, cwd: string): ReviewActio
 		runDir: driver.runDir,
 		taskVersion: task.version,
 	});
+	if (review.taskDesignUpdated) {
+		const nextVersion = task.version + 1;
+		const currentTask = readFlowTask(cwd, driver.taskId);
+		if (currentTask) {
+			const { taskDir: _td, _signatureBroken: _broken, ...fields } = currentTask;
+			writeFlowTask(cwd, driver.taskId, { ...fields, version: nextVersion });
+		}
+		// 回写 review 的 taskVersion 为 bump 后的值(重签)。
+		return { ok: true, kind: "accepted", review: acceptFlowReview({
+			cwd,
+			taskId: driver.taskId,
+			runId: driver.runId,
+			runDir: driver.runDir,
+			taskVersion: nextVersion,
+		}) };
+	}
 	return { ok: true, kind: "accepted", review };
 }
 

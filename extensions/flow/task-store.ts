@@ -2,10 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import path from "node:path";
 import { isRecord, readJsonStrict } from "./flow-fs.ts";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
-import { deriveProjectKey, getOrCreateMasterKey, signRecord, verifyRecord } from "./flow-signing.ts";
-
-/** task.json 状态机关键字段——这些字段的篡改会被签名检测到。 */
-const TASK_SIGNED_FIELDS = ["id", "status", "version", "latest_review_run", "ready_origin"];
+import { deriveProjectKey, getOrCreateMasterKey, signRecord, verifyRecord, TASK_SIGNED_FIELDS } from "./flow-signing.ts";
 
 /**
  * task.json 可能出现的所有 status 值。
@@ -124,7 +121,7 @@ export function readFlowTask(cwd: string, taskId: string): FlowTaskMetadata | un
 	if (inMigrationWindow) {
 		// 窗口内不强制验签,旧记录正常返回。
 	} else {
-		const check = verifyRecord(getProjectKey(cwd), parsed);
+		const check = verifyRecord(getProjectKey(cwd), parsed, TASK_SIGNED_FIELDS);
 		if (!check.verified) {
 			signatureBroken = true;
 		}
@@ -151,6 +148,65 @@ export function writeFlowTask(cwd: string, taskId: string, task: Record<string, 
 	writeFileSync(path.join(taskDir, "task.json"), `${JSON.stringify(withSig, null, "\t")}\n`);
 	// 首次签名写入即关闭迁移窗口:此后无 _sig 的记录不再被信任。
 	closeMigrationWindow(cwd);
+}
+
+/**
+ * 把磁盘上已有的 task.json 重签(原地)。
+ *
+ * 用途:`/flow task create` 是 prompt 驱动的——agent 按 prompts.ts 指示**手写**
+ * task.json(它拿不到签名密钥,所以无 `_sig`)。runtime 在 agent_end 检测到新 task
+ * 且资产校验通过后,调本函数把 agent 写的字段原样重发为签名版。这样:
+ *  - 新建的 draft 立刻带合法签名,后续严格验签的读取路径(readTaskMetadata/
+ *    readFlowTask)不会误报"记录不可用";
+ *  - 首次签名即关闭迁移窗口(writeFlowTask 内部完成);
+ *  - agent 面向的契约不变——它照样手写字段,runtime 透明签名。
+ *
+ * 读原始磁盘 JSON(不走 readFlowTask):draft 是 agent 刚写的,我们要的是它写
+ * 的原始字段,不受签名状态影响。无 task.json 或字段非法时返回 false(调用方按
+ * "task 没建好"处理,会落到 contract-repair 路径)。
+ */
+export function signFlowTaskOnDisk(cwd: string, taskId: string): boolean {
+	const taskDir = resolveFlowTaskDir(cwd, taskId);
+	const taskJsonPath = path.join(taskDir, "task.json");
+	if (!existsSync(taskJsonPath)) {
+		return false;
+	}
+	const parsed = readJsonStrict(taskJsonPath);
+	if (!isRecord(parsed)) {
+		return false;
+	}
+	// 保留 agent 写的所有业务字段,只剥离旧签名(若有)和 runtime-only 字段。
+	const { _sig: _oldSig, taskDir: _td, _signatureBroken: _broken, ...fields } = parsed;
+	writeFlowTask(cwd, taskId, fields);
+	return true;
+}
+
+/**
+ * 仅当 task.json **完全无签名**时首签(用于 asset repair 路径)。
+ *
+ * 与 signFlowTaskOnDisk 的区别:既有 task(已有有效签名)不重签——repair 期间 agent
+ * 若改了 status/version 等生命周期字段,原样重签会把篡改洗白成可信。这里只对新建但
+ * 首签未完成的 task 补签,且强制 status="draft"(create 阶段 agent 不该写非 draft 状态)。
+ * 已签名的 task 完全不动,交给验签 + 显式 repair-signing 保护。
+ */
+export function signFlowTaskOnDiskIfUnsigned(cwd: string, taskId: string): boolean {
+	const taskDir = resolveFlowTaskDir(cwd, taskId);
+	const taskJsonPath = path.join(taskDir, "task.json");
+	if (!existsSync(taskJsonPath)) {
+		return false;
+	}
+	const parsed = readJsonStrict(taskJsonPath);
+	if (!isRecord(parsed)) {
+		return false;
+	}
+	// 已有签名(无论是否验过)→ 不动。mismatch 的交给显式 repair-signing。
+	if (parsed._sig !== undefined) {
+		return false;
+	}
+	// 无签名 → 首签。强制 status=draft:create 阶段 agent 不该推进状态。
+	const { _sig: _oldSig, taskDir: _td, _signatureBroken: _broken, ...fields } = parsed;
+	writeFlowTask(cwd, taskId, { ...fields, status: "draft" });
+	return true;
 }
 
 export function updateFlowTaskStatus(

@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { registerFlow, setFlowDriverSessionFactoryForTests } from "../extensions/flow/index.ts";
 import { readDriverStatus, writeDriverStatus } from "../extensions/flow/driver-store.ts";
-import { writeFlowTask, getProjectKey } from "../extensions/flow/task-store.ts";
-import { signRecord } from "../extensions/flow/flow-signing.ts";
+import { writeFlowTask, getProjectKey, readFlowTask } from "../extensions/flow/task-store.ts";
+import { signRecord, verifyRecord } from "../extensions/flow/flow-signing.ts";
 import { acceptFlowReview } from "../extensions/flow/review-store.ts";
 
 function makePi() {
@@ -290,6 +290,49 @@ test("task create completion opens an interruptive prove gate for the new task",
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
+});
+
+// 回归:create 路径的签名收口。agent 按 prompt 手写 task.json(无 _sig),runtime
+// 在 agent_end 资产校验通过后必须重签——否则窗口外严格验签会把新建 draft 误判为
+// "记录不可用"。见 docs/handoff/2026-06-19-unsigned-read-paths.md 的对称缺陷。
+test("task create completion signs the agent-authored task.json so it reads as trusted", async () => {
+	// 关窗:模拟一个已签过名的 workspace(真实用户的窗口早已关闭)。
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-create-sign-"));
+	writeFlowTask(cwd, "anchor-task", { id: "anchor-task", version: 1, status: "draft" });
+	const { pi, commands, handlers } = makePi();
+	const { ctx, selections } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler('task create "整理 README 要点"', ctx);
+
+	// 模拟 agent 按 prompts.ts 指示**手写**无签名 task.json(真实 create 路径,
+	// 不走 writeFlowTask——agent 拿不到密钥)。
+	const taskDir = path.join(cwd, ".flow", "tasks", "readme-essentials");
+	fs.mkdirSync(taskDir, { recursive: true });
+	fs.writeFileSync(
+		path.join(taskDir, "task.json"),
+		`${JSON.stringify({ id: "readme-essentials", version: 1, status: "draft", goal: "整理 README 要点" }, null, "\t")}\n`,
+	);
+	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n\n## 最优路径\n\nA. Prepare\n", "utf8");
+	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Run Todo\n", "utf8");
+	fs.writeFileSync(path.join(taskDir, "validator.md"), "# Validator\n", "utf8");
+	fs.writeFileSync(path.join(taskDir, "input.schema.json"), '{"type":"object"}\n', "utf8");
+	fs.writeFileSync(path.join(taskDir, "output.schema.json"), '{"type":"object"}\n', "utf8");
+
+	// 触发 agent_end:create-success 分支应重签。
+	for (const handler of handlers.get("agent_end") ?? []) {
+		await handler({}, ctx);
+	}
+
+	// 重签后:readFlowTask 在窗口外不再标 _signatureBroken;磁盘 JSON 带合法 _sig。
+	const task = readFlowTask(cwd, "readme-essentials");
+	assert.equal(task?._signatureBroken, undefined);
+	const onDisk = JSON.parse(fs.readFileSync(path.join(taskDir, "task.json"), "utf8"));
+	assert.equal(verifyRecord(getProjectKey(cwd), onDisk).verified, true);
+	// agent 写的业务字段被保留,没被重签覆盖丢失。
+	assert.equal(onDisk.goal, "整理 README 要点");
+	// stage gate 照常推进(证明重签没破坏正常流程)。
+	assert.ok(selections.some((s) => s.title === "Flow next step"));
 });
 
 test("task create completion repairs incomplete task assets before offering prove", async () => {
@@ -1036,7 +1079,7 @@ test("driver factory failure marks the run failed without registering a live dri
 		await commands.get("flow").handler("task prove x --input keyword=Medtrum", ctx);
 
 		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
-		const status = readDriverStatus(runDir);
+		const status = readDriverStatus(runDir, cwd);
 		assert.equal(status?.status, "failed");
 		assert.match(status?.summary ?? "", /session create failed/);
 		assert.equal(notifications.at(-1)?.type, "error");
@@ -1087,7 +1130,7 @@ test("driver start failure disposes and removes the live driver", async () => {
 		await sleep(10);
 
 		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
-		const status = readDriverStatus(runDir);
+		const status = readDriverStatus(runDir, cwd);
 		assert.equal(status?.status, "failed");
 		assert.match(status?.summary ?? "", /driver start failed/);
 		assert.equal(disposed, true);
@@ -1143,7 +1186,7 @@ test("driver terminal completion keeps the driver retained and advances to revie
 		releaseStart();
 		await sleep(10);
 
-		const runStatus = readDriverStatus(runDir);
+		const runStatus = readDriverStatus(runDir, cwd);
 		assert.equal(disposed, false);
 		assert.equal(runStatus?.status, "done");
 		assert.equal(runStatus?.step, "validated");
@@ -1519,7 +1562,7 @@ test("/flow task review opens a completed focused driver run and marks task revi
 		step: "validated",
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	writePassingRunOutput(runDir, "ok");
 	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	fs.writeFileSync(path.join(runDir, "feedback.md"), "# User Feedback\n\n");
@@ -1550,7 +1593,7 @@ test("/flow task review blocks runs without PASS runtime validation", async () =
 		step: "validated",
 		summary: "FAIL: missing output/result.json",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	const { pi, commands, sentMessages } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
 	registerFlow(pi as any);
@@ -1572,7 +1615,7 @@ test("/flow task accept requires a started review", async () => {
 		step: "validated",
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	writePassingRunOutput(runDir, "ok");
 	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
@@ -1619,7 +1662,7 @@ test("/flow task accept marks a reviewed PASS prove as verified and unblocks run
 			step: "validated",
 			summary: "PASS: ok",
 			updatedAt: "2026-06-18T01:00:00.000Z",
-		});
+		}, cwd);
 		writePassingRunOutput(runDir, "ok");
 		writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 		const { pi, commands, sentMessages } = makePi();
@@ -1656,7 +1699,7 @@ test("/flow task reject requires a started PASS review", async () => {
 		step: "validated",
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx(cwd);
@@ -1681,7 +1724,7 @@ test("/flow task reject blocks started review when validation is not PASS", asyn
 		step: "validated",
 		summary: "FAIL: missing output/result.json",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	fs.mkdirSync(runDir, { recursive: true });
 	fs.writeFileSync(
 		path.join(runDir, "review.json"),
@@ -1725,7 +1768,7 @@ test("/flow task reject marks task needs-work after started PASS review", async 
 		step: "validated",
 		summary: "PASS: ok",
 		updatedAt: "2026-06-18T01:00:00.000Z",
-	});
+	}, cwd);
 	writePassingRunOutput(runDir, "ok");
 	writePassingValidation(cwd, runDir, "task-a", "run-001", "ok");
 	const { pi, commands } = makePi();
@@ -2306,7 +2349,7 @@ test("driver focus input delivery failure is handled and marks the run failed", 
 		});
 
 		const runDir = path.join(cwd, ".flow", "tasks", "x", "runs", "run-001");
-		const status = readDriverStatus(runDir);
+		const status = readDriverStatus(runDir, cwd);
 		const feedback = fs.readFileSync(path.join(runDir, "feedback.md"), "utf8");
 		assert.deepEqual(result, { action: "handled" });
 		assert.equal(status?.status, "failed");
@@ -2397,17 +2440,17 @@ test("session_shutdown pauses transient live drivers and disposes them", async (
 		await commands.get("flow").handler("task prove task-b --input b", ctx);
 		const taskARunDir = path.join(cwd, ".flow", "tasks", "task-a", "runs", "run-001");
 		const taskBRunDir = path.join(cwd, ".flow", "tasks", "task-b", "runs", "run-001");
-		assert.equal(readDriverStatus(taskARunDir)?.status, "running");
-		assert.equal(readDriverStatus(taskBRunDir)?.status, "running");
+		assert.equal(readDriverStatus(taskARunDir, cwd)?.status, "running");
+		assert.equal(readDriverStatus(taskBRunDir, cwd)?.status, "running");
 
 		for (const handler of handlers.get("session_shutdown") ?? []) {
-			await handler();
+			await handler({}, ctx);
 		}
 
 		assert.deepEqual(disposed.sort(), ["task-a", "task-b"]);
-		assert.equal(readDriverStatus(taskARunDir)?.status, "paused");
-		assert.match(readDriverStatus(taskARunDir)?.summary ?? "", /session shut down/);
-		assert.equal(readDriverStatus(taskBRunDir)?.status, "paused");
+		assert.equal(readDriverStatus(taskARunDir, cwd)?.status, "paused");
+		assert.match(readDriverStatus(taskARunDir, cwd)?.summary ?? "", /session shut down/);
+		assert.equal(readDriverStatus(taskBRunDir, cwd)?.status, "paused");
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
@@ -2447,13 +2490,13 @@ test("session_shutdown preserves terminal live driver status", async () => {
 			step: "complete",
 			summary: "completed before shutdown",
 			sessionFile: "driver.jsonl",
-		});
+		}, cwd);
 
 		for (const handler of handlers.get("session_shutdown") ?? []) {
-			await handler();
+			await handler({}, ctx);
 		}
 
-		const status = readDriverStatus(runDir);
+		const status = readDriverStatus(runDir, cwd);
 		assert.deepEqual(disposed, ["task-done"]);
 		assert.equal(status?.status, "done");
 		assert.equal(status?.summary, "completed before shutdown");

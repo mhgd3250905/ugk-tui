@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { deleteFlowTask, readFlowTask, updateFlowTaskStatus, writeFlowTask } from "../extensions/flow/task-store.ts";
+import { deleteFlowTask, readFlowTask, signFlowTaskOnDiskIfUnsigned, updateFlowTaskStatus, writeFlowTask } from "../extensions/flow/task-store.ts";
 
 function makeTempCwd(): string {
 	return mkdtempSync(path.join(tmpdir(), "flow-task-store-"));
@@ -142,4 +142,44 @@ test("unsigned records are trusted inside the migration window (legacy data)", (
 	const task = readFlowTask(cwd, "legacy-task");
 	assert.equal(task?._signatureBroken, undefined, "legacy unsigned record trusted inside window");
 	assert.equal(task?.status, "active");
+});
+
+// P1-c 回归:asset repair 路径的 signFlowTaskOnDiskIfUnsigned 不得把既有 task(已签名)
+// 的篡改洗白。既有 task 的 task.json 已有签名,repair 期间 agent 若改了 status,该函数
+// 不应重签(交给验签挡住 + 显式 repair-signing)。只对完全无签名的新建 task 首签。
+test("signFlowTaskOnDiskIfUnsigned skips already-signed task (does not legitimize tampering)", () => {
+	const cwd = makeTempCwd();
+	const taskDir = path.join(cwd, ".flow", "tasks", "existing-task");
+	mkdirSync(taskDir, { recursive: true });
+	// 既有 task:runtime 已签名(status: reviewing)。
+	writeFlowTask(cwd, "existing-task", { id: "existing-task", version: 1, status: "reviewing" });
+	// 模拟 repair 期间 agent 篡改:改 status 为 ready,保留旧 _sig(签名算不出 → mismatch)。
+	const onDisk = JSON.parse(readFileSync(path.join(taskDir, "task.json"), "utf8"));
+	onDisk.status = "ready";
+	writeFileSync(path.join(taskDir, "task.json"), `${JSON.stringify(onDisk, null, "\t")}\n`);
+
+	// repair 路径调 signFlowTaskOnDiskIfUnsigned:既有签名 → 不动(返回 false)。
+	const signed = signFlowTaskOnDiskIfUnsigned(cwd, "existing-task");
+	assert.equal(signed, false);
+	// task.json 仍是被篡改状态,验签挡住(readFlowTask 标 _signatureBroken)。
+	const task = readFlowTask(cwd, "existing-task");
+	assert.equal(task?._signatureBroken, true);
+});
+
+test("signFlowTaskOnDiskIfUnsigned signs unsigned new task and forces draft status", () => {
+	const cwd = makeTempCwd();
+	const taskDir = path.join(cwd, ".flow", "tasks", "new-task");
+	mkdirSync(taskDir, { recursive: true });
+	// 新建 task:agent 手写(无 _sig),且违规写了 status: ready。
+	writeFileSync(
+		path.join(taskDir, "task.json"),
+		`${JSON.stringify({ id: "new-task", version: 1, status: "ready", goal: "test" }, null, "\t")}\n`,
+	);
+
+	// 首签:无签名 → 签,但强制 status=draft(create 阶段不该有非 draft 状态)。
+	const signed = signFlowTaskOnDiskIfUnsigned(cwd, "new-task");
+	assert.equal(signed, true);
+	const task = readFlowTask(cwd, "new-task");
+	assert.equal(task?.status, "draft");
+	assert.equal(task?._signatureBroken, undefined);
 });

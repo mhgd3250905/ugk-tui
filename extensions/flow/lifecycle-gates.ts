@@ -1,14 +1,13 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { isRecord, readJsonStrict } from "./flow-fs.ts";
-import { CORRUPT_FEEDBACK } from "./flow-signing.ts";
+import { CORRUPT_FEEDBACK, TASK_SIGNED_FIELDS, verifyRecord } from "./flow-signing.ts";
 import { invalidFlowTaskIdMessage, isValidFlowTaskId } from "./parser.ts";
-import { acceptFlowReview, isFlowReviewAccepted, readFlowReviewVerified } from "./review-store.ts";
+import { acceptFlowReview, isFlowReviewAccepted, readFlowReview } from "./review-store.ts";
 import { getProjectKey } from "./task-store.ts";
 import { isRunnable, normalizeLegacyState } from "./task-state.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
 import type { FlowDriverStatus } from "./types.ts";
-import { verifyRecord } from "./flow-signing.ts";
 import { isInMigrationWindow } from "./task-store.ts";
 
 /**
@@ -61,13 +60,14 @@ export function readTaskMetadata(cwd: string, taskId: string): TaskGuardResult {
 	}
 
 	// 签名校验:迁移窗口外,无 _sig 或签名不符 = 记录被篡改。
-	// 反馈用中性措辞(CORRUPT_FEEDBACK),不提签名/密钥——见设计文档反馈安全要求。
+	// 反馈告知 agent 正确路径(/flow task accept 或 /flow repair-signing),不提签名/密钥。
 	if (!isInMigrationWindow(cwd) && isRecord(parsed)) {
-		const sigCheck = verifyRecord(getProjectKey(cwd), parsed);
+		const sigCheck = verifyRecord(getProjectKey(cwd), parsed, TASK_SIGNED_FIELDS);
 		if (!sigCheck.verified) {
+			const reviewRun = typeof parsed.latest_review_run === "string" ? parsed.latest_review_run : undefined;
 			return {
 				ok: false,
-				message: CORRUPT_FEEDBACK.taskStatus(taskId),
+				message: CORRUPT_FEEDBACK.taskStatus(taskId, reviewRun),
 				type: "warning",
 			};
 		}
@@ -116,7 +116,7 @@ export function validateTaskForDriver(kind: "prove" | "run", cwd: string, taskId
 		};
 	}
 	const reviewRunDir = path.join(task.taskDir, "runs", task.latestReviewRun);
-	let review = readFlowReviewVerified(reviewRunDir, cwd);
+	let review = readFlowReview(reviewRunDir, cwd);
 	const expectedReview = { taskId, runId: task.latestReviewRun };
 	if (
 		!isFlowReviewAccepted(review, task.version, expectedReview) &&

@@ -26,8 +26,8 @@ import {
 	writeDriverStatus,
 } from "./driver-store.ts";
 import { formatFlowQueued } from "./formatter.ts";
-import { lockTaskAssets, type FlowWriteGuard } from "./flow-write-guard.ts";
-import { autoMigrateIfNeeded, resignAllRecords } from "./flow-resign.ts";
+import { lockTaskAssets, lockTaskStateRecords, type FlowWriteGuard } from "./flow-write-guard.ts";
+import { autoMigrateIfNeeded, resignAllRecords, resignTaskRecords, resignUnsignedStatusRecords } from "./flow-resign.ts";
 import { closeMigrationWindow } from "./task-store.ts";
 import {
 	isTransientDriverStatus,
@@ -47,7 +47,7 @@ import { acceptReview, rejectReview, startReview, type ReviewActionOutcome } fro
 import { isFlowReviewAccepted, readFlowReview } from "./review-store.ts";
 import { readFlowRunValidation, validateFlowRun } from "./run-validation.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
-import { deleteFlowTask, readFlowTask, updateFlowTaskStatus } from "./task-store.ts";
+import { deleteFlowTask, readFlowTask, signFlowTaskOnDisk, signFlowTaskOnDiskIfUnsigned, updateFlowTaskStatus } from "./task-store.ts";
 import { transition } from "./task-state.ts";
 import type { FlowDriverStatus, FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
 
@@ -119,6 +119,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 	// driver 执行期间的 task 资产只读锁,按 driverKey 索引。
 	// 所有 driver 终态(dispose/clear/shutdown)都必须释放对应 guard,否则文件永久只读。
 	const writeGuards = new Map<string, FlowWriteGuard>();
+	// review 期间的 .json 状态记录只读锁(原件保护),按 taskId 索引。
+	// startReview 时锁定(防 agent 手写 .json);accept/reject 前解锁(runtime 要写)。
+	// shutdown 也要释放,否则 .json 永久只读。
+	const reviewWriteGuards = new Map<string, FlowWriteGuard>();
 	let pendingCreateTaskIds: Set<string> | undefined;
 	let pendingTaskAssetRepair: { taskId: string; attempts: number } | undefined;
 
@@ -136,6 +140,15 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (guard) {
 			guard.unlock();
 			writeGuards.delete(driverKey);
+		}
+	}
+
+	/** 释放某 task 的 review .json 只读锁。幂等;accept/reject/shutdown 都应调用。 */
+	function releaseReviewGuard(taskId: string): void {
+		const guard = reviewWriteGuards.get(taskId);
+		if (guard) {
+			guard.unlock();
+			reviewWriteGuards.delete(taskId);
 		}
 	}
 
@@ -179,7 +192,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 	function listConsoleDrivers(cwd: string): Array<FlowDriverSummary & { reviewStatus?: string }> {
 		return listDriverSummaries(cwd).map((driver) => ({
 			...driver,
-			reviewStatus: readFlowReview(driver.runDir)?.status,
+			reviewStatus: readFlowReview(driver.runDir, cwd)?.status,
 		}));
 	}
 
@@ -378,7 +391,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 				status: "failed",
 				step: "driver session",
 				summary,
-			});
+			}, cwd);
 			ctx.ui.notify(`Flow driver failed: ${driverKey}\n${summary}`, "error");
 			return;
 		}
@@ -395,9 +408,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 			step: "starting",
 			summary: `${kind} driver running`,
 			sessionFile: liveDriver.sessionFile,
-		});
+		}, cwd);
 		if (driverView.focusState.focus === "driver") {
-			renderFocus(ctx, readDriverStatus(artifacts.runDir)!);
+			renderFocus(ctx, readDriverStatus(artifacts.runDir, cwd)!);
 		} else {
 			renderMainDriverActivity(ctx);
 		}
@@ -414,7 +427,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 					step: "validating output",
 					summary: "validating driver output",
 					sessionFile: liveDriver.sessionFile,
-				});
+				}, cwd);
 				let attemptedContractRepair = false;
 				let validation = validateFlowRun({
 					cwd,
@@ -433,9 +446,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 						step: "repairing output contract",
 						summary: `${validation.result}: ${validation.summary}`,
 						sessionFile: liveDriver.sessionFile,
-					});
+					}, cwd);
 					if (isCurrentFocusedDriver()) {
-						renderFocus(ctx, readDriverStatus(artifacts.runDir)!);
+						renderFocus(ctx, readDriverStatus(artifacts.runDir, cwd)!);
 					} else {
 						renderMainDriverActivity(ctx);
 					}
@@ -456,7 +469,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 						step: "validating repaired output",
 						summary: "validating repaired driver output",
 						sessionFile: liveDriver.sessionFile,
-					});
+					}, cwd);
 					validation = validateFlowRun({
 						cwd,
 						taskId,
@@ -475,8 +488,8 @@ export function registerFlow(pi: ExtensionAPI): void {
 					step: validation.result === "PASS" ? "validated" : "validation failed",
 					summary: `${validation.result}: ${validation.summary}`,
 					sessionFile: liveDriver.sessionFile,
-				});
-				const status = readDriverStatus(artifacts.runDir)!;
+				}, cwd);
+				const status = readDriverStatus(artifacts.runDir, cwd)!;
 				if (kind === "prove") {
 					const event = validation.result === "PASS"
 						? { kind: "prove-pass" as const, runId, validatedAt: validation.createdAt, nextStep: validation.nextStep }
@@ -539,7 +552,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 					step: "driver start",
 					summary,
 					sessionFile: liveDriver.sessionFile,
-				});
+				}, cwd);
 				if (isCurrentFocusedDriver()) {
 					clearFocusedDriver(ctx);
 				}
@@ -601,6 +614,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
+		// review 期间锁定 .json 状态记录(原件保护):agent 物理写不进 task/review/
+		// validation/status.json,只能改 SKILL.md 等设计资产。accept/reject 前解锁。
+		reviewWriteGuards.set(driver.taskId, lockTaskStateRecords(getCwd(ctx), driver.taskId));
 		if (driverView.focusState.focus === "driver") {
 			clearFocusedDriver(ctx);
 		}
@@ -613,10 +629,16 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (!driver) {
 			return;
 		}
+		// accept 前 unlock:runtime 要写 task.json(transition + version bump)和
+		// review.json(acceptFlowReview)。若 accept 失败(前置校验/状态机拒),重新加锁——
+		// 否则 review 期间 .json 原件保护失效。
+		releaseReviewGuard(driver.taskId);
 		const driverKey = getDriverKey(driver.taskId, driver.runId);
 		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
 		const outcome = acceptReview({ driver, driverLive }, getCwd(ctx));
 		if (!outcome.ok) {
+			// 失败:重新加锁,保持原件保护。accept 后(成功)不再锁(终态)。
+			reviewWriteGuards.set(driver.taskId, lockTaskStateRecords(getCwd(ctx), driver.taskId));
 			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
@@ -635,10 +657,14 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (!driver) {
 			return;
 		}
+		// reject 前 unlock:runtime 要写 task.json(transition)和 review.json(rejectFlowReview)。
+		// 若 reject 失败,重新加锁保持原件保护。
+		releaseReviewGuard(driver.taskId);
 		const driverKey = getDriverKey(driver.taskId, driver.runId);
 		const driverLive = Boolean(liveDrivers.get(driverKey)) || isTransientDriverStatus(driver.status);
 		const outcome = rejectReview({ driver, driverLive }, getCwd(ctx), reason);
 		if (!outcome.ok) {
+			reviewWriteGuards.set(driver.taskId, lockTaskStateRecords(getCwd(ctx), driver.taskId));
 			ctx.ui.notify(outcome.reason, outcome.type);
 			return;
 		}
@@ -798,10 +824,33 @@ export function registerFlow(pi: ExtensionAPI): void {
 					ctx.ui.notify("Flow reset-signing cancelled.", "info");
 					return;
 				}
-				const result = resignAllRecords(getCwd(ctx), "manual /flow reset-signing");
+				const result = resignAllRecords(getCwd(ctx), "manual /flow reset-signing", "all");
 				closeMigrationWindow(getCwd(ctx));
 				ctx.ui.notify(
-					`Flow records re-signed: ${result.tasks} tasks, ${result.reviews} reviews, ${result.validations} validations (${result.skipped} skipped).`,
+					`Flow records re-signed: ${result.tasks} tasks, ${result.reviews} reviews, ${result.validations} validations, ${result.statuses} statuses (${result.skipped} skipped).`,
+					"info",
+				);
+				return;
+			}
+
+			if (request.kind === "repair-signing") {
+				const taskId = request.taskId;
+				const confirmed = await ctx.ui.confirm(
+					`Repair Flow records for ${taskId}`,
+					`This re-signs ${taskId}'s task/review/validation/status records with the current key (trusts current content). Use after records become unusable. Continue?`,
+				);
+				if (!confirmed) {
+					ctx.ui.notify("Flow repair-signing cancelled.", "info");
+					return;
+				}
+				// 先解锁再重签:review 期间 .json 被 lockTaskStateRecords 设为只读,
+				// 不先解锁会让 resignTaskRecords 写失败(skipped)。repair 是异常恢复路径,
+				// 重签后不再重新加锁(重签可能改了内容,锁已无意义;要继续 review 重新 /flow task review)。
+				releaseReviewGuard(taskId);
+				const result = resignTaskRecords(getCwd(ctx), taskId);
+				closeMigrationWindow(getCwd(ctx));
+				ctx.ui.notify(
+					`Flow records repaired for ${taskId}: ${result.tasks} tasks, ${result.reviews} reviews, ${result.validations} validations, ${result.statuses} statuses (${result.skipped} skipped).`,
 					"info",
 				);
 				return;
@@ -821,6 +870,13 @@ export function registerFlow(pi: ExtensionAPI): void {
 			const validation = validateFlowTaskAssets(getCwd(ctx), repair.taskId);
 			if (validation.ok) {
 				pendingTaskAssetRepair = undefined;
+				// asset repair 只补缺失的设计资产(SKILL.md/schema 等)。task.json 的签名
+				// 状态不在此重置——既有 task 本就有有效签名,repair 期间 agent 若改了
+				// task.json 的 status/version 等生命周期字段,验签会挡住(readTaskMetadata
+				// 报不可用),交给显式 /flow repair-signing 恢复,不在此洗白。
+				// 仅当 task.json 完全无签名(新建 task 首签未完成)时才首签,且强制 status=draft
+				// (create 阶段 agent 不该写非 draft 状态;写了一律归一为 draft)。
+				signFlowTaskOnDiskIfUnsigned(getCwd(ctx), repair.taskId);
 				await runStageGate(ctx, { phase: "create", taskId: repair.taskId });
 				return;
 			}
@@ -851,6 +907,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 			queueTaskAssetRepair(ctx, createdTasks[0].id, validation.issues);
 			return;
 		}
+		// agent 按 prompt 手写了 task.json(无 _sig——它拿不到签名密钥)。runtime 在
+		// 资产校验通过后把它重签为可信记录:首次签名即关窗,后续严格验签的读取路径才
+		// 不会把新建 draft 误判为"记录不可用"。这是 create 路径的签名收口。
+		signFlowTaskOnDisk(getCwd(ctx), createdTasks[0].id);
 		await runStageGate(ctx, { phase: "create", taskId: createdTasks[0].id });
 	});
 
@@ -871,6 +931,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 		// driver session 不做迁移,避免在 driver cwd 下产生多余的 migrated marker。
 		if (ctx.mode !== "print") {
 			autoMigrateIfNeeded(getCwd(ctx));
+			// 升级兼容:PR #9 之前 status.json 不签名,引入签名后旧 run 的 unsigned
+			// status 会被 readDriverStatus 拒绝→run 从菜单消失。启动期一次性补签。
+			// 独立于迁移窗口(窗口已关也要跑),只重签 unsigned 的,已签的跳过。
+			resignUnsignedStatusRecords(getCwd(ctx));
 		}
 		const entries = ctx.sessionManager?.getEntries?.() ?? [];
 		driverView.restoreFromEntries(entries);
@@ -943,7 +1007,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 				step: driver.step ?? "input delivery",
 				summary,
 				sessionFile: liveDriver.sessionFile,
-			});
+			}, getCwd(ctx));
 			const failedDriverKey = getDriverKey(driver.taskId, driver.runId);
 			liveDrivers.delete(failedDriverKey);
 			releaseWriteGuard(failedDriverKey);
@@ -962,17 +1026,23 @@ export function registerFlow(pi: ExtensionAPI): void {
 		if (ctx) {
 			driverView.detachSessionView(ctx);
 		}
+		// session_shutdown 写 status.json 需要正确的 cwd 才能验签。真实场景下 pi 总是
+		// 传 ctx;若 ctx 缺失,跳过 status 重写(只 dispose),绝不用 process.cwd() 兜底
+		// —— 那会跨 workspace 用错 projectKey,把签名写坏。
+		const shutdownCwd = ctx ? getCwd(ctx) : undefined;
 		for (const driver of liveDrivers.values()) {
-			const status = readDriverStatus(driver.runDir);
-			if (status && isTransientDriverStatus(status.status)) {
-				writeDriverStatus(driver.runDir, {
-					taskId: status.taskId,
-					runId: status.runId,
-					status: "paused",
-					step: status.step,
-					summary: "driver paused because session shut down",
-					sessionFile: status.sessionFile ?? driver.sessionFile,
-				});
+			if (shutdownCwd) {
+				const status = readDriverStatus(driver.runDir, shutdownCwd);
+				if (status && isTransientDriverStatus(status.status)) {
+					writeDriverStatus(driver.runDir, {
+						taskId: status.taskId,
+						runId: status.runId,
+						status: "paused",
+						step: status.step,
+						summary: "driver paused because session shut down",
+						sessionFile: status.sessionFile ?? driver.sessionFile,
+					}, shutdownCwd);
+				}
 			}
 			driver.dispose();
 		}
@@ -986,6 +1056,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 		// 会话关闭:释放所有未释放的 task 资产只读锁,避免文件永久卡在 0444。
 		for (const key of [...writeGuards.keys()]) {
 			releaseWriteGuard(key);
+		}
+		// 同样释放 review 期间的 .json 只读锁(若 review 未完成就被关)。
+		for (const taskId of [...reviewWriteGuards.keys()]) {
+			releaseReviewGuard(taskId);
 		}
 		ctx?.ui && updateSessionSwitcher(ctx);
 	});

@@ -155,3 +155,48 @@ test("CORRUPT_FEEDBACK gives a safe recovery action, not destructive", () => {
 	assert.ok(!taskMsg.includes("删除"));
 	assert.ok(!taskMsg.includes("手动修复"));
 });
+
+// P1-b 回归:verifyRecord 的 requiredCovered 参数防止旧签名(covered 字段少)给 agent
+// 补写的新字段背书。例如旧 review 签名不含 taskDesignDecision,agent 补写后若不校验
+// covered 完整性,验签仍过 → isFlowReviewAccepted gate 被绕过。
+test("verifyRecord rejects records whose covered does not include all required fields", () => {
+	const masterKey = getOrCreateMasterKey();
+	const projectKey = deriveProjectKey({ cwd: "/test-project" }, masterKey);
+
+	// 造一个"旧签名":只覆盖 status,不含 taskDesignDecision。
+	const record = { status: "accepted", taskDesignDecision: "no-change" };
+	const oldSig = signRecord(projectKey, record, ["status"]);
+	const withOldSig = { ...record, _sig: oldSig };
+
+	// 不传 requiredCovered:旧签名验过(向后兼容裸 verifyRecord)。
+	assert.equal(verifyRecord(projectKey, withOldSig).verified, true);
+
+	// 传 requiredCovered(含 taskDesignDecision):covered 不足 → mismatch(拒读)。
+	const check = verifyRecord(projectKey, withOldSig, ["status", "taskDesignDecision"]);
+	assert.equal(check.verified, false);
+	assert.equal((check as { reason: string }).reason, "mismatch");
+
+	// 对照:用完整 covered 重签后,requiredCovered 校验通过。
+	const fullSig = signRecord(projectKey, record, ["status", "taskDesignDecision"]);
+	const withFullSig = { ...record, _sig: fullSig };
+	assert.equal(verifyRecord(projectKey, withFullSig, ["status", "taskDesignDecision"]).verified, true);
+});
+
+// P1 回归:_sig 字段存在但值非法(null/0/""/false)必须是 malformed,不是 no-signature。
+// 否则 resignUnsignedStatusRecords 会把它们当旧版无签名数据自动补签洗白。
+test("verifyRecord treats _sig with invalid value as malformed, not no-signature", () => {
+	const projectKey = deriveProjectKey({ cwd: "/test-project" }, getOrCreateMasterKey());
+	const record = { status: "done" };
+
+	// 完全没有 _sig → no-signature(旧版,可补签)。
+	assert.equal((verifyRecord(projectKey, record) as { reason: string }).reason, "no-signature");
+
+	// _sig 字段存在但值非法 → malformed(不可自动补签洗白)。
+	for (const invalidSig of [null, 0, "", false, "not-an-object"]) {
+		const withBadSig = { ...record, _sig: invalidSig };
+		const check = verifyRecord(projectKey, withBadSig);
+		assert.equal(check.verified, false);
+		assert.equal((check as { reason: string }).reason, "malformed",
+			`_sig: ${JSON.stringify(invalidSig)} should be malformed, not no-signature`);
+	}
+});

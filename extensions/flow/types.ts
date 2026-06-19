@@ -30,6 +30,7 @@ export type FlowRequest =
 	| { kind: "task-reject"; runId: string; reason?: string }
 	| { kind: "task-delete"; taskId: string }
 	| { kind: "reset-signing" }
+	| { kind: "repair-signing"; taskId: string }
 	| { kind: "attach"; runId?: string }
 	| { kind: "detach" }
 	| { kind: "driver-status" }

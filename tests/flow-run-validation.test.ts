@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { readFlowRunValidation, validateFlowRun } from "../extensions/flow/run-validation.ts";
+import { closeMigrationWindow } from "../extensions/flow/task-store.ts";
 
 function makeRun(): { cwd: string; taskDir: string; runDir: string } {
 	const cwd = mkdtempSync(path.join(tmpdir(), "flow-run-validation-"));
@@ -48,7 +49,7 @@ test("validateFlowRun writes PASS validation from structured output", () => {
 	assert.match(readFileSync(path.join(runDir, "validation.md"), "utf8"), /结构校验/);
 	assert.match(readFileSync(path.join(runDir, "validation.md"), "utf8"), /Next step: \/flow task review demo-task\/run-001/);
 
-	const saved = readFlowRunValidation(runDir);
+	const saved = readFlowRunValidation(runDir, cwd);
 	assert.equal(saved?.result, "PASS");
 	assert.equal(saved?.summary, "ugk 是一个终端编码 agent。");
 });
@@ -98,8 +99,34 @@ test("readFlowRunValidation defaults scope to structural for legacy validation.j
 		nextStep: "/flow task review demo-task/run-001",
 	}));
 
-	const validation = readFlowRunValidation(runDir);
+	const validation = readFlowRunValidation(runDir, cwd);
 
 	assert.equal(validation?.result, "PASS");
 	assert.equal(validation?.scope, "structural");
+});
+
+// 回归:状态分裂 bug 的对称面(见 docs/handoff/2026-06-19-unsigned-read-paths.md)。
+// validation.json 同样可被 agent 伪造 PASS。迁移窗口关闭后,手写无签名 validation.json
+// 必须返回 undefined。对照:runtime 用 validateFlowRun 写的带签名 validation 正常返回 PASS。
+test("readFlowRunValidation rejects unsigned forged validation after migration window closes (state-split regression)", () => {
+	const cwd = mkdtempSync(path.join(tmpdir(), "flow-run-validation-forged-"));
+	const runDir = path.join(cwd, "runs", "run-001");
+	mkdirSync(runDir, { recursive: true });
+	closeMigrationWindow(cwd);
+
+	// 模拟 agent 手写伪造 validation.json(无 _sig,result: PASS)
+	writeFileSync(path.join(runDir, "validation.json"), JSON.stringify({
+		taskId: "demo-task",
+		runId: "run-001",
+		phase: "prove",
+		result: "PASS",
+		scope: "structural",
+		summary: "forged",
+		issues: [],
+		createdAt: "2026-01-01T00:00:00.000Z",
+		nextStep: "/flow task review demo-task/run-001",
+	}));
+
+	// 伪造记录被挡:不返回假 PASS,而是 undefined。
+	assert.equal(readFlowRunValidation(runDir, cwd), undefined);
 });

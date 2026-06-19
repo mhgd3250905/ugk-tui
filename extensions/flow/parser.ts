@@ -116,5 +116,15 @@ export function parseFlowCommand(args: string): FlowRequest {
 
 	if (text === "reset-signing") return { kind: "reset-signing" };
 
+	const repairMatch = text.match(/^repair-signing\s+(\S+)\s*$/);
+	if (repairMatch) {
+		const taskId = repairMatch[1];
+		if (!isValidFlowTaskId(taskId)) return { kind: "error", message: invalidFlowTaskIdMessage(taskId) };
+		return { kind: "repair-signing", taskId };
+	}
+	if (text === "repair-signing" || text.startsWith("repair-signing ")) {
+		return { kind: "error", message: "Usage: /flow repair-signing <task-id>" };
+	}
+
 	return { kind: "help" };
 }

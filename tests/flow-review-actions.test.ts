@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { acceptReview, rejectReview, startReview } from "../extensions/flow/review-actions.ts";
@@ -125,6 +125,45 @@ test("acceptReview succeeds and transitions task to ready", () => {
 	assert.equal((outcome as { kind: string }).kind, "accepted");
 	assert.equal(readFlowTask(cwd, "demo-task")?.status, "ready");
 	assert.equal((readFlowTask(cwd, "demo-task") as { ready_origin?: string }).ready_origin, "local-proved");
+});
+
+// version bump 由 runtime 接管:agent 不再手改 task.json.version(那会破坏签名)。
+// 当 review 期间设计资产(SKILL.md 等)被修改时,runtime 扫描 mtime 检测到,accept 时 version+1;
+// 无修改时 version 不变。updatedFiles 由 runtime 扫描决定,不信 agent 填的(那会破坏签名)。
+test("acceptReview bumps task version when task design assets were updated", () => {
+	const cwd = makeTempCwd();
+	const { driver, taskDir, runDir } = makePassRun(cwd);
+	// 建一个旧 mtime 的 SKILL.md,确保 review start 时它"尚未改"。
+	writeFileSync(path.join(taskDir, "SKILL.md"), "# old\n");
+	const oldTime = new Date(Date.now() - 1000);
+	utimesSync(path.join(taskDir, "SKILL.md"), oldTime, oldTime);
+
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
+	// 模拟 agent 在 review 期间写回 SKILL.md(mtime 变新)。
+	writeFileSync(path.join(taskDir, "SKILL.md"), "# updated\n");
+	seedTask(cwd, "demo-task", "reviewing");
+
+	const outcome = acceptReview({ driver, driverLive: false }, cwd);
+	assert.equal(outcome.ok, true);
+	// version 被 runtime bump:1 → 2,且带签名(readFlowTask 验过)。
+	const task = readFlowTask(cwd, "demo-task");
+	assert.equal(task?.version, 2);
+	assert.equal(task?._signatureBroken, undefined);
+	assert.equal((outcome as { review?: { taskVersion?: number } }).review?.taskVersion, 2);
+});
+
+test("acceptReview does not bump version when task design was not updated", () => {
+	const cwd = makeTempCwd();
+	const { driver, runDir } = makePassRun(cwd);
+	startFlowReview({ cwd, taskId: "demo-task", runId: "run-001", runDir });
+	seedTask(cwd, "demo-task", "reviewing");
+
+	const outcome = acceptReview({ driver, driverLive: false }, cwd);
+	assert.equal(outcome.ok, true);
+	// 无 updatedFiles → version 不变。
+	const task = readFlowTask(cwd, "demo-task");
+	assert.equal(task?.version, 1);
+	assert.equal((outcome as { review?: { taskVersion?: number } }).review?.taskVersion, 1);
 });
 
 test("acceptReview fails when task metadata is unreadable", () => {

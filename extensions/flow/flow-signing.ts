@@ -31,7 +31,7 @@ const MASTER_KEY_PERMS = 0o600;
 export interface RecordSignature {
 	alg: "hmac-sha256";
 	/** 被签名的字段名列表。验签时按此取字段,防"加了字段没签"的漏签。 */
-	covered: string[];
+	covered: readonly string[];
 	/** HMAC-SHA256(projectKey, canonicalJSON(coveredFields)) 的 base64。 */
 	value: string;
 	/** runtime 签名的时间(ISO),用于内部诊断,不暴露给 agent。 */
@@ -103,7 +103,7 @@ export function canonicalJson(value: unknown): string {
  * 从记录里取出要签的字段,算签名值。
  * covered 里列出的字段缺失时按 null 签(防"删字段绕过签名")。
  */
-function extractCovered(record: Record<string, unknown>, covered: string[]): Record<string, unknown> {
+function extractCovered(record: Record<string, unknown>, covered: readonly string[]): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 	for (const key of covered) {
 		// undefined 和缺失统一当 null,避免"签时 undefined、验时缺失"的不一致
@@ -125,7 +125,7 @@ function computeSignatureValue(projectKey: Buffer, covered: Record<string, unkno
 export function signRecord(
 	projectKey: Buffer,
 	record: Record<string, unknown>,
-	covered: string[],
+	covered: readonly string[],
 	now = new Date(),
 ): RecordSignature {
 	const coveredFields = extractCovered(record, covered);
@@ -142,18 +142,35 @@ export function signRecord(
  *
  * 返回中性结果:verified(可信)或 broken(不可信)。调用方对 broken 的反馈
  * 必须遵守设计文档的反馈安全要求——中性措辞,不提签名/密钥。
+ *
+ * requiredCovered(可选):当前记录类型**必须**覆盖的判定字段集。传入时,校验记录
+ * 自带的 _sig.covered 是否包含全部 requiredCovered——防止旧签名(covered 字段少)
+ * 被用来给 agent 补写的新字段背书(如旧 review 不含 taskDesignDecision,agent 补写
+ * 后验签仍过 → 绕过 isFlowReviewAccepted gate)。covered 不足返回 mismatch。
  */
 export function verifyRecord(
 	projectKey: Buffer,
 	record: Record<string, unknown>,
+	requiredCovered?: readonly string[],
 ): SignatureCheck {
+	// 区分"完全没有 _sig 字段"(no-signature,旧版数据,可补签)vs
+	// "_sig 字段存在但值非法"(malformed,被篡改/损坏,不可自动补签洗白)。
+	// _sig: null/0/""/false 等都属于 malformed——字段在但不是合法签名对象。
+	if (!Object.prototype.hasOwnProperty.call(record, "_sig")) {
+		return { verified: false, reason: "no-signature" };
+	}
 	const sig = record["_sig"];
 	if (!sig || typeof sig !== "object") {
-		return { verified: false, reason: "no-signature" };
+		return { verified: false, reason: "malformed" };
 	}
 	const sigObj = sig as Partial<RecordSignature>;
 	if (!Array.isArray(sigObj.covered) || typeof sigObj.value !== "string") {
 		return { verified: false, reason: "malformed" };
+	}
+	// covered 完整性:记录自带 covered 必须包含当前类型应有的全部判定字段。
+	// 旧签名(字段集小)不能给新字段背书——缺字段 = 不可信(mismatch)。
+	if (requiredCovered && !requiredCovered.every((field) => (sigObj.covered as string[]).includes(field))) {
+		return { verified: false, reason: "mismatch" };
 	}
 	const coveredFields = extractCovered(record, sigObj.covered);
 	const expected = computeSignatureValue(projectKey, coveredFields);
@@ -170,14 +187,60 @@ export function verifyRecord(
 }
 
 /**
+ * 各判定记录被签名覆盖的字段名。集中定义一处,所有写/读/重签路径共用——
+ * 防止"改了 task-store 忘改 flow-resign"的漏签。
+ *
+ * 原则:凡 agent 能手写、且会误导 runtime 判断的字段,都必须在此列。
+ * 非判定性的展示字段(如 summary、issues、decisions)不在此列——它们不影响
+ * 状态机决策,且其上游结论(如 result/status)已签。
+ */
+export const TASK_SIGNED_FIELDS = [
+	"id",
+	"status",
+	"version",
+	"latest_review_run",
+	"ready_origin",
+	"next_step", // 被 activity card 读为"下一步建议",agent 手写会误导
+] as const;
+
+export const REVIEW_SIGNED_FIELDS = [
+	"taskId",
+	"runId",
+	"status",
+	"taskVersion",
+	"acceptedAt",
+	"taskDesignUpdated", // isFlowReviewAccepted 的 hasSettledTaskDesign 用它判定
+	"taskDesignDecision",
+] as const;
+
+export const VALIDATION_SIGNED_FIELDS = [
+	"taskId",
+	"runId",
+	"result",
+	"scope",
+	"createdAt",
+] as const;
+
+export const STATUS_SIGNED_FIELDS = [
+	"taskId",
+	"runId",
+	"status", // driverLive / session_shutdown / picker 排序都依赖它
+	"updatedAt", // 防回滚到旧状态
+] as const;
+
+/**
  * 标准损坏反馈文案。调用方在 agent 可见的反馈里用这些,**不自己编**——
  * 保证措辞统一、不泄露签名机制。每条都是中性"记录不可用"+ 安全恢复动作。
  */
 export const CORRUPT_FEEDBACK = {
-	taskStatus: (taskId: string) =>
-		`Flow task ${taskId} 的状态记录不可用,建议从证明阶段重新开始(/flow task prove ${taskId})`,
-	review: (taskId: string) =>
-		`task ${taskId} 的复盘记录不可用;请告诉用户这次 run 需要重新复盘`,
+	taskStatus: (taskId: string, runId?: string) =>
+		runId
+			? `Flow task ${taskId} 的状态记录不可用(被手写或损坏)。推进状态的唯一合法路径是 /flow task accept ${runId}(runtime 会写入),不要手写 task.json。若记录已损坏到无法 accept,用 /flow repair-signing ${taskId} 恢复。`
+			: `Flow task ${taskId} 的状态记录不可用(被手写或损坏)。状态记录由 runtime 独占写入,不要手写 task.json。用 /flow repair-signing ${taskId} 恢复,或从证明阶段重新开始(/flow task prove ${taskId})。`,
+	review: (taskId: string, runId?: string) =>
+		runId
+			? `task ${taskId} 的复盘记录不可用(被手写或损坏)。复盘记录由 runtime 在 /flow task accept ${runId} 时写入,不要手写 review.json。`
+			: `task ${taskId} 的复盘记录不可用(被手写或损坏)。复盘记录由 runtime 在 /flow task accept 时写入,不要手写 review.json。`,
 	validation: (runId: string) =>
-		`run ${runId} 的校验记录不可用,runtime 将重新校验产出`,
+		`run ${runId} 的校验记录不可用(被手写或损坏)。校验记录由 runtime 重新校验产出时写入,不要手写 validation.json。`,
 } as const;

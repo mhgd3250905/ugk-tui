@@ -1,4 +1,4 @@
-import { chmodSync, existsSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { resolveFlowTaskDir } from "./task-store.ts";
 
@@ -73,6 +73,66 @@ export function lockTaskAssets(cwd: string, taskId: string): FlowWriteGuard {
 					chmodSync(filePath, WRITABLE_MODE);
 				} catch {
 					// 恢复失败尽力而为:文件可能在期间被删除。
+				}
+			}
+		},
+	};
+}
+
+/**
+ * review 阶段的 .json 状态记录写保护(原件保护)。
+ *
+ * 对应"银行原件 vs 复印件":task.json/review.json/validation.json/status.json 是
+ * runtime 独占的判定记录(原件),review 期间锁为只读;SKILL.md 等设计资产是 agent
+ * 可填的"复印件",不锁。这样 agent 物理写不进 .json,从根上杜绝 task 被写脏卡死。
+ * accept/reject 时 runtime 自己要写 .json,调用方必须先 unlock。
+ *
+ * 锁定清单:task.json + 该 task 所有 runs 目录下的 review.json、validation.json、
+ * status.json(只锁已存在的)。
+ */
+export function lockTaskStateRecords(cwd: string, taskId: string): FlowWriteGuard {
+	const taskDir = resolveFlowTaskDir(cwd, taskId);
+	const lockedPaths: string[] = [];
+
+	const tryLock = (filePath: string): void => {
+		if (!existsSync(filePath)) {
+			return;
+		}
+		try {
+			chmodSync(filePath, READONLY_MODE);
+			lockedPaths.push(filePath);
+		} catch {
+			// 锁定失败不阻断:跨平台/权限问题时降级为不锁(验签仍是最终防线)。
+		}
+	};
+
+	// task.json(原件)
+	tryLock(path.join(taskDir, "task.json"));
+
+	// 所有 run 的 review.json / validation.json / status.json
+	const runsDir = path.join(taskDir, "runs");
+	if (existsSync(runsDir)) {
+		try {
+			for (const runEntry of readdirSync(runsDir, { withFileTypes: true })) {
+				if (!runEntry.isDirectory()) continue;
+				const runDir = path.join(runsDir, runEntry.name);
+				tryLock(path.join(runDir, "review.json"));
+				tryLock(path.join(runDir, "validation.json"));
+				tryLock(path.join(runDir, "status.json"));
+			}
+		} catch {
+			// runs 目录读取失败:已锁的保持锁定,其余降级不锁。
+		}
+	}
+
+	return {
+		lockedPaths,
+		unlock() {
+			for (const filePath of lockedPaths) {
+				try {
+					chmodSync(filePath, WRITABLE_MODE);
+				} catch {
+					// 恢复失败尽力而为。
 				}
 			}
 		},

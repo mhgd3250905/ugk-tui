@@ -282,6 +282,10 @@ function persistState(pi: ExtensionAPI, state: JudgeState): void {
 	});
 }
 
+function isPassDeliverySummary(summary: string): boolean {
+	return /^Judge final verdict: PASS$/m.test(summary);
+}
+
 function isStringArray(value: unknown): value is string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
@@ -353,7 +357,17 @@ export function registerJudge(pi: ExtensionAPI): void {
 
 	pi.registerCommand("judge", {
 		description: "Enter Judge aligning mode",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
+			if (String(args ?? "").trim().toLowerCase() === "ack") {
+				if (state.phase === "delivering" && isPassDeliverySummary(state.summary)) {
+					state = completeJudge(state);
+					persistState(pi, state);
+					ctx.ui.notify("Judge delivery accepted.", "info");
+					return;
+				}
+				ctx.ui.notify("No pending PASS Judge delivery to accept.", "warning");
+				return;
+			}
 			state = enterAligning(state);
 			pi.setActiveTools(JUDGE_ALIGNING_TOOLS);
 			ctx.ui.notify(`Judge aligning mode enabled. Tools: ${JUDGE_ALIGNING_TOOLS.join(", ")}`, "info");
@@ -509,7 +523,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 							}
 							state = enterDelivering({ ...state, summary: deliveryReport });
 							persistState(pi, state);
-							ctx.ui.notify("Judge delivery is waiting for user acknowledgement.", "warning");
+							ctx.ui.notify("Judge delivery is waiting for user acknowledgement. Run /judge ack to accept it later.", "warning");
 							return { action: "pass", keepWatching: false };
 						}
 

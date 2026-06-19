@@ -220,9 +220,9 @@ test("final PASS displays delivery report and user ack marks Judge done", async 
 	assert.match(report, /pathsTried 显示 write 成功/);
 });
 
-test("final PASS without user ack stays delivering", async () => {
+test("final PASS without user ack can be accepted later with /judge ack", async () => {
 	const { pi, commands, handlers, entries } = makePi();
-	const { ctx } = makeCtx(false);
+	const { ctx, notifications } = makeCtx(false);
 	const prompts: string[] = [];
 	installDecisionSession([
 		JSON.stringify({ status: "pass", reason: "满足", evidence: ["文件存在"] }),
@@ -248,6 +248,12 @@ test("final PASS without user ack stays delivering", async () => {
 
 	assert.equal(entries.at(-1)?.data.phase, "delivering");
 	assert.notEqual(entries.at(-1)?.data.phase, "done");
+	assert.match(notifications.map((entry) => entry.message).join("\n"), /\/judge ack/);
+
+	await commands.get("judge").handler("ack", ctx);
+
+	assert.equal(entries.at(-1)?.data.phase, "done");
+	assert.match(notifications.map((entry) => entry.message).join("\n"), /accepted/i);
 });
 
 test("final FAIL returns to driving and steers the driver with evidence", async () => {
@@ -316,4 +322,9 @@ test("final FAIL at max steer reports status without steering again", async () =
 	assert.equal(wakeupResults[0].action, "pass");
 	assert.equal(wakeupResults[0].keepWatching, false);
 	assert.match(notifications.map((entry) => entry.message).join("\n"), /仍不满足验收/);
+
+	await commands.get("judge").handler("ack", ctx);
+
+	assert.equal(entries.at(-1)?.data.phase, "delivering");
+	assert.match(notifications.map((entry) => entry.message).join("\n"), /PASS/);
 });

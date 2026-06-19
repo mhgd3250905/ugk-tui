@@ -194,3 +194,31 @@ test("resignUnsignedStatusRecords skips already-signed status (no rewrite)", () 
 	// 仍可读。
 	assert.equal(readDriverStatus(runDir, cwd)?.status, "done");
 });
+
+// P1 安全回归:启动期补签**不得**把"已签名但被篡改"(mismatch)的 status 洗白。
+// 只补 no-signature(旧版无签名);mismatch/malformed 必须保持拒读,交给显式 repair。
+test("resignUnsignedStatusRecords does NOT legitimize tampered signed status (mismatch)", () => {
+	const cwd = makeTempCwd();
+	writeFlowTask(cwd, "tampered-task", { id: "tampered-task", version: 1, status: "ready" });
+	const runDir = path.join(cwd, ".flow", "tasks", "tampered-task", "runs", "run-001");
+	mkdirSync(runDir, { recursive: true });
+	// runtime 写一个合法签名的 running status。
+	writeDriverStatus(runDir, { taskId: "tampered-task", runId: "run-001", status: "running" }, cwd);
+	// 模拟 agent 篡改:改 status 为 done,保留旧 _sig(签名算不出正确值 → mismatch)。
+	const onDisk = JSON.parse(readFileSync(path.join(runDir, "status.json"), "utf8"));
+	onDisk.status = "done";
+	writeFileSync(path.join(runDir, "status.json"), `${JSON.stringify(onDisk, null, "\t")}\n`);
+	// 篡改后读不出(验签拦截)。
+	assert.equal(readDriverStatus(runDir, cwd), undefined);
+
+	// 启动期补签:**不应**处理 mismatch(只补 no-signature)。
+	const resigned = resignUnsignedStatusRecords(cwd);
+	assert.equal(resigned, 0);
+	// 仍读不出——篡改没被洗白。
+	assert.equal(readDriverStatus(runDir, cwd), undefined);
+
+	// 显式 repair(用户确认)才能恢复:这里直接调 resignTaskRecords 模拟。
+	const result = resignTaskRecords(cwd, "tampered-task");
+	assert.equal(result.statuses, 1);
+	assert.equal(readDriverStatus(runDir, cwd)?.status, "done");
+});

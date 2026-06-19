@@ -199,8 +199,12 @@ export function resignUnsignedStatusRecords(cwd: string): number {
 			try {
 				const parsed = readJsonStrict(statusPath);
 				if (!isRecord(parsed)) continue;
-				// 已签名且验过 → 跳过(不重复写,保留原 mtime)。
-				if (verifyRecord(projectKey, parsed).verified) continue;
+				// 只补"完全没有 _sig"的旧版 status(PR #9 之前从不签名)。
+				// 对已有 _sig 但 mismatch/malformed 的记录(被篡改/损坏)**绝不自动补签**——
+				// 那会把检测到的篡改洗白成可信。交给显式 /flow repair-signing(用户确认)。
+				const check = verifyRecord(projectKey, parsed);
+				if (check.verified) continue; // 已验过 → 跳过
+				if (check.reason !== "no-signature") continue; // mismatch/malformed → 保持拒读
 				const sig = signRecord(projectKey, parsed, STATUS_SIGNED_FIELDS);
 				writeFileSync(statusPath, `${JSON.stringify({ ...parsed, _sig: sig }, null, "\t")}\n`);
 				resigned++;

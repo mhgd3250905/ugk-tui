@@ -153,9 +153,15 @@ export function verifyRecord(
 	record: Record<string, unknown>,
 	requiredCovered?: readonly string[],
 ): SignatureCheck {
+	// 区分"完全没有 _sig 字段"(no-signature,旧版数据,可补签)vs
+	// "_sig 字段存在但值非法"(malformed,被篡改/损坏,不可自动补签洗白)。
+	// _sig: null/0/""/false 等都属于 malformed——字段在但不是合法签名对象。
+	if (!Object.prototype.hasOwnProperty.call(record, "_sig")) {
+		return { verified: false, reason: "no-signature" };
+	}
 	const sig = record["_sig"];
 	if (!sig || typeof sig !== "object") {
-		return { verified: false, reason: "no-signature" };
+		return { verified: false, reason: "malformed" };
 	}
 	const sigObj = sig as Partial<RecordSignature>;
 	if (!Array.isArray(sigObj.covered) || typeof sigObj.value !== "string") {

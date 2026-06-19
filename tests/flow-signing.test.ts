@@ -181,3 +181,22 @@ test("verifyRecord rejects records whose covered does not include all required f
 	const withFullSig = { ...record, _sig: fullSig };
 	assert.equal(verifyRecord(projectKey, withFullSig, ["status", "taskDesignDecision"]).verified, true);
 });
+
+// P1 回归:_sig 字段存在但值非法(null/0/""/false)必须是 malformed,不是 no-signature。
+// 否则 resignUnsignedStatusRecords 会把它们当旧版无签名数据自动补签洗白。
+test("verifyRecord treats _sig with invalid value as malformed, not no-signature", () => {
+	const projectKey = deriveProjectKey({ cwd: "/test-project" }, getOrCreateMasterKey());
+	const record = { status: "done" };
+
+	// 完全没有 _sig → no-signature(旧版,可补签)。
+	assert.equal((verifyRecord(projectKey, record) as { reason: string }).reason, "no-signature");
+
+	// _sig 字段存在但值非法 → malformed(不可自动补签洗白)。
+	for (const invalidSig of [null, 0, "", false, "not-an-object"]) {
+		const withBadSig = { ...record, _sig: invalidSig };
+		const check = verifyRecord(projectKey, withBadSig);
+		assert.equal(check.verified, false);
+		assert.equal((check as { reason: string }).reason, "malformed",
+			`_sig: ${JSON.stringify(invalidSig)} should be malformed, not no-signature`);
+	}
+});

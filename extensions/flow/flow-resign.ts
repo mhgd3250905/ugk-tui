@@ -53,8 +53,14 @@ export function resignTaskRecords(cwd: string, taskId: string): ResignResult {
 /**
  * 扫描项目所有判定记录并用当前 projectKey 重签。
  * 写 reset log(留痕)。调用方负责在合适时机调用(手动命令 / 启动期)。
+ *
+ * statusStrategy:
+ * - "unsigned-only"(默认,autoMigrate 用):status 只补 no-signature 的,mismatch/
+ *   malformed 跳过(不洗白篡改)。
+ * - "all"(reset-signing 用,用户显式确认"信任所有内容"):status 无条件重签。
+ *   reset-signing 是密钥丢失恢复场景,用户已确认信任当前内容,可以重签 mismatch。
  */
-export function resignAllRecords(cwd: string, reason: string): ResignResult {
+export function resignAllRecords(cwd: string, reason: string, statusStrategy: "unsigned-only" | "all" = "unsigned-only"): ResignResult {
 	const result: ResignResult = { tasks: 0, reviews: 0, validations: 0, statuses: 0, skipped: 0 };
 	const projectKey = getProjectKey(cwd);
 	const tasksDir = path.join(cwd, ".flow", "tasks");
@@ -65,7 +71,7 @@ export function resignAllRecords(cwd: string, reason: string): ResignResult {
 
 	for (const taskEntry of readdirSync(tasksDir, { withFileTypes: true })) {
 		if (!taskEntry.isDirectory()) continue;
-		resignOneTask(projectKey, path.join(tasksDir, taskEntry.name), result);
+		resignOneTask(projectKey, path.join(tasksDir, taskEntry.name), result, statusStrategy);
 	}
 
 	writeResetLog(cwd, reason, result);
@@ -187,7 +193,8 @@ export function autoMigrateIfNeeded(cwd: string): ResignResult | undefined {
 }
 
 /**
- * 扫描所有 run 的 status.json,只重签**无签名或签名不符**的(已签的跳过,不重复写)。
+ * 扫描所有 run 的 status.json,只重签**完全没有 _sig 字段**的旧版记录(已签的、
+ * mismatch 的、malformed 的都跳过,不重复写也不洗白)。
  *
  * 升级兼容:PR #9 之前 status.json 从不签名,PR #9 引入签名后,历史 run 的 unsigned
  * status.json 会在窗口外被 readDriverStatus 拒绝,导致 run 从菜单/review 入口消失。

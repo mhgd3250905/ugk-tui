@@ -824,7 +824,7 @@ export function registerFlow(pi: ExtensionAPI): void {
 					ctx.ui.notify("Flow reset-signing cancelled.", "info");
 					return;
 				}
-				const result = resignAllRecords(getCwd(ctx), "manual /flow reset-signing");
+				const result = resignAllRecords(getCwd(ctx), "manual /flow reset-signing", "all");
 				closeMigrationWindow(getCwd(ctx));
 				ctx.ui.notify(
 					`Flow records re-signed: ${result.tasks} tasks, ${result.reviews} reviews, ${result.validations} validations, ${result.statuses} statuses (${result.skipped} skipped).`,

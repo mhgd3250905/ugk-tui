@@ -26,6 +26,7 @@ import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
 import registerFlow from "./flow/index.ts";
+import registerJudge from "./judge/judge.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
@@ -92,6 +93,9 @@ export default function (pi: ExtensionAPI) {
 
 	// 1.3b.1) flow:Task workflow command(/flow 队列 + hidden context 注入)
 	registerFlow(pi);
+
+	// 1.3b.2) judge:需求对齐骨架(/judge 只读澄清 + driver stub)
+	registerJudge(pi);
 
 	// 1.3c) chrome-cdp:受保护的本地登录态 Chrome 控制器(/cdp + chrome_cdp tool)
 	registerChromeCdp(pi);

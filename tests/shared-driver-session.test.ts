@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import {
 	createDriverSession,
 	createFlowDriverSession,
 	type DriverSessionFactory,
 	type DriverSessionOptions,
+	createFlowDriverResourceLoaderOptions,
 } from "../extensions/shared/driver-session.ts";
 
 function createOptions(): DriverSessionOptions {
@@ -49,4 +51,22 @@ test("shared driver session exposes the base creator and Flow compatibility alia
 	assert.deepEqual(driver.getWidgetLines(), ["Shared driver task-a/run-001", "hello"]);
 	assert.equal(driver.sessionFile, "driver-session.jsonl");
 	assert.equal(driver.visibleSession, sessionHandle);
+});
+
+test("driver resource loader can inject an explicit agent definition", () => {
+	const agentDefinitionPath = path.resolve("agents/driver.md");
+	const options = createFlowDriverResourceLoaderOptions({
+		cwd: "E:/workspace",
+		agentDir: "C:/Users/demo/.pi/agent",
+		agentDefinitionPath,
+	});
+
+	assert.equal(typeof options.agentsFilesOverride, "function");
+	const overridden = options.agentsFilesOverride!({
+		agentsFiles: [{ path: "E:/workspace/AGENTS.md", content: "project context" }],
+	});
+
+	assert.equal(overridden.agentsFiles.at(-1)?.path, agentDefinitionPath);
+	assert.match(overridden.agentsFiles.at(-1)?.content ?? "", /^---\nname: driver/m);
+	assert.match(overridden.agentsFiles.at(-1)?.content ?? "", /model: deepseek-v4-pro/);
 });

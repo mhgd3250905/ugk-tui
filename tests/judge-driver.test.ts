@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import { createJudgeDriver } from "../extensions/judge/judge-driver.ts";
 import type { DriverSessionFactory } from "../extensions/shared/driver-session.ts";
 
@@ -141,6 +142,33 @@ test("requires the delegated driver environment to expose judge_complete", async
 		/Missing required capabilities: judge_complete/,
 	);
 	assert.deepEqual(expectedToolNames, ["judge_complete"]);
+});
+
+test("delegated Judge driver uses the isolated driver agent definition", async () => {
+	let agentDefinitionPath: string | undefined;
+	const sessionFactory: DriverSessionFactory = async (options) => {
+		agentDefinitionPath = options.agentDefinitionPath;
+		return {
+			session: {
+				isStreaming: false,
+				getAllTools() {
+					return [{ name: "judge_complete" }];
+				},
+				subscribe() {
+					return () => {};
+				},
+				async prompt() {},
+				async steer() {},
+				async followUp() {},
+				dispose() {},
+			},
+		};
+	};
+
+	await createJudgeDriver(createOptions({ sessionFactory }));
+
+	assert.equal(path.basename(agentDefinitionPath ?? ""), "driver.md");
+	assert.match(agentDefinitionPath ?? "", /agents[/\\]driver\.md$/);
 });
 
 test("wakes up when any driver tool execution ends with an error", async () => {

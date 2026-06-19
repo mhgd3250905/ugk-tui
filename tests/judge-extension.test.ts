@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import {
 	registerJudge,
 	setJudgeDecisionSessionFactoryForTests,
@@ -284,13 +285,15 @@ test("default Judge wakeup path prompts a Judge decision session and parses pass
 	const { pi, commands, handlers } = makePi();
 	const { ctx } = makeCtx();
 	const prompts: string[] = [];
+	let agentDefinitionPath: string | undefined;
 	const verdicts = [
 		{ action: "pass", keepWatching: true },
 		{ action: "steer", direction: "改用只读检查。", keepWatching: true },
 		{ action: "abort", reason: "违反硬约束" },
 	];
 	const wakeupResults: unknown[] = [];
-	setJudgeDecisionSessionFactoryForTests(async () => {
+	setJudgeDecisionSessionFactoryForTests(async (options: any) => {
+		agentDefinitionPath = options.agentDefinitionPath;
 		let listener: ((event: any) => void) | undefined;
 		return {
 			session: {
@@ -342,6 +345,8 @@ test("default Judge wakeup path prompts a Judge decision session and parses pass
 	}
 
 	assert.equal(prompts.length, 3);
+	assert.equal(path.basename(agentDefinitionPath ?? ""), "judge.md");
+	assert.match(agentDefinitionPath ?? "", /agents[/\\]judge\.md$/);
 	assert.ok(prompts.every((prompt) => /DriverSummary/.test(prompt)));
 	assert.match(prompts[0], /完成 Judge 阶段 2/);
 	assert.deepEqual(wakeupResults, [

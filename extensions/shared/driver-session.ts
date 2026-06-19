@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -20,6 +21,7 @@ export interface DriverSessionOptions {
 	onTranscriptUpdate?: () => void;
 	uiContext?: ExtensionUIContext;
 	extensionMode?: ExtensionMode;
+	agentDefinitionPath?: string;
 }
 
 export type FlowDriverSessionOptions = DriverSessionOptions;
@@ -47,16 +49,31 @@ export interface DriverSessionLike {
 
 export type DriverSessionFactory = (options: DriverSessionOptions) => Promise<{ session: DriverSessionLike }>;
 
-export function createFlowDriverResourceLoaderOptions(options: { cwd: string; agentDir: string }): {
+export function createFlowDriverResourceLoaderOptions(options: { cwd: string; agentDir: string; agentDefinitionPath?: string }): {
 	cwd: string;
 	agentDir: string;
 	additionalExtensionPaths: string[];
+	agentsFilesOverride?: (base: { agentsFiles: Array<{ path: string; content: string }> }) => {
+		agentsFiles: Array<{ path: string; content: string }>;
+	};
 } {
 	const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+	const agentDefinitionPath = options.agentDefinitionPath ? path.resolve(options.agentDefinitionPath) : undefined;
 	return {
 		cwd: options.cwd,
 		agentDir: options.agentDir,
 		additionalExtensionPaths: [path.join(extensionRoot, "index.ts")],
+		agentsFilesOverride: agentDefinitionPath
+			? (base) => ({
+				agentsFiles: [
+					...base.agentsFiles,
+					{
+						path: agentDefinitionPath,
+						content: readFileSync(agentDefinitionPath, "utf8"),
+					},
+				],
+			})
+			: undefined,
 	};
 }
 
@@ -157,6 +174,7 @@ export async function defaultDriverSessionFactory(
 	const resourceLoader = new DefaultResourceLoader(createFlowDriverResourceLoaderOptions({
 		cwd: options.cwd,
 		agentDir,
+		agentDefinitionPath: options.agentDefinitionPath,
 	}));
 	await resourceLoader.reload();
 

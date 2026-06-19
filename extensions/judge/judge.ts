@@ -8,6 +8,7 @@ import {
 	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	abortJudge,
 	completeJudge,
@@ -51,6 +52,13 @@ import registerQuestionnaire from "./questionnaire.ts";
 const JUDGE_ALIGNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const JUDGE_MENU_OPTIONS = ["委派 driver 执行", "继续澄清", "改需求"];
 const JUDGE_PHASES = new Set(["aligning", "driving", "delivering", "aborted", "done"]);
+export const JUDGE_AGENT_DEFINITION_PATH = path.resolve(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"..",
+	"..",
+	"agents",
+	"judge.md",
+);
 
 let judgeDriverFactoryForTests:
 	| ((options: JudgeDriverOptions) => Promise<JudgeDriverHandle>)
@@ -132,6 +140,7 @@ function createJudgeVerdictProviderHandle(options: {
 				label: "Judge decider",
 				uiContext: options.uiContext,
 				extensionMode: options.extensionMode,
+				agentDefinitionPath: JUDGE_AGENT_DEFINITION_PATH,
 			},
 			judgeDecisionSessionFactoryForTests ?? defaultDriverSessionFactory,
 		);

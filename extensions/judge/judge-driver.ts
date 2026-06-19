@@ -1,4 +1,6 @@
 import type { ExtensionMode, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	createDriverSession,
 	defaultDriverSessionFactory,
@@ -68,6 +70,13 @@ export interface JudgeDriverHandle {
 }
 
 export const JUDGE_WAKEUP_TOOL_NAMES = new Set(["chrome_cdp", "bash", "write", "edit"]);
+export const DRIVER_AGENT_DEFINITION_PATH = path.resolve(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"..",
+	"..",
+	"agents",
+	"driver.md",
+);
 
 function cloneSummary(summary: DriverSummary): DriverSummary {
 	return {
@@ -286,6 +295,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 			expectedToolNames: ["judge_complete"],
 			uiContext: opts.uiContext,
 			extensionMode: opts.extensionMode,
+			agentDefinitionPath: DRIVER_AGENT_DEFINITION_PATH,
 		},
 		factory,
 	);

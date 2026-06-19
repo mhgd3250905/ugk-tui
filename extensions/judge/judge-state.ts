@@ -23,6 +23,7 @@ export interface DriverSummary {
 	artifacts: DriverArtifact[];
 	lastError?: string;
 	turnCount: number;
+	steerCount: number;
 	completed: boolean;
 	aborted?: boolean;
 	abortReason?: string;
@@ -71,6 +72,21 @@ export function startDriving(state: JudgeState): JudgeState {
 		...state,
 		phase: "driving",
 		keepWatching: true,
+	};
+}
+
+export function recordJudgeSteer(state: JudgeState): JudgeState {
+	return {
+		...state,
+		steerCount: state.steerCount + 1,
+	};
+}
+
+export function recordJudgeEscalation(state: JudgeState, summary: string): JudgeState {
+	return {
+		...state,
+		summary,
+		keepWatching: false,
 	};
 }
 

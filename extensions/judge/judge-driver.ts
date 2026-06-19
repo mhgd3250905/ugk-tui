@@ -48,8 +48,17 @@ export interface JudgeDriverOptions {
 	runId?: string;
 	sessionFactory?: DriverSessionFactory;
 	onWakeup?: (context: JudgeWakeupContext) => Promise<JudgeVerdict> | JudgeVerdict;
+	maxSteer?: number;
+	onEscalate?: (context: JudgeEscalationContext) => Promise<void> | void;
 	uiContext?: ExtensionUIContext;
 	extensionMode?: ExtensionMode;
+}
+
+export interface JudgeEscalationContext {
+	reason: string;
+	summary: DriverSummary;
+	tail: TranscriptTail;
+	transcript: string;
 }
 
 export interface JudgeDriverHandle {
@@ -66,6 +75,7 @@ function cloneSummary(summary: DriverSummary): DriverSummary {
 		artifacts: summary.artifacts.map((artifact) => ({ ...artifact })),
 		lastError: summary.lastError,
 		turnCount: summary.turnCount,
+		steerCount: summary.steerCount,
 		completed: summary.completed,
 		aborted: summary.aborted,
 		abortReason: summary.abortReason,
@@ -145,8 +155,10 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 		pathsTried: [],
 		artifacts: [],
 		turnCount: 0,
+		steerCount: 0,
 		completed: false,
 	};
+	const maxSteer = opts.maxSteer ?? 5;
 	let driver: DriverSession | undefined;
 	let disposed = false;
 	let watching = true;
@@ -178,6 +190,18 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 						return;
 					}
 					if (verdict.action === "steer") {
+						summary.steerCount += 1;
+						if (summary.steerCount >= maxSteer) {
+							watching = false;
+							const escalationSummary = cloneSummary(summary);
+							await opts.onEscalate?.({
+								reason: `maxSteer reached (${summary.steerCount}/${maxSteer})`,
+								summary: escalationSummary,
+								tail,
+								transcript: driver?.getTranscriptText() ?? "",
+							});
+							return;
+						}
 						watching = verdict.keepWatching;
 						await driver?.sendUserInput(verdict.direction);
 						return;

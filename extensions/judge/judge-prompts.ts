@@ -38,7 +38,8 @@ Return parseable JSON only:
 - {"action":"steer","direction":"specific instruction for the driver","keepWatching":true}
 - {"action":"abort","reason":"why the driver must stop"}
 
-Use pass for acceptable progress, steer for correctable drift, and abort for hard-constraint violations or impossible progress.`;
+Use pass for acceptable progress, steer for correctable drift, and abort for hard-constraint violations or impossible progress.
+Return abort when the driver repeats the same class of failure, violates hard constraints, or cannot satisfy the Spec with any credible next step.`;
 
 export function buildDecidePrompt(spec: string, summary: unknown, tail: unknown = { toolCalls: [], assistantOutput: "" }): string {
 	return [

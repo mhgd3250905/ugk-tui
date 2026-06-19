@@ -9,8 +9,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 import {
+	abortJudge,
 	createJudgeState,
 	enterAligning,
+	recordJudgeEscalation,
+	recordJudgeSteer,
 	setRequirementsSpec,
 	startDriving,
 	type JudgeState,
@@ -26,6 +29,7 @@ import {
 } from "./judge-utils.ts";
 import {
 	createJudgeDriver,
+	type JudgeEscalationContext,
 	type JudgeDriverHandle,
 	type JudgeDriverOptions,
 	type JudgeWakeupContext,
@@ -77,6 +81,23 @@ function sliceNewTranscript(before: string, after: string): string {
 	return after.startsWith(before) ? after.slice(before.length) : after;
 }
 
+function formatJudgeEscalation(context: JudgeEscalationContext): string {
+	return [
+		"[JUDGE ESCALATION]",
+		"",
+		`Reason: ${context.reason}`,
+		"",
+		"DriverSummary:",
+		JSON.stringify(context.summary, null, "\t"),
+		"",
+		"TranscriptTail:",
+		JSON.stringify(context.tail, null, "\t"),
+		"",
+		"Transcript:",
+		context.transcript || "(empty)",
+	].join("\n");
+}
+
 function createJudgeVerdictProviderHandle(options: {
 	cwd: string;
 	runId: string;
@@ -126,16 +147,30 @@ function createJudgeVerdictProviderHandle(options: {
 	};
 }
 
-function createJudgeWakeupHandler(specText: string, provider: JudgeVerdictProvider): JudgeDriverOptions["onWakeup"] {
+function createJudgeWakeupHandler(
+	specText: string,
+	provider: JudgeVerdictProvider,
+	hooks: {
+		onSteer?: () => void;
+		onAbort?: (reason: string) => void;
+	} = {},
+): JudgeDriverOptions["onWakeup"] {
 	return async (context) => {
 		const summary = context.summary;
 		const decidePrompt = context.decidePrompt || buildDecidePrompt(specText, summary, context.tail);
-		return provider({
+		const verdict = await provider({
 			...context,
 			spec: specText,
 			summary,
 			decidePrompt,
 		});
+		if (verdict.action === "steer") {
+			hooks.onSteer?.();
+		}
+		if (verdict.action === "abort") {
+			hooks.onAbort?.(verdict.reason);
+		}
+		return verdict;
 	};
 }
 
@@ -332,7 +367,32 @@ export function registerJudge(pi: ExtensionAPI): void {
 				runId,
 				spec: specText,
 				initialPrompt,
-				onWakeup: createJudgeWakeupHandler(specText, activeJudgeVerdictProvider.decide),
+				onWakeup: createJudgeWakeupHandler(specText, activeJudgeVerdictProvider.decide, {
+					onSteer() {
+						state = recordJudgeSteer(state);
+						persistState(pi, state);
+					},
+					onAbort(reason) {
+						state = abortJudge(state);
+						persistState(pi, state);
+						ctx.ui.notify(`Judge aborted driver: ${reason}`, "error");
+					},
+				}),
+				maxSteer: state.maxSteer,
+				onEscalate: async (context) => {
+					const escalationSummary = formatJudgeEscalation(context);
+					state = recordJudgeEscalation(state, escalationSummary);
+					persistState(pi, state);
+					pi.sendMessage(
+						{
+							customType: "judge-escalation",
+							content: escalationSummary,
+							display: true,
+						},
+						{ triggerTurn: false },
+					);
+					ctx.ui.notify(`Judge needs user intervention: ${context.reason}`, "warning");
+				},
 				uiContext: ctx.ui,
 				extensionMode: ctx.mode,
 			});

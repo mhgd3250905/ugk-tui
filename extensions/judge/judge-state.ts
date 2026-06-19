@@ -6,6 +6,15 @@ export interface RequirementsSpec {
 	context: string;
 }
 
+export interface DriverSummary {
+	pathsTried: string[];
+	lastError?: string;
+	turnCount: number;
+	completed: boolean;
+	aborted?: boolean;
+	abortReason?: string;
+}
+
 export type JudgePhase = "aligning" | "driving" | "delivering" | "aborted" | "done";
 
 export interface JudgeState {

@@ -1,6 +1,11 @@
 import type { RequirementsSpec } from "./judge-state.ts";
 export { isSafeCommand } from "../plan-mode-utils.ts";
 
+export type JudgeVerdict =
+	| { action: "pass"; keepWatching: boolean }
+	| { action: "steer"; direction: string; keepWatching: boolean }
+	| { action: "abort"; reason: string };
+
 function isStringArray(value: unknown): value is string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
@@ -53,4 +58,52 @@ export function extractRequirementsSpec(text: string): RequirementsSpec | undefi
 
 export function formatRequirementsSpec(spec: RequirementsSpec): string {
 	return JSON.stringify(spec, null, "\t");
+}
+
+function normalizeVerdict(value: unknown): JudgeVerdict | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const record = value as Record<string, unknown>;
+	if (record.action === "pass" && typeof record.keepWatching === "boolean") {
+		return { action: "pass", keepWatching: record.keepWatching };
+	}
+	if (
+		record.action === "steer" &&
+		typeof record.direction === "string" &&
+		record.direction.trim().length > 0 &&
+		typeof record.keepWatching === "boolean"
+	) {
+		return { action: "steer", direction: record.direction.trim(), keepWatching: record.keepWatching };
+	}
+	if (record.action === "abort" && typeof record.reason === "string" && record.reason.trim().length > 0) {
+		return { action: "abort", reason: record.reason.trim() };
+	}
+	return undefined;
+}
+
+function parseVerdictCandidate(candidate: string): JudgeVerdict | undefined {
+	try {
+		return normalizeVerdict(JSON.parse(candidate));
+	} catch {
+		return undefined;
+	}
+}
+
+export function parseJudgeVerdict(text: string): JudgeVerdict | undefined {
+	const fencedPattern = /```(?:json)?\s*([\s\S]*?)```/gi;
+	for (const match of text.matchAll(fencedPattern)) {
+		const verdict = parseVerdictCandidate(match[1].trim());
+		if (verdict) return verdict;
+	}
+
+	const trimmed = text.trim();
+	const direct = parseVerdictCandidate(trimmed);
+	if (direct) return direct;
+
+	const firstBrace = trimmed.indexOf("{");
+	const lastBrace = trimmed.lastIndexOf("}");
+	if (firstBrace >= 0 && lastBrace > firstBrace) {
+		return parseVerdictCandidate(trimmed.slice(firstBrace, lastBrace + 1));
+	}
+
+	return undefined;
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractRequirementsSpec, isSafeCommand } from "../extensions/judge/judge-utils.ts";
+import { extractRequirementsSpec, isSafeCommand, parseJudgeVerdict } from "../extensions/judge/judge-utils.ts";
 
 test("extractRequirementsSpec parses fenced JSON specs", () => {
 	const spec = extractRequirementsSpec(`
@@ -54,4 +54,27 @@ test("isSafeCommand is exported for Judge and blocks non-readonly bash commands"
 	assert.equal(isSafeCommand("git status --short"), true);
 	assert.equal(isSafeCommand("npm install"), false);
 	assert.equal(isSafeCommand("echo hacked > output.txt"), false);
+});
+
+test("parseJudgeVerdict parses pass, steer, and abort verdict JSON", () => {
+	assert.deepEqual(parseJudgeVerdict(`{"action":"pass","keepWatching":true}`), {
+		action: "pass",
+		keepWatching: true,
+	});
+	assert.deepEqual(parseJudgeVerdict("```json\n{\"action\":\"steer\",\"direction\":\"改用只读检查\",\"keepWatching\":false}\n```"), {
+		action: "steer",
+		direction: "改用只读检查",
+		keepWatching: false,
+	});
+	assert.deepEqual(parseJudgeVerdict(`{"action":"abort","reason":"违反硬约束"}`), {
+		action: "abort",
+		reason: "违反硬约束",
+	});
+});
+
+test("parseJudgeVerdict rejects malformed verdicts", () => {
+	assert.equal(parseJudgeVerdict("{ nope"), undefined);
+	assert.equal(parseJudgeVerdict(`{"action":"pass"}`), undefined);
+	assert.equal(parseJudgeVerdict(`{"action":"steer","keepWatching":true}`), undefined);
+	assert.equal(parseJudgeVerdict(`{"action":"abort"}`), undefined);
 });

@@ -22,3 +22,25 @@ When requirements are aligned, your final assistant message must include parseab
 Required fields: goal, hardConstraints, acceptance.
 Optional fields: forbidden, context.
 Do not do implementation work in this phase.`;
+
+export const DECIDE_PROMPT = `[JUDGE DECIDE MODE]
+You are Judge observing a driver agent.
+
+Return parseable JSON only:
+- {"action":"pass","keepWatching":true}
+- {"action":"steer","direction":"specific instruction for the driver","keepWatching":true}
+- {"action":"abort","reason":"why the driver must stop"}
+
+Use pass for acceptable progress, steer for correctable drift, and abort for hard-constraint violations.`;
+
+export function buildDecidePrompt(spec: string, summary: unknown): string {
+	return [
+		DECIDE_PROMPT,
+		"",
+		"RequirementsSpec:",
+		spec,
+		"",
+		"DriverSummary:",
+		JSON.stringify(summary, null, "\t"),
+	].join("\n");
+}

@@ -1,6 +1,13 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type, type AssistantMessage, type TextContent } from "@earendil-works/pi-ai";
+import {
+	defineTool,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type ExtensionMode,
+	type ExtensionUIContext,
+} from "@earendil-works/pi-coding-agent";
+import path from "node:path";
 import {
 	createJudgeState,
 	enterAligning,
@@ -9,13 +16,128 @@ import {
 	type JudgeState,
 	type RequirementsSpec,
 } from "./judge-state.ts";
-import { ALIGN_PROMPT } from "./judge-prompts.ts";
-import { extractRequirementsSpec, formatRequirementsSpec, isSafeCommand } from "./judge-utils.ts";
+import { ALIGN_PROMPT, buildDecidePrompt } from "./judge-prompts.ts";
+import {
+	extractRequirementsSpec,
+	formatRequirementsSpec,
+	isSafeCommand,
+	parseJudgeVerdict,
+	type JudgeVerdict,
+} from "./judge-utils.ts";
+import {
+	createJudgeDriver,
+	type JudgeDriverHandle,
+	type JudgeDriverOptions,
+	type JudgeWakeupContext,
+} from "./judge-driver.ts";
+import {
+	createDriverSession,
+	defaultDriverSessionFactory,
+	type DriverSession,
+	type DriverSessionFactory,
+} from "../shared/driver-session.ts";
 import registerQuestionnaire from "./questionnaire.ts";
 
 const JUDGE_ALIGNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const JUDGE_MENU_OPTIONS = ["委派 driver 执行", "继续澄清", "改需求"];
 const JUDGE_PHASES = new Set(["aligning", "driving", "delivering", "aborted", "done"]);
+
+let judgeDriverFactoryForTests:
+	| ((options: JudgeDriverOptions) => Promise<JudgeDriverHandle>)
+	| undefined;
+type JudgeVerdictProviderContext = JudgeWakeupContext & {
+	spec: string;
+};
+type JudgeVerdictProvider = (context: JudgeVerdictProviderContext) => Promise<JudgeVerdict> | JudgeVerdict;
+interface JudgeVerdictProviderHandle {
+	decide: JudgeVerdictProvider;
+	dispose(): void;
+}
+let judgeVerdictProviderForTests: JudgeVerdictProvider | undefined;
+let judgeDecisionSessionFactoryForTests: DriverSessionFactory | undefined;
+
+export function setJudgeDriverFactoryForTests(factory: typeof judgeDriverFactoryForTests): void {
+	judgeDriverFactoryForTests = factory;
+}
+
+export function setJudgeVerdictProviderForTests(provider: typeof judgeVerdictProviderForTests): void {
+	judgeVerdictProviderForTests = provider;
+}
+
+export function setJudgeDecisionSessionFactoryForTests(factory: typeof judgeDecisionSessionFactoryForTests): void {
+	judgeDecisionSessionFactoryForTests = factory;
+}
+
+function getCwd(ctx: ExtensionContext): string {
+	const cwd = (ctx as { cwd?: unknown }).cwd;
+	return typeof cwd === "string" ? cwd : process.cwd();
+}
+
+function sliceNewTranscript(before: string, after: string): string {
+	return after.startsWith(before) ? after.slice(before.length) : after;
+}
+
+function createJudgeVerdictProviderHandle(options: {
+	cwd: string;
+	runId: string;
+	runDir: string;
+	specText: string;
+	uiContext: ExtensionUIContext;
+	extensionMode: ExtensionMode;
+}): JudgeVerdictProviderHandle {
+	let session: DriverSession | undefined;
+
+	async function getSession(): Promise<DriverSession> {
+		if (session) return session;
+		session = await createDriverSession(
+			{
+				cwd: options.cwd,
+				taskId: "judge-decider",
+				runId: `${options.runId}-judge`,
+				runDir: path.join(options.runDir, "judge"),
+				initialPrompt: "",
+				label: "Judge decider",
+				uiContext: options.uiContext,
+				extensionMode: options.extensionMode,
+			},
+			judgeDecisionSessionFactoryForTests ?? defaultDriverSessionFactory,
+		);
+		return session;
+	}
+
+	return {
+		async decide(context) {
+			const judgeSession = await getSession();
+			const decidePrompt = context.decidePrompt || buildDecidePrompt(options.specText, context.summary);
+			const before = judgeSession.getTranscriptText();
+			await judgeSession.sendUserInput(decidePrompt);
+			const after = judgeSession.getTranscriptText();
+			const currentTurn = sliceNewTranscript(before, after);
+			const verdict = parseJudgeVerdict(currentTurn);
+			return verdict ?? {
+				action: "abort",
+				reason: "Judge verdict parse failed",
+			};
+		},
+		dispose() {
+			session?.dispose();
+			session = undefined;
+		},
+	};
+}
+
+function createJudgeWakeupHandler(specText: string, provider: JudgeVerdictProvider): JudgeDriverOptions["onWakeup"] {
+	return async (context) => {
+		const summary = context.summary;
+		const decidePrompt = context.decidePrompt || buildDecidePrompt(specText, summary);
+		return provider({
+			...context,
+			spec: specText,
+			summary,
+			decidePrompt,
+		});
+	};
+}
 
 function isAssistantMessage(message: AgentMessage): message is AssistantMessage {
 	return message.role === "assistant" && Array.isArray(message.content);
@@ -37,18 +159,6 @@ function persistState(pi: ExtensionAPI, state: JudgeState): void {
 		maxSteer: state.maxSteer,
 		keepWatching: state.keepWatching,
 	});
-}
-
-function notifySpecStub(pi: ExtensionAPI, ctx: ExtensionContext, spec: RequirementsSpec): void {
-	pi.sendMessage(
-		{
-			customType: "judge-driver-stub",
-			content: `[JUDGE DRIVER STUB]\n\nDriver delegation is intentionally stubbed in phase 2. No driver session was started.\n\nSpec:\n\n\`\`\`json\n${formatRequirementsSpec(spec)}\n\`\`\``,
-			display: true,
-		},
-		{ triggerTurn: false },
-	);
-	ctx.ui.notify("Judge driver delegation stubbed. Spec is ready for phase 3.", "info");
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -88,10 +198,37 @@ function restoreJudgeState(data: unknown): JudgeState | undefined {
 	};
 }
 
+const judgeCompleteTool = defineTool({
+	name: "judge_complete",
+	label: "Judge Complete",
+	description: "Signal to the Judge that the driver believes the delegated task is complete.",
+	parameters: Type.Object({
+		summary: Type.Optional(Type.String({ description: "Short completion summary from the driver" })),
+	}),
+
+	async execute(_toolCallId, params) {
+		const summary = typeof params.summary === "string" ? params.summary : "";
+		return {
+			content: [
+				{
+					type: "text",
+					text: summary
+						? `judge_complete received. Summary: ${summary}`
+						: "judge_complete received.",
+				},
+			],
+			details: { completed: true, summary },
+		};
+	},
+});
+
 export function registerJudge(pi: ExtensionAPI): void {
 	let state = createJudgeState();
+	let activeDriver: JudgeDriverHandle | undefined;
+	let activeJudgeVerdictProvider: JudgeVerdictProviderHandle | undefined;
 
 	registerQuestionnaire(pi);
+	pi.registerTool(judgeCompleteTool);
 
 	pi.registerCommand("judge", {
 		description: "Enter Judge aligning mode",
@@ -140,6 +277,13 @@ export function registerJudge(pi: ExtensionAPI): void {
 		}
 	});
 
+	pi.on("session_shutdown", async () => {
+		activeDriver?.dispose();
+		activeDriver = undefined;
+		activeJudgeVerdictProvider?.dispose();
+		activeJudgeVerdictProvider = undefined;
+	});
+
 	pi.on("agent_end", async (event, ctx) => {
 		if (state.phase !== "aligning" || !ctx.hasUI) return;
 
@@ -159,7 +303,41 @@ export function registerJudge(pi: ExtensionAPI): void {
 		if (choice === "委派 driver 执行") {
 			state = startDriving(state);
 			persistState(pi, state);
-			notifySpecStub(pi, ctx, spec);
+			activeDriver?.dispose();
+			const runId = `judge-${Date.now()}`;
+			const specText = formatRequirementsSpec(spec);
+			const initialPrompt = [
+				"[JUDGE DRIVER TASK]",
+				"Execute the following RequirementsSpec. When complete, call the judge_complete tool.",
+				"",
+				specText,
+			].join("\n");
+			const createDriver = judgeDriverFactoryForTests ?? createJudgeDriver;
+			const cwd = getCwd(ctx);
+			const runDir = path.join(cwd, ".judge", runId);
+			activeJudgeVerdictProvider?.dispose();
+			activeJudgeVerdictProvider = judgeVerdictProviderForTests
+				? { decide: judgeVerdictProviderForTests, dispose() {} }
+				: createJudgeVerdictProviderHandle({
+					cwd,
+					runId,
+					runDir,
+					specText,
+					uiContext: ctx.ui,
+					extensionMode: ctx.mode,
+				});
+			activeDriver = await createDriver({
+				cwd,
+				runDir,
+				runId,
+				spec: specText,
+				initialPrompt,
+				onWakeup: createJudgeWakeupHandler(specText, activeJudgeVerdictProvider.decide),
+				uiContext: ctx.ui,
+				extensionMode: ctx.mode,
+			});
+			await activeDriver.start();
+			ctx.ui.notify("Judge driver started.", "info");
 			return;
 		}
 

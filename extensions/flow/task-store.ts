@@ -153,6 +153,37 @@ export function writeFlowTask(cwd: string, taskId: string, task: Record<string, 
 	closeMigrationWindow(cwd);
 }
 
+/**
+ * 把磁盘上已有的 task.json 重签(原地)。
+ *
+ * 用途:`/flow task create` 是 prompt 驱动的——agent 按 prompts.ts 指示**手写**
+ * task.json(它拿不到签名密钥,所以无 `_sig`)。runtime 在 agent_end 检测到新 task
+ * 且资产校验通过后,调本函数把 agent 写的字段原样重发为签名版。这样:
+ *  - 新建的 draft 立刻带合法签名,后续严格验签的读取路径(readTaskMetadata/
+ *    readFlowTask)不会误报"记录不可用";
+ *  - 首次签名即关闭迁移窗口(writeFlowTask 内部完成);
+ *  - agent 面向的契约不变——它照样手写字段,runtime 透明签名。
+ *
+ * 读原始磁盘 JSON(不走 readFlowTask):draft 是 agent 刚写的,我们要的是它写
+ * 的原始字段,不受签名状态影响。无 task.json 或字段非法时返回 false(调用方按
+ * "task 没建好"处理,会落到 contract-repair 路径)。
+ */
+export function signFlowTaskOnDisk(cwd: string, taskId: string): boolean {
+	const taskDir = resolveFlowTaskDir(cwd, taskId);
+	const taskJsonPath = path.join(taskDir, "task.json");
+	if (!existsSync(taskJsonPath)) {
+		return false;
+	}
+	const parsed = readJsonStrict(taskJsonPath);
+	if (!isRecord(parsed)) {
+		return false;
+	}
+	// 保留 agent 写的所有业务字段,只剥离旧签名(若有)和 runtime-only 字段。
+	const { _sig: _oldSig, taskDir: _td, _signatureBroken: _broken, ...fields } = parsed;
+	writeFlowTask(cwd, taskId, fields);
+	return true;
+}
+
 export function updateFlowTaskStatus(
 	cwd: string,
 	taskId: string,

@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { registerFlow, setFlowDriverSessionFactoryForTests } from "../extensions/flow/index.ts";
 import { readDriverStatus, writeDriverStatus } from "../extensions/flow/driver-store.ts";
-import { writeFlowTask, getProjectKey } from "../extensions/flow/task-store.ts";
-import { signRecord } from "../extensions/flow/flow-signing.ts";
+import { writeFlowTask, getProjectKey, readFlowTask } from "../extensions/flow/task-store.ts";
+import { signRecord, verifyRecord } from "../extensions/flow/flow-signing.ts";
 import { acceptFlowReview } from "../extensions/flow/review-store.ts";
 
 function makePi() {
@@ -290,6 +290,49 @@ test("task create completion opens an interruptive prove gate for the new task",
 	} finally {
 		setFlowDriverSessionFactoryForTests(undefined);
 	}
+});
+
+// 回归:create 路径的签名收口。agent 按 prompt 手写 task.json(无 _sig),runtime
+// 在 agent_end 资产校验通过后必须重签——否则窗口外严格验签会把新建 draft 误判为
+// "记录不可用"。见 docs/handoff/2026-06-19-unsigned-read-paths.md 的对称缺陷。
+test("task create completion signs the agent-authored task.json so it reads as trusted", async () => {
+	// 关窗:模拟一个已签过名的 workspace(真实用户的窗口早已关闭)。
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-create-sign-"));
+	writeFlowTask(cwd, "anchor-task", { id: "anchor-task", version: 1, status: "draft" });
+	const { pi, commands, handlers } = makePi();
+	const { ctx, selections } = makeCtx(cwd);
+	registerFlow(pi as any);
+
+	await commands.get("flow").handler('task create "整理 README 要点"', ctx);
+
+	// 模拟 agent 按 prompts.ts 指示**手写**无签名 task.json(真实 create 路径,
+	// 不走 writeFlowTask——agent 拿不到密钥)。
+	const taskDir = path.join(cwd, ".flow", "tasks", "readme-essentials");
+	fs.mkdirSync(taskDir, { recursive: true });
+	fs.writeFileSync(
+		path.join(taskDir, "task.json"),
+		`${JSON.stringify({ id: "readme-essentials", version: 1, status: "draft", goal: "整理 README 要点" }, null, "\t")}\n`,
+	);
+	fs.writeFileSync(path.join(taskDir, "SKILL.md"), "# Skill\n\n## 最优路径\n\nA. Prepare\n", "utf8");
+	fs.writeFileSync(path.join(taskDir, "todo.template.md"), "# Run Todo\n", "utf8");
+	fs.writeFileSync(path.join(taskDir, "validator.md"), "# Validator\n", "utf8");
+	fs.writeFileSync(path.join(taskDir, "input.schema.json"), '{"type":"object"}\n', "utf8");
+	fs.writeFileSync(path.join(taskDir, "output.schema.json"), '{"type":"object"}\n', "utf8");
+
+	// 触发 agent_end:create-success 分支应重签。
+	for (const handler of handlers.get("agent_end") ?? []) {
+		await handler({}, ctx);
+	}
+
+	// 重签后:readFlowTask 在窗口外不再标 _signatureBroken;磁盘 JSON 带合法 _sig。
+	const task = readFlowTask(cwd, "readme-essentials");
+	assert.equal(task?._signatureBroken, undefined);
+	const onDisk = JSON.parse(fs.readFileSync(path.join(taskDir, "task.json"), "utf8"));
+	assert.equal(verifyRecord(getProjectKey(cwd), onDisk).verified, true);
+	// agent 写的业务字段被保留,没被重签覆盖丢失。
+	assert.equal(onDisk.goal, "整理 README 要点");
+	// stage gate 照常推进(证明重签没破坏正常流程)。
+	assert.ok(selections.some((s) => s.title === "Flow next step"));
 });
 
 test("task create completion repairs incomplete task assets before offering prove", async () => {

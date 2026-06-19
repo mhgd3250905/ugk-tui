@@ -47,7 +47,7 @@ import { acceptReview, rejectReview, startReview, type ReviewActionOutcome } fro
 import { isFlowReviewAccepted, readFlowReview } from "./review-store.ts";
 import { readFlowRunValidation, validateFlowRun } from "./run-validation.ts";
 import { validateFlowTaskAssets } from "./task-validation.ts";
-import { deleteFlowTask, readFlowTask, updateFlowTaskStatus } from "./task-store.ts";
+import { deleteFlowTask, readFlowTask, signFlowTaskOnDisk, updateFlowTaskStatus } from "./task-store.ts";
 import { transition } from "./task-state.ts";
 import type { FlowDriverStatus, FlowDriverSummary, FlowFocusState, FlowRequest } from "./types.ts";
 
@@ -821,6 +821,9 @@ export function registerFlow(pi: ExtensionAPI): void {
 			const validation = validateFlowTaskAssets(getCwd(ctx), repair.taskId);
 			if (validation.ok) {
 				pendingTaskAssetRepair = undefined;
+				// 修复后的 task.json 同样是 agent 手写的(无 _sig)。推进 stage 前,
+				// runtime 把它重签为可信记录——否则窗口外读取会报"记录不可用"。
+				signFlowTaskOnDisk(getCwd(ctx), repair.taskId);
 				await runStageGate(ctx, { phase: "create", taskId: repair.taskId });
 				return;
 			}
@@ -851,6 +854,10 @@ export function registerFlow(pi: ExtensionAPI): void {
 			queueTaskAssetRepair(ctx, createdTasks[0].id, validation.issues);
 			return;
 		}
+		// agent 按 prompt 手写了 task.json(无 _sig——它拿不到签名密钥)。runtime 在
+		// 资产校验通过后把它重签为可信记录:首次签名即关窗,后续严格验签的读取路径才
+		// 不会把新建 draft 误判为"记录不可用"。这是 create 路径的签名收口。
+		signFlowTaskOnDisk(getCwd(ctx), createdTasks[0].id);
 		await runStageGate(ctx, { phase: "create", taskId: createdTasks[0].id });
 	});
 

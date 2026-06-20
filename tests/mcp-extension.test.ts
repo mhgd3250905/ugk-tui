@@ -269,3 +269,39 @@ test("root extension wires MCP command, hooks, and doctor check", async () => {
 	});
 	assert.match(notifications.join("\n"), /MCP/);
 });
+
+test("/mcp reload treats command contexts with confirm UI as interactive even without hasUI", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-reload-ui-"));
+	fs.writeFileSync(
+		path.join(cwd, ".mcp.local.json"),
+		JSON.stringify({
+			mcpServers: {
+				alpha: { command: process.execPath, args: [stubServerPath] },
+			},
+		}),
+	);
+	const pi = makePi(["greet"]);
+	const notifications: string[] = [];
+	let confirmations = 0;
+
+	registerMcp(pi as any);
+	await pi.commands.get("mcp")!.handler("reload", {
+		cwd,
+		ui: {
+			notify(message: string) {
+				notifications.push(message);
+			},
+			async confirm() {
+				confirmations += 1;
+				return true;
+			},
+		},
+	});
+
+	assert.equal(confirmations, 1);
+	assert.equal(pi.registeredTools.has("alpha__echo"), true);
+	assert.match(notifications.join("\n"), /connected: 1/);
+
+	await emit(pi, "session_shutdown", { reason: "quit" }, { cwd });
+	await waitForNoProcess(/mcp-stub-server\.mjs/);
+});

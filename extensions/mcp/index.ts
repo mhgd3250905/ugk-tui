@@ -298,6 +298,13 @@ async function confirmSpawn(ctx: McpRuntimeContext, entry: McpConfigEntry): Prom
 	if (!hasInteractiveUi(ctx)) {
 		return false;
 	}
+	if (ctx.ui?.select && !ctx.ui?.confirm) {
+		const choice = await ctx.ui.select(
+			`Allow MCP server?\n\nServer "${entry.name}" from ${entry.scope} config wants to spawn:\n${entry.config.command}`,
+			["Allow", "Deny"],
+		);
+		return choice === "Allow";
+	}
 	return Boolean(
 		await ctx.ui?.confirm?.(
 			"Allow MCP server?",
@@ -331,7 +338,7 @@ function resolveCwd(ctx: McpRuntimeContext): string {
 }
 
 function hasInteractiveUi(ctx: McpRuntimeContext | undefined): boolean {
-	return Boolean(ctx?.hasUI && (ctx.ui?.confirm || ctx.ui?.select));
+	return Boolean(ctx && ctx.hasUI !== false && (ctx.ui?.confirm || ctx.ui?.select));
 }
 
 function connectionErrorMessage(error: unknown): string {

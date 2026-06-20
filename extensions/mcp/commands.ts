@@ -162,7 +162,7 @@ async function reloadMcp(
 	}
 
 	removeActiveTools(pi, staleTools);
-	return `MCP reload complete. connected: ${connections.length}, tools: ${countTools(nextServerTools)}, stale: ${state.staleServerTools.size}`;
+	return `MCP reload complete. connected: ${connections.length}, tools: ${countTools(nextServerTools)}, failed: ${countFailed(state.failedServers)}, stale: ${state.staleServerTools.size}`;
 }
 
 function serverToolsFromConnections(connections: McpConnection[]): Map<string, string[]> {
@@ -206,6 +206,16 @@ function isPermissionMode(value: string): value is McpPermissionMode {
 
 function countTools(serverTools: Map<string, string[]>): number {
 	return Array.from(serverTools.values()).reduce((sum, tools) => sum + tools.length, 0);
+}
+
+function countFailed(failedServers: McpCommandState["failedServers"]): number {
+	if (!failedServers) {
+		return 0;
+	}
+	if (failedServers instanceof Map) {
+		return failedServers.size;
+	}
+	return Object.keys(failedServers).length;
 }
 
 function notify(context: CommandContext, message: string): void {

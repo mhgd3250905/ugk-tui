@@ -54,9 +54,9 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
 	const apiSummary = deepseekStatus.replace(/^deepseek:\s*/, "DeepSeek ");
 	const rows = [
-		["🧰 Tools", "✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp"],
+		["🧰 Tools", "✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ judge"],
 		["🤖 Agents", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries"],
-		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /flow  /cdp  /ugk-ui"],
+		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /flow  /judge  /cdp  /ugk-ui"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		["🛡️ Guard", "dangerous bash gate enabled"],
 	] as const;

@@ -21,6 +21,7 @@ function makePi() {
 	const handlers = new Map<string, Function[]>();
 	const tools: any[] = [];
 	const activeTools: string[][] = [];
+	let currentActiveTools = ["read", "bash", "edit", "write", "chrome_cdp"];
 	const sentMessages: Array<{ message: any; options?: any }> = [];
 	const userMessages: string[] = [];
 	const entries: Array<{ customType: string; data: unknown }> = [];
@@ -40,7 +41,11 @@ function makePi() {
 			registerTool(tool: any) {
 				tools.push(tool);
 			},
+			getActiveTools() {
+				return [...currentActiveTools];
+			},
 			setActiveTools(names: string[]) {
+				currentActiveTools = [...names];
 				activeTools.push(names);
 			},
 			on(event: string, handler: Function) {
@@ -221,7 +226,7 @@ test("/judge toggle disables an active Judge session", async () => {
 	const injected = await handlers.get("before_agent_start")![0]({}, ctx);
 
 	assert.equal(injected, undefined);
-	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write"]);
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "chrome_cdp"]);
 	assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: undefined });
 	assert.deepEqual(widgetCalls.at(-1), { key: "judge-driver-view", content: undefined });
 	assert.match(notifications.at(-1)?.message ?? "", /Judge disabled/);

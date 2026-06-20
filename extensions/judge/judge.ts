@@ -146,7 +146,7 @@ function openPreparedLiveLogTerminal(liveLogPath: string): { ok: boolean; error?
 }
 
 /**
- * 在新终端窗口打开 live.log 的实时跟踪(tail -f / Get-Content -Wait)。
+ * 在新终端窗口打开 live.log 的实时跟踪。
  * 零污染主 agent context:过程数据只写文件、只在新终端显示。
  * 跨平台兼容(macOS / Linux / Windows):
  *   - Windows:用 cmd start 打开承载 bash tail 的可见过程终端窗口。
@@ -583,6 +583,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 	let state = createJudgeState();
 	let activeDriver: JudgeDriverHandle | undefined;
 	let activeJudgeVerdictProvider: JudgeVerdictProviderHandle | undefined;
+	let restoreToolsSnapshot: string[] | undefined;
 
 	function setJudgeStatus(ctx: ExtensionContext, label?: string): void {
 		const ui = ctx.ui as {
@@ -597,11 +598,20 @@ export function registerJudge(pi: ExtensionAPI): void {
 	}
 
 	function enableJudge(ctx: ExtensionContext): void {
+		restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
+			? pi.getActiveTools()
+			: JUDGE_NORMAL_TOOLS;
 		state = enterAligning(state);
 		pi.setActiveTools(JUDGE_ALIGNING_TOOLS);
 		ctx.ui.notify(`Judge aligning mode enabled. Tools: ${JUDGE_ALIGNING_TOOLS.join(", ")}`, "info");
 		setJudgeStatus(ctx, "⚖ judge");
 		persistState(pi, state);
+	}
+
+	function restoreActiveTools(): void {
+		if (!restoreToolsSnapshot) return;
+		pi.setActiveTools(restoreToolsSnapshot);
+		restoreToolsSnapshot = undefined;
 	}
 
 	function disableJudge(ctx: ExtensionContext): void {
@@ -611,7 +621,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 		activeJudgeVerdictProvider = undefined;
 		state = abortJudge(state);
 		persistState(pi, state);
-		pi.setActiveTools(JUDGE_NORMAL_TOOLS);
+		restoreActiveTools();
 		clearJudgeDriverWidget(ctx.ui);
 		setJudgeStatus(ctx, undefined);
 		ctx.ui.notify("Judge disabled.", "info");
@@ -675,6 +685,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 					ctx.ui.notify("Judge delivery accepted.", "info");
 					clearJudgeDriverWidget(ctx.ui);
 					setJudgeStatus(ctx, undefined);
+					restoreActiveTools();
 					return;
 				}
 				ctx.ui.notify("No pending PASS Judge delivery to accept.", "warning");
@@ -734,11 +745,20 @@ export function registerJudge(pi: ExtensionAPI): void {
 
 		state = restored;
 		if (state.phase === "aligning") {
+			restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
+				? pi.getActiveTools()
+				: JUDGE_NORMAL_TOOLS;
 			pi.setActiveTools(JUDGE_ALIGNING_TOOLS);
 			setJudgeStatus(ctx, "⚖ judge");
 		} else if (state.phase === "driving") {
+			restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
+				? pi.getActiveTools()
+				: JUDGE_NORMAL_TOOLS;
 			setJudgeStatus(ctx, "⚖ driving");
 		} else if (state.phase === "delivering") {
+			restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
+				? pi.getActiveTools()
+				: JUDGE_NORMAL_TOOLS;
 			setJudgeStatus(ctx, "⚖ delivering");
 		} else {
 			setJudgeStatus(ctx, undefined);
@@ -752,6 +772,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 		activeJudgeVerdictProvider = undefined;
 		if (ctx?.ui) clearJudgeDriverWidget(ctx.ui);
 		if (ctx?.ui) setJudgeStatus(ctx, undefined);
+		restoreActiveTools();
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -875,6 +896,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 						ctx.ui.notify(`Judge aborted driver: ${reason}`, "error");
 						clearDriverWidget();
 						setJudgeStatus(ctx, undefined);
+						restoreActiveTools();
 					},
 					async onFinalize(context) {
 						const canContinueAfterFail = state.keepWatching && context.summary.steerCount < state.maxSteer;
@@ -916,6 +938,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 								ctx.ui.notify("Judge delivery accepted.", "info");
 								clearDriverWidget();
 								setJudgeStatus(ctx, undefined);
+								restoreActiveTools();
 								return { action: "pass", keepWatching: false };
 							}
 							state = markPendingAck(enterDelivering({ ...state, summary: deliveryReport }), "pass");
@@ -930,6 +953,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 							state = enterDelivering({ ...state, summary: deliveryReport });
 							persistState(pi, state);
 							clearDriverWidget();
+							restoreActiveTools();
 							ctx.ui.notify(`Judge final delivery failed and cannot continue automatically: ${finalVerdict.reason}`, "warning");
 							return { action: "pass", keepWatching: false };
 						}
@@ -957,6 +981,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 					persistState(pi, state);
 					setJudgeStatus(ctx, undefined);
 					clearDriverWidget();
+					restoreActiveTools();
 					pi.sendMessage(
 						{
 							customType: "judge-escalation",

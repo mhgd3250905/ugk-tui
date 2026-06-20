@@ -18,6 +18,7 @@
 - `subagent` — 子代理委派(single/parallel/chain 三模式,隔离 context 只回摘要)
 - `cron` — 定时任务管理(status/list/add/remove/history,代理常驻 cron 服务)
 - `chrome_cdp` — 受保护的本地登录态 Chrome 控制(status/tabs/navigate/evaluate/screenshot,默认 ask-gated)
+- `judge` — 实时监督模式:先对齐 RequirementsSpec,再委派 Driver 执行,由 Judge 在关键节点放行/纠偏/终止/最终验收
 
 ### plan-mode 只读探索模式
 - `/plan` 切换只读模式(或 Ctrl+Alt+P)
@@ -39,6 +40,13 @@
 - 默认 `ask` 模式,控制本地登录态 Chrome 前需要说明原因并经过用户确认
 - 仅用于 SSO/cookie/CAPTCHA/私有工作区/本地 Chrome 状态,不替代普通联网检索
 - 详见 `skills/chrome-cdp-guide/SKILL.md` 与 `extensions/chrome-cdp/README.md`
+
+### Judge 实时监督模式
+- `/judge` 打开 Judge 菜单;`/judge toggle` 开关;`/judge check-bash-window` 检查 bash 新窗口 live log;`/judge ack` 接受等待确认的 PASS 交付。
+- 三阶段:aligning(用 questionnaire 对齐 Spec) → driving(Driver 执行 + Judge 监督纠偏) → delivering(最终验收和用户确认)。
+- Driver 完成必须调用 `judge_complete`;Judge 会对照 `RequirementsSpec.acceptance` 做最终 PASS/FAIL。
+- 过程日志写入 `<cwd>/.judge/<runId>/live.log`;Windows 使用 Git Bash + `cmd start "" ... tail -f`,不做 Windows Terminal 特殊适配。
+- 详见 `docs/judge.md`。旧 `docs/handoff/` 和早期设计文档只作历史材料,不得覆盖 `docs/judge.md` 的当前事实。
 
 ### ugk 品牌 UI
 - `extensions/ui-brand.ts` 通过 pi UI hook 设置 header/footer/title
@@ -80,6 +88,6 @@
 
 - **bash 工具走 Git Bash**(`D:\Git\bin\bash.exe`),命令用 Linux 语法,Windows 路径用正斜杠
 - **subagent 的 agent 定义** 在仓库 `agents/*.md`(版本管理),需复制到 `~/.pi/agent/agents/` 才生效(见 subagent-guide skill)
-- **模型**:全局默认 `deepseek-v4-pro`;预设 agent 在各自 .md 的 frontmatter 配置(scout=flash,其余=pro)
+- **模型**:全局默认 `deepseek-v4-pro`;`agents/*.md` 的 frontmatter 记录角色意图,但当前 pi 运行时不靠修改这些 frontmatter 来切换 Judge/Driver 的实际模型。需要更换模型时必须改 session 创建/模型选择代码并补测试。
 - **运行时发行策略**:pi 是 UGK 的内部 runtime,每个 UGK 版本必须固定一个明确的 pi 版本。不要让用户看到或执行 `pi update`;pi 升级只能通过 UGK 项目主动升级依赖、完成兼容验证并发布新的 UGK 版本。
 - **UGK 更新策略**:启动入口在进入 TUI 前检查 GitHub `main` 最新 commit,显示 Codex CLI 风格的 `Update now / Skip / Skip until next version` 菜单。开发仓库内更新走 `git pull --rebase origin main && npm install`,正式 npm 安装场景走 `npm install -g ugk-agent`;成功后提示重启并退出,不继续加载旧 TUI。`/update` 是会话内手动入口。

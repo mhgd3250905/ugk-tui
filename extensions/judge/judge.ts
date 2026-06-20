@@ -85,6 +85,10 @@ function quotePowerShellLiteral(value: string): string {
 	return `'${value.replace(/'/g, "''")}'`;
 }
 
+function quoteCmdArgument(value: string): string {
+	return `"${value}"`;
+}
+
 export function buildWindowsLiveLogLauncher(liveLogPath: string): { path: string; content: string } {
 	const launcherPath = path.join(path.dirname(liveLogPath), "judge-live-launcher.cmd");
 	return {
@@ -110,7 +114,7 @@ export function buildWindowsLiveLogLaunchPlan(liveLogPath: string): WindowsLiveL
 	const launcher = buildWindowsLiveLogLauncher(liveLogPath);
 	return {
 		command: "cmd.exe",
-		args: ["/c", "start", "Judge driver live", launcher.path],
+		args: ["/d", "/s", "/c", `start "" ${quoteCmdArgument(launcher.path)}`],
 		launcher,
 	};
 }

@@ -184,13 +184,18 @@ test("Windows live log launch plan has no Windows Terminal special casing", () =
 });
 
 test("Windows live log launch plan opens a system-managed terminal window (conhost)", () => {
-	const liveLogPath = path.join("E:/workspace/project/.judge/judge-123", "live.log");
+	const liveLogPath = path.join("E:/workspace/project with spaces/.judge/judge-123", "live.log");
 	const plan = buildWindowsLiveLogLaunchPlan(liveLogPath);
 
 	assert.equal(plan.command, "cmd.exe");
 	assert.equal("shell" in plan, false);
-	assert.deepEqual(plan.args.slice(0, 3), ["/c", "start", "Judge driver live"]);
-	assert.equal(plan.launcher?.path, path.join("E:/workspace/project/.judge/judge-123", "judge-live-launcher.cmd"));
+	assert.deepEqual(plan.args.slice(0, 3), ["/d", "/s", "/c"]);
+	assert.equal(plan.args.length, 4);
+	assert.equal(
+		plan.args[3],
+		`start "" "${path.join("E:/workspace/project with spaces/.judge/judge-123", "judge-live-launcher.cmd")}"`,
+	);
+	assert.equal(plan.launcher?.path, path.join("E:/workspace/project with spaces/.judge/judge-123", "judge-live-launcher.cmd"));
 	assert.match(plan.launcher?.content ?? "", /-Encoding UTF8/);
 });
 

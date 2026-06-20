@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import {
+	buildWindowsLiveLogLaunchPlan,
 	buildWindowsLiveLogLauncher,
 	registerJudge,
 	setJudgeDecisionSessionFactoryForTests,
@@ -146,6 +147,26 @@ test("Windows live log launcher is written next to live.log with a stable filena
 	);
 	assert.match(launcher.content, /Get-Content/);
 	assert.match(launcher.content, /live\.log/);
+});
+
+test("Windows live log launch plan opens a Windows Terminal tab when WT_SESSION exists", () => {
+	const liveLogPath = path.join("E:/workspace/project/.judge/judge-123", "live.log");
+	const plan = buildWindowsLiveLogLaunchPlan(liveLogPath, { WT_SESSION: "session-guid" });
+
+	assert.equal(plan.command, "wt.exe");
+	assert.deepEqual(plan.args.slice(0, 3), ["new-tab", "--title", "Judge driver live"]);
+	assert.ok(plan.args.includes("powershell.exe"));
+	assert.ok(plan.args.some((arg) => arg.includes("Get-Content")));
+	assert.equal(plan.launcher, undefined);
+});
+
+test("Windows live log launch plan falls back to conhost when WT_SESSION is absent", () => {
+	const liveLogPath = path.join("E:/workspace/project/.judge/judge-123", "live.log");
+	const plan = buildWindowsLiveLogLaunchPlan(liveLogPath, {});
+
+	assert.equal(plan.command, "cmd.exe");
+	assert.deepEqual(plan.args.slice(0, 3), ["/c", "start", "Judge driver live"]);
+	assert.equal(plan.launcher?.path, path.join("E:/workspace/project/.judge/judge-123", "judge-live-launcher.cmd"));
 });
 
 test("/judge enters aligning mode, switches to readonly tools, and injects ALIGN_PROMPT", async () => {

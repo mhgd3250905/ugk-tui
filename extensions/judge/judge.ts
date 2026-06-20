@@ -95,11 +95,41 @@ export function buildWindowsLiveLogLauncher(liveLogPath: string): { path: string
 	};
 }
 
+export function buildWindowsLiveLogLaunchPlan(
+	liveLogPath: string,
+	env: Record<string, string | undefined> = process.env,
+): { command: string; args: string[]; launcher?: { path: string; content: string } } {
+	if (env.WT_SESSION) {
+		return {
+			command: "wt.exe",
+			args: [
+				"new-tab",
+				"--title",
+				"Judge driver live",
+				"powershell.exe",
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				`Get-Content -LiteralPath ${quotePowerShellLiteral(liveLogPath)} -Wait`,
+			],
+		};
+	}
+
+	const launcher = buildWindowsLiveLogLauncher(liveLogPath);
+	return {
+		command: "cmd.exe",
+		args: ["/c", "start", "Judge driver live", launcher.path],
+		launcher,
+	};
+}
+
 /**
  * 在新终端窗口打开 live.log 的实时跟踪(tail -f / Get-Content -Wait)。
  * 零污染主 agent context:过程数据只写文件、只在新终端显示。
  * 跨平台兼容(macOS / Linux / Windows):
- *   - Windows:写临时 .cmd 批处理文件(避免多层引号嵌套),用 start 开独立窗口跑。
+ *   - Windows Terminal:用 wt.exe new-tab 直接跑 PowerShell tail。
+ *   - Windows conhost:写项目内 .cmd 批处理文件(避免多层引号嵌套),用 start 开独立窗口跑。
  *   - macOS:osascript 让 Terminal.app 跑 tail(路径转义处理空格)。
  *   - Linux:which 检测可用终端(gnome-terminal -- / konsole -e / xterm -e / x-terminal-emulator),用各自正确的参数语法。
  * 开窗失败不抛错(只返回 error),因为这只是辅助查看,不影响 Judge 主流程。
@@ -107,14 +137,13 @@ export function buildWindowsLiveLogLauncher(liveLogPath: string): { path: string
 function openLiveLogTerminal(liveLogPath: string): { ok: boolean; error?: string } {
 	try {
 		if (process.platform === "win32") {
-			// Windows:多层引号嵌套(cmd start + cmd /k + powershell -Command "...")在 spawn 下极易出错。
-			// 解法:写一个临时 .cmd 批处理文件,路径写死在文件里(纯文本,无引号嵌套问题),start 开窗跑它。
-			const launcher = buildWindowsLiveLogLauncher(liveLogPath);
-			// PowerShell 单引号包路径(路径不含单引号时安全),-Wait 实时跟踪。最后 pause 让用户看完。
-			mkdirSync(path.dirname(launcher.path), { recursive: true });
-			writeFileSync(launcher.path, launcher.content, "utf8");
-			// start 第一个带引号参数当窗口标题(怪癖),然后跑批处理。
-			spawn("cmd.exe", ["/c", "start", "Judge driver live", launcher.path], {
+			// Windows Terminal 里优先开 new-tab；非 WT 回退 conhost + 项目内 launcher.cmd。
+			const plan = buildWindowsLiveLogLaunchPlan(liveLogPath);
+			if (plan.launcher) {
+				mkdirSync(path.dirname(plan.launcher.path), { recursive: true });
+				writeFileSync(plan.launcher.path, plan.launcher.content, "utf8");
+			}
+			spawn(plan.command, plan.args, {
 				detached: true,
 				stdio: "ignore",
 				windowsHide: false,

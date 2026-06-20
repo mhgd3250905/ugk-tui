@@ -216,11 +216,75 @@ test("final PASS displays delivery report and user ack marks Judge done", async 
 	assert.equal(prompts.length, 1);
 	assert.match(prompts[0], /JUDGE FINALIZE MODE/);
 	const report = sentMessages.map((entry) => entry.message.content).join("\n");
-	assert.match(report, /PASS/);
+	assert.match(report, /✅ Judge PASS/);
 	assert.match(report, /E:\/AII\/ugk-core\/out\/result\.md/);
-	assert.match(report, /pathsTried/);
-	assert.match(report, /artifacts/);
+	assert.match(report, /📦 产出/);
+	assert.match(report, /🛣️ 走过的路径\(1 步,steer 0\/5\)/);
 	assert.match(report, /pathsTried 显示 write 成功/);
+});
+
+test("final PASS delivery report prioritizes decision evidence and hides raw logs", async () => {
+	const { pi, commands, handlers, sentMessages } = makePi();
+	const { ctx } = makeCtx(true);
+	const prompts: string[] = [];
+	const manyPaths = Array.from({ length: 17 }, (_, index) => ({
+		toolName: index === 16 ? "bash" : `tool_${index + 1}`,
+		argsSummary: index === 16 ? "command=npm test" : "",
+		resultSummary: index === 16
+			? "content=[{\"type\":\"text\",\"text\":\"npm test failed because lint failed\"}]"
+			: "content=[{\"type\":\"text\",\"text\":\"raw successful tool output\"}]",
+		failed: index === 16,
+	}));
+	installDecisionSession([
+		JSON.stringify({
+			status: "pass",
+			reason: "交付内容满足全部验收条件",
+			evidence: ["driver 输出了最终结果摘要", "最后一次失败路径已有明确原因"],
+		}),
+	], prompts);
+	setJudgeDriverFactoryForTests(async (options: any) => ({
+		async start() {
+			await options.onWakeup(completedWakeupContext({
+				summary: {
+					pathsTried: manyPaths,
+					artifacts: [],
+					steerCount: 2,
+				},
+				tail: {
+					assistantOutput: "最终结果摘要: 已完成依赖审计,没有发现高危漏洞。",
+				},
+			}));
+		},
+		dispose() {},
+		getSummary() {
+			return completedWakeupContext().summary;
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire", input: {} }, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		setJudgeDecisionSessionFactoryForTests(undefined);
+	}
+
+	const report = sentMessages.map((entry) => entry.message.content).join("\n");
+	assert.match(report, /✅ Judge PASS/);
+	assert.match(report, /交付内容满足全部验收条件/);
+	assert.match(report, /📦 产出/);
+	assert.match(report, /driver 未产出文件/);
+	assert.match(report, /最终结果摘要: 已完成依赖审计/);
+	assert.match(report, /🔍 验收证据/);
+	assert.match(report, /driver 输出了最终结果摘要/);
+	assert.match(report, /🛣️ 走过的路径\(17 步,steer 2\/5\)/);
+	assert.match(report, /中间省略 10 步/);
+	assert.match(report, /bash ✗/);
+	assert.doesNotMatch(report, /content=\[\{"type":"text"/);
+	assert.doesNotMatch(report, /DriverSummary/);
+	assert.doesNotMatch(report, /TranscriptTail/);
 });
 
 test("final PASS without user ack can be accepted later with /judge ack", async () => {

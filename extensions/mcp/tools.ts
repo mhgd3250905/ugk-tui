@@ -33,6 +33,7 @@ export type McpToolRegistrationOptions = {
 
 export type McpToolRegistrationResult = {
 	registered: string[];
+	registeredByServer: Map<string, string[]>;
 	skipped: Array<{ registeredName: string; serverName: string; toolName: string; reason: string }>;
 	warnings: string[];
 };
@@ -122,9 +123,11 @@ export function registerMcpTools(
 ): McpToolRegistrationResult {
 	const registered = new Set(opts.existingToolNames ?? []);
 	const registeredNames: string[] = [];
+	const registeredByServer = new Map<string, string[]>();
 	const warnings: string[] = [];
 	const skipped: McpToolRegistrationResult["skipped"] = [];
 	const serverNames = resolveNormalizedServerNameEntries(connections.map((connection) => connection.name));
+	const usedToolNamesByServer = new Map<string, Set<string>>();
 
 	for (const entry of serverNames) {
 		if (entry.warning) {
@@ -134,9 +137,22 @@ export function registerMcpTools(
 
 	for (const [index, connection] of connections.entries()) {
 		const serverName = serverNames[index].normalizedName;
+		const serverTools = registeredByServer.get(connection.name) ?? [];
+		registeredByServer.set(connection.name, serverTools);
+		const usedToolNames = usedToolNamesByServer.get(serverName) ?? new Set<string>();
+		usedToolNamesByServer.set(serverName, usedToolNames);
 		for (const mcpTool of connection.tools) {
-			const toolName = normalizeToolName(mcpTool.name);
+			const baseToolName = normalizeToolName(mcpTool.name);
+			const toolName = resolveNameCollision(baseToolName, usedToolNames, TOOL_NAME_MAX_LENGTH);
+			usedToolNames.add(toolName);
 			const registeredName = buildToolName(serverName, toolName);
+			if (toolName !== baseToolName) {
+				warn(
+					`MCP tool "${connection.name}/${mcpTool.name}" normalized to duplicate "${baseToolName}", using "${registeredName}".`,
+					warnings,
+					opts.warn,
+				);
+			}
 			if (registered.has(registeredName)) {
 				const reason = `MCP tool "${connection.name}/${mcpTool.name}" skipped because "${registeredName}" is already registered.`;
 				warn(reason, warnings, opts.warn);
@@ -147,11 +163,13 @@ export function registerMcpTools(
 			pi.registerTool(createMcpToolDefinition(connection, mcpTool, { ...opts, serverName, toolName, registeredName }));
 			registered.add(registeredName);
 			registeredNames.push(registeredName);
+			serverTools.push(registeredName);
 		}
 	}
 
 	return {
 		registered: registeredNames,
+		registeredByServer,
 		skipped,
 		warnings,
 	};

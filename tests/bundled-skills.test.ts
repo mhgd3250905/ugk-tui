@@ -44,6 +44,13 @@ test("bundles MCP guide as a preinstalled skill", () => {
 	assert.equal(fs.existsSync(mcpConfigureScriptPath), true);
 });
 
+test("npm package excludes local MCP config files", () => {
+	const npmIgnore = fs.readFileSync(new URL("../.npmignore", import.meta.url), "utf8");
+
+	assert.match(npmIgnore, /^mcp\.json$/m);
+	assert.match(npmIgnore, /^\.mcp\.local\.json$/m);
+});
+
 test("MCP guide configure script merges pasted mcpServers JSON into install config", () => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-guide-"));
 	const input = path.join(cwd, "input.json");

@@ -186,7 +186,7 @@ test("/mcp reload uses pre-registered startup tools without duplicate registrati
 		},
 		registerMcpTools() {
 			registerCalls += 1;
-			return { registered: [], skipped: [], warnings: ["duplicate"] };
+			return { registered: [], registeredByServer: new Map(), skipped: [], warnings: ["duplicate"] };
 		},
 	});
 

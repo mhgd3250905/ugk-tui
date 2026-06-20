@@ -128,12 +128,15 @@ async function reloadMcp(
 
 	const result = deps.reload ? await deps.reload(context) : {};
 	const connections = result.connections ?? [];
+	let registration: McpToolRegistrationResult | undefined;
 	if (connections.length > 0 && !result.registered) {
-		(deps.registerMcpTools ?? registerMcpTools)(pi, connections);
+		registration = (deps.registerMcpTools ?? registerMcpTools)(pi, connections);
 	}
 
 	const nextServerTools = result.registered
 		? normalizeServerTools(result.registered)
+		: registration
+			? new Map(registration.registeredByServer)
 		: serverToolsFromConnections(connections);
 
 	state.serverTools.clear();

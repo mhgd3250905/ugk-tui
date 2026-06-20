@@ -135,6 +135,34 @@ test("disconnect and disconnectAll are idempotent", async () => {
 	await registry.disconnectAll();
 });
 
+test("blocked same-name reconnect disconnects the existing connection", async () => {
+	const registry = new McpRegistry();
+	const connection = await registry.connect(
+		"alpha",
+		{ command: process.execPath, args: [stubServerPath] },
+		connectOpts,
+	);
+	try {
+		assert.equal(connection.status, "connected");
+
+		await assert.rejects(
+			registry.connect(
+				"alpha",
+				{ command: process.execPath, args: [stubServerPath] },
+				{ ...connectOpts, canConnect: () => false },
+			),
+			/blocked by spawn policy/i,
+		);
+
+		assert.equal(connection.status, "disconnected");
+		assert.equal(registry.get("alpha")?.status, "failed");
+	} finally {
+		await connection.disconnect();
+		await registry.disconnectAll();
+		await waitForNoProcess(/mcp-stub-server\.mjs/);
+	}
+});
+
 test("connect failure rejects with a clear error and does not leave stub processes running", async () => {
 	const registry = new McpRegistry();
 

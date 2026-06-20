@@ -10,10 +10,7 @@ import {
 } from "./permissions.ts";
 import { McpConnectionError, McpRegistry, type McpConnection } from "./registry.ts";
 import {
-	buildToolName,
-	normalizeToolName,
 	registerMcpTools,
-	resolveNormalizedServerNames,
 	type McpToolPolicyContext,
 	type McpToolRegistrationResult,
 } from "./tools.ts";
@@ -95,7 +92,7 @@ export function registerMcp(pi: ExtensionAPI, deps: McpExtensionDeps = {}): McpE
 
 	registerMcpCommand(pi, state, {
 		reload: (ctx) => startup(ctx as McpRuntimeContext),
-		registerMcpTools: () => ({ registered: [], skipped: [], warnings: [] }),
+		registerMcpTools: () => ({ registered: [], registeredByServer: new Map(), skipped: [], warnings: [] }),
 	});
 
 	registerProcessCleanup(registry);
@@ -185,7 +182,7 @@ function registerConnectedTools(
 	previousServerTools: Map<string, string[]> = new Map(),
 ): McpToolRegistrationResult {
 	if (connections.length === 0) {
-		return { registered: [], skipped: [], warnings: [] };
+		return { registered: [], registeredByServer: new Map(), skipped: [], warnings: [] };
 	}
 
 	return registerMcpTools(pi, connections, {
@@ -241,7 +238,7 @@ function mergeRegistration(
 		}
 	}
 
-	const registered = serverToolsFromConnections(result.connections);
+	const registered = new Map(registration.registeredByServer);
 	result.registered = registered;
 	state.serverTools.clear();
 	for (const [serverName, tools] of registered) {
@@ -249,19 +246,9 @@ function mergeRegistration(
 	}
 }
 
-function serverToolsFromConnections(connections: McpConnection[]): Map<string, string[]> {
-	const normalizedServers = resolveNormalizedServerNames(connections.map((connection) => connection.name));
-	const serverTools = new Map<string, string[]>();
-	for (const connection of connections) {
-		const normalizedServerName = normalizedServers.names.get(connection.name) ?? connection.name;
-		const registered = connection.tools.map((tool) => buildToolName(normalizedServerName, normalizeToolName(tool.name)));
-		serverTools.set(connection.name, registered);
-	}
-	return serverTools;
-}
-
 function appendServerInstructions(systemPrompt: string, registry: Pick<McpRegistry, "connections">): string {
 	const lines = Array.from(registry.connections.values())
+		.filter((connection) => connection.status === "connected")
 		.map((connection) => {
 			const instructions = readInstructions(connection);
 			return instructions ? `- ${connection.name}: ${instructions}` : undefined;
@@ -364,6 +351,10 @@ function getActiveTools(pi: ExtensionAPI): string[] {
 let processCleanupRegistered = false;
 const cleanupRegistries = new Set<McpRegistry>();
 
+export async function disconnectMcpCleanupRegistries(): Promise<void> {
+	await Promise.all(Array.from(cleanupRegistries, (item) => item.disconnectAll()));
+}
+
 function registerProcessCleanup(registry: McpRegistry): void {
 	cleanupRegistries.add(registry);
 	if (processCleanupRegistered) {
@@ -371,17 +362,18 @@ function registerProcessCleanup(registry: McpRegistry): void {
 	}
 	processCleanupRegistered = true;
 	const cleanup = () => {
-		for (const item of cleanupRegistries) {
-			void item.disconnectAll();
-		}
+		void disconnectMcpCleanupRegistries();
 	};
+	process.once("beforeExit", async () => {
+		await disconnectMcpCleanupRegistries();
+	});
 	process.once("exit", cleanup);
-	process.once("SIGINT", () => {
-		cleanup();
+	process.once("SIGINT", async () => {
+		await disconnectMcpCleanupRegistries();
 		process.exit(130);
 	});
-	process.once("SIGTERM", () => {
-		cleanup();
+	process.once("SIGTERM", async () => {
+		await disconnectMcpCleanupRegistries();
 		process.exit(143);
 	});
 }

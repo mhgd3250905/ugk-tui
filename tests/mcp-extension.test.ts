@@ -248,6 +248,118 @@ test("reload re-registers prior MCP tool names without duplicate warnings", asyn
 	assert.deepEqual(result.content, [{ type: "text", text: "generation:2" }]);
 });
 
+test("session_start does not track MCP tools skipped by non-MCP collisions", async () => {
+	const registry = {
+		connections: new Map(),
+		async connect(name: string) {
+			const connection = {
+				name,
+				status: "connected",
+				tools: [{ name: "echo", inputSchema: { type: "object" } }],
+				async callTool() {
+					return { content: [{ type: "text", text: "mcp" }] };
+				},
+			};
+			this.connections.set(name, connection);
+			return connection;
+		},
+		async disconnectAll() {
+			this.connections.clear();
+		},
+	};
+	const pi = makePi(["alpha__echo"]);
+	const ctx = makeCtx(process.cwd());
+	const state = registerMcpForTest(pi, {
+		registry: registry as any,
+		loadConfig: () => ({
+			servers: new Map([["alpha", { name: "alpha", scope: "user", config: { command: "node" } }]]),
+			errors: [],
+		}),
+	});
+
+	await emit(pi, "session_start", { reason: "startup" }, ctx);
+	await pi.commands.get("mcp")!.handler("disable alpha", ctx);
+
+	assert.equal(pi.registeredTools.has("alpha__echo"), false);
+	assert.deepEqual(state.serverTools.get("alpha"), []);
+	assert.deepEqual(pi.getActiveTools(), ["alpha__echo"]);
+	assert.match(state.warnings.join("\n"), /already registered/);
+});
+
+test("before_agent_start omits instructions from disconnected stale servers after reload", async () => {
+	let phase = "initial";
+	const registry = {
+		connections: new Map(),
+		async connect(name: string) {
+			const connection = {
+				name,
+				status: "connected",
+				tools: [{ name: "echo", inputSchema: { type: "object" } }],
+				client: {
+					getInstructions() {
+						return `${name} instructions`;
+					},
+				},
+				async callTool() {
+					return { content: [{ type: "text", text: "ok" }] };
+				},
+				async disconnect() {
+					this.status = "disconnected";
+				},
+			};
+			this.connections.set(name, connection);
+			return connection;
+		},
+		async disconnectAll() {
+			await Promise.all(Array.from(this.connections.values(), (connection: any) => connection.disconnect()));
+		},
+	};
+	const pi = makePi(["greet"]);
+	const ctx = makeCtx(process.cwd());
+	registerMcpForTest(pi, {
+		registry: registry as any,
+		loadConfig: () => ({
+			servers:
+				phase === "initial"
+					? new Map([["beta", { name: "beta", scope: "user", config: { command: "node" } }]])
+					: new Map(),
+			errors: [],
+		}),
+	});
+
+	await emit(pi, "session_start", { reason: "startup" }, ctx);
+	phase = "empty";
+	await pi.commands.get("mcp")!.handler("reload", ctx);
+	const injected = (await emit(pi, "before_agent_start", { systemPrompt: "Base prompt" }, ctx)).at(-1);
+
+	assert.equal(injected, undefined);
+});
+
+test("process cleanup waits for async registry disconnect", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-signal-cleanup-"));
+	const marker = path.join(cwd, "disconnect-marker.txt");
+	const registry = {
+		connections: new Map(),
+		async disconnectAll() {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			fs.writeFileSync(marker, "disconnected");
+		},
+	};
+	const pi = makePi();
+	const beforeExitListeners = process.listenerCount("beforeExit");
+	registerMcpForTest(pi, {
+		registry: registry as any,
+		loadConfig: () => ({ servers: new Map(), errors: [] }),
+	});
+	const mcpModule = await import("../extensions/mcp/index.ts");
+
+	assert.equal(typeof mcpModule.disconnectMcpCleanupRegistries, "function");
+	assert.ok(process.listenerCount("beforeExit") >= beforeExitListeners);
+	await mcpModule.disconnectMcpCleanupRegistries();
+
+	assert.equal(fs.readFileSync(marker, "utf8"), "disconnected");
+});
+
 test("before_agent_start appends MCP server instructions", async () => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-instructions-"));
 	writeProjectConfig(cwd, {

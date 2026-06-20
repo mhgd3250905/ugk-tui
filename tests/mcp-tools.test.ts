@@ -62,19 +62,37 @@ test("server name normalization resolves collisions with suffixes and warnings",
 	assert.match(result.warnings[0], /foo-bar-2/);
 });
 
-test("registerMcpTools skips full registered-name collisions and warns", () => {
+test("registerMcpTools suffixes normalized MCP tool name collisions", async () => {
 	const { pi, tools } = makePi();
-	const { connection } = makeConnection("Alpha", [
+	const { connection, calls } = makeConnection("Alpha", [
 		{ name: "Echo!", inputSchema: { type: "object" } },
 		{ name: "echo-", inputSchema: { type: "object" } },
 	]);
 
 	const result = registerMcpTools(pi as any, [connection as any]);
 
-	assert.deepEqual([...tools.keys()], ["alpha__echo-"]);
-	assert.equal(result.registered.length, 1);
+	assert.deepEqual([...tools.keys()], ["alpha__echo-", "alpha__echo--2"]);
+	assert.deepEqual(result.registered, ["alpha__echo-", "alpha__echo--2"]);
+	assert.deepEqual(result.registeredByServer.get("Alpha"), ["alpha__echo-", "alpha__echo--2"]);
+	assert.equal(result.skipped.length, 0);
+	await tools.get("alpha__echo--2").execute("call-1", { message: "hi" }, undefined, undefined, {});
+	assert.deepEqual(calls.at(-1), { toolName: "echo-", args: { message: "hi" }, opts: {} });
+	assert.match(result.warnings.join("\n"), /echo-.*alpha__echo--2/i);
+});
+
+test("registerMcpTools skips collisions with existing non-MCP tools", () => {
+	const { pi, tools } = makePi();
+	const { connection } = makeConnection("Alpha", [
+		{ name: "echo", inputSchema: { type: "object" } },
+	]);
+
+	const result = registerMcpTools(pi as any, [connection as any], { existingToolNames: ["alpha__echo"] });
+
+	assert.deepEqual([...tools.keys()], []);
+	assert.deepEqual(result.registered, []);
+	assert.deepEqual(result.registeredByServer.get("Alpha"), []);
 	assert.equal(result.skipped.length, 1);
-	assert.match(result.warnings.join("\n"), /alpha__echo-/);
+	assert.match(result.warnings.join("\n"), /alpha__echo/);
 });
 
 test("adaptSchema preserves JSON Schema fields through Type.Unsafe", () => {

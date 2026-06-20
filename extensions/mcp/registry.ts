@@ -137,6 +137,7 @@ export class McpRegistry {
 		const policyContext = { name, config };
 		const allowed = opts.canConnect ? await opts.canConnect(policyContext) : true;
 		if (!allowed) {
+			await this.disconnect(name);
 			const connection = new McpConnection(
 				name,
 				createMcpClient({ name: `ugk-mcp-${name}`, version: "1.0.0" }),

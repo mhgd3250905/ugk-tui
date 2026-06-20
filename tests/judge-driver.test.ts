@@ -562,7 +562,7 @@ test("driver events append readable lines to live.log and getLiveLogPath returns
 		runDir,
 		spec: "test spec",
 		sessionFactory,
-		onWakeup: async () => ({ action: "steer", direction: "换 cdp", keepWatching: true }),
+		onWakeup: async () => ({ action: "steer", direction: "换 cdp", reason: "HTTP 路径被限制", keepWatching: true }),
 	});
 
 	// getLiveLogPath 指向 runDir/live.log
@@ -570,19 +570,31 @@ test("driver events append readable lines to live.log and getLiveLogPath returns
 	assert.equal(liveLogPath, pathMod.join(runDir, "live.log"));
 
 	// emit 几个事件,live.log 应被追加可读行
-	emit!({ type: "tool_execution_start", toolName: "chrome_cdp" });
-	emit!({ type: "tool_execution_end", toolName: "chrome_cdp", isError: false });
-	emit!({ type: "tool_execution_end", toolName: "bash", isError: true });
+	emit!({ type: "tool_execution_start", toolName: "chrome_cdp", input: { url: "https://www.zhihu.com/hot" } });
+	emit!({ type: "tool_execution_end", toolName: "chrome_cdp", isError: false, result: { message: "Navigated Chrome tab" } });
+	emit!({
+		type: "message_end",
+		message: {
+			role: "assistant",
+			content: [{ type: "text", text: "我会先用 Chrome CDP 打开热榜。\n然后读取页面标题。" }],
+		},
+	} as any);
+	emit!({ type: "tool_execution_end", toolName: "bash", isError: true, result: { stderr: "command failed" } });
 	await new Promise((r) => setTimeout(r, 10));
 
 	const { readFileSync } = await import("node:fs");
 	const logContent = readFileSync(liveLogPath, "utf8");
+	assert.doesNotMatch(logContent, /[🔄🔧🤖🧑]/u, "live.log should use ASCII markers");
 	assert.ok(logContent.includes("chrome_cdp"), "live.log should contain chrome_cdp tool events");
 	assert.ok(logContent.includes("started"), "live.log should mark tool start");
 	assert.ok(logContent.includes("completed"), "live.log should mark tool completed");
 	assert.ok(logContent.includes("FAILED"), "live.log should mark failed tools");
+	assert.ok(logContent.includes("args: url=https://www.zhihu.com/hot"), "live.log should include tool args summary");
+	assert.ok(logContent.includes("result: message=Navigated Chrome tab"), "live.log should include tool result summary");
+	assert.ok(logContent.includes("[driver] 我会先用 Chrome CDP 打开热榜。"), "live.log should include assistant text");
 	// steer verdict 也应进 live.log
 	assert.ok(logContent.includes("STEER"), "live.log should contain Judge steer verdict");
+	assert.ok(logContent.includes("HTTP 路径被限制"), "live.log should contain Judge verdict reason");
 
 	rmSync(runDir, { recursive: true, force: true });
 });

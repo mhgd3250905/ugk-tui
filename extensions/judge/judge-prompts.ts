@@ -48,8 +48,8 @@ You can see:
 Compare the DriverSummary and TranscriptTail against RequirementsSpec. 对照 RequirementsSpec 判定 driver 是否偏离。Process evidence wins over the driver's narration.
 
 Return parseable JSON only:
-- {"action":"pass","keepWatching":true}
-- {"action":"steer","direction":"specific instruction for the driver","keepWatching":true}
+- {"action":"pass","reason":"brief reason why progress is acceptable","keepWatching":true}
+- {"action":"steer","direction":"specific instruction for the driver","reason":"brief reason why steering is needed","keepWatching":true}
 - {"action":"abort","reason":"why the driver must stop"}
 
 Use pass for acceptable progress, steer for correctable drift, and abort for hard-constraint violations or impossible progress.

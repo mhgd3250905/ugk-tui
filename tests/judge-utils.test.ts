@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DECIDE_PROMPT } from "../extensions/judge/judge-prompts.ts";
 import { extractRequirementsSpec, isSafeCommand, parseJudgeVerdict } from "../extensions/judge/judge-utils.ts";
 
 test("extractRequirementsSpec parses fenced JSON specs", () => {
@@ -57,13 +58,15 @@ test("isSafeCommand is exported for Judge and blocks non-readonly bash commands"
 });
 
 test("parseJudgeVerdict parses pass, steer, and abort verdict JSON", () => {
-	assert.deepEqual(parseJudgeVerdict(`{"action":"pass","keepWatching":true}`), {
+	assert.deepEqual(parseJudgeVerdict(`{"action":"pass","reason":"driver 正在按约束推进","keepWatching":true}`), {
 		action: "pass",
+		reason: "driver 正在按约束推进",
 		keepWatching: true,
 	});
-	assert.deepEqual(parseJudgeVerdict("```json\n{\"action\":\"steer\",\"direction\":\"改用只读检查\",\"keepWatching\":false}\n```"), {
+	assert.deepEqual(parseJudgeVerdict("```json\n{\"action\":\"steer\",\"direction\":\"改用只读检查\",\"reason\":\"写入前证据不足\",\"keepWatching\":false}\n```"), {
 		action: "steer",
 		direction: "改用只读检查",
+		reason: "写入前证据不足",
 		keepWatching: false,
 	});
 	assert.deepEqual(parseJudgeVerdict(`{"action":"abort","reason":"违反硬约束"}`), {
@@ -77,4 +80,9 @@ test("parseJudgeVerdict rejects malformed verdicts", () => {
 	assert.equal(parseJudgeVerdict(`{"action":"pass"}`), undefined);
 	assert.equal(parseJudgeVerdict(`{"action":"steer","keepWatching":true}`), undefined);
 	assert.equal(parseJudgeVerdict(`{"action":"abort"}`), undefined);
+});
+
+test("DECIDE_PROMPT requires pass and steer verdicts to include a reason", () => {
+	assert.match(DECIDE_PROMPT, /"action":"pass","reason"/);
+	assert.match(DECIDE_PROMPT, /"action":"steer","direction".*"reason"/);
 });

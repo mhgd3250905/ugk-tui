@@ -30,8 +30,8 @@ type TailEvent = {
 };
 
 export type JudgeVerdict =
-	| { action: "pass"; keepWatching: boolean }
-	| { action: "steer"; direction: string; keepWatching: boolean }
+	| { action: "pass"; keepWatching: boolean; reason?: string }
+	| { action: "steer"; direction: string; keepWatching: boolean; reason?: string }
 	| { action: "abort"; reason: string };
 
 export type JudgeFinalVerdict =
@@ -257,8 +257,11 @@ export function formatRequirementsSpec(spec: RequirementsSpec): string {
 function normalizeVerdict(value: unknown): JudgeVerdict | undefined {
 	if (!value || typeof value !== "object") return undefined;
 	const record = value as Record<string, unknown>;
+	const reason = typeof record.reason === "string" && record.reason.trim().length > 0
+		? record.reason.trim()
+		: undefined;
 	if (record.action === "pass" && typeof record.keepWatching === "boolean") {
-		return { action: "pass", keepWatching: record.keepWatching };
+		return { action: "pass", keepWatching: record.keepWatching, ...(reason ? { reason } : {}) };
 	}
 	if (
 		record.action === "steer" &&
@@ -266,7 +269,7 @@ function normalizeVerdict(value: unknown): JudgeVerdict | undefined {
 		record.direction.trim().length > 0 &&
 		typeof record.keepWatching === "boolean"
 	) {
-		return { action: "steer", direction: record.direction.trim(), keepWatching: record.keepWatching };
+		return { action: "steer", direction: record.direction.trim(), keepWatching: record.keepWatching, ...(reason ? { reason } : {}) };
 	}
 	if (record.action === "abort" && typeof record.reason === "string" && record.reason.trim().length > 0) {
 		return { action: "abort", reason: record.reason.trim() };

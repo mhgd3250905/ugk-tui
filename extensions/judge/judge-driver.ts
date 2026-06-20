@@ -22,6 +22,10 @@ import {
 
 type DriverSessionEvent = {
 	type?: string;
+	message?: {
+		role?: string;
+		content?: unknown;
+	};
 	assistantMessageEvent?: {
 		type?: string;
 		delta?: string;
@@ -150,16 +154,46 @@ function formatWakeupError(error: unknown): string {
 	return `judge wakeup failed: ${String(error)}`;
 }
 
+function indentContinuation(text: string): string {
+	return text.replace(/\n/g, "\n           ");
+}
+
+function getAssistantMessageText(event: DriverSessionEvent): string {
+	if (event.type !== "message_end") return "";
+	if (event.message?.role !== "assistant") return "";
+	const content = event.message.content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((block) => {
+			if (!block || typeof block !== "object" || Array.isArray(block)) return "";
+			const record = block as Record<string, unknown>;
+			return record.type === "text" && typeof record.text === "string" ? record.text : "";
+		})
+		.filter(Boolean)
+		.join("\n");
+}
+
 /** 把 driver 事件格式化成 live.log 的一行。message_update(text_delta)太碎不写,返回空串跳过。 */
 function formatEventLine(event: DriverSessionEvent): string {
-	if (event.type === "agent_start") return "🔄 driver turn started";
-	if (event.type === "agent_end") return "🔄 driver turn ended";
+	if (event.type === "agent_start") return "[T] driver turn started";
+	if (event.type === "agent_end") return "[T] driver turn ended";
 	if (event.type === "tool_execution_start") {
-		return `🔧 ${event.toolName ?? "(tool)"} | started`;
+		const args = summarizeToolArgs(event.input);
+		return [`[tool] ${event.toolName ?? "(tool)"} | started`, args ? `           args: ${indentContinuation(args)}` : ""]
+			.filter(Boolean)
+			.join("\n");
 	}
 	if (event.type === "tool_execution_end") {
 		const status = event.isError ? "FAILED" : "completed";
-		return `🔧 ${event.toolName ?? "(tool)"} | ${status}`;
+		const result = summarizeToolResult(event.result ?? event.output);
+		return [`[tool] ${event.toolName ?? "(tool)"} | ${status}`, result ? `           result: ${indentContinuation(result)}` : ""]
+			.filter(Boolean)
+			.join("\n");
+	}
+	if (event.type === "message_end") {
+		const text = getAssistantMessageText(event);
+		return text ? `[driver] ${text}` : "";
 	}
 	// message_update / 其他:不写(避免逐 token 刷屏)
 	return "";
@@ -167,8 +201,11 @@ function formatEventLine(event: DriverSessionEvent): string {
 
 /** 把 Judge verdict 格式化成 live.log 的一行。 */
 function formatJudgeVerdictForLog(verdict: { action: string; direction?: string; reason?: string }): string {
-	if (verdict.action === "pass") return "PASS";
-	if (verdict.action === "steer") return `STEER: ${verdict.direction ?? "(no direction)"}`;
+	if (verdict.action === "pass") return `PASS${verdict.reason ? ` - ${verdict.reason}` : ""}`;
+	if (verdict.action === "steer") {
+		const direction = verdict.direction ?? "(no direction)";
+		return `STEER: ${direction}${verdict.reason ? ` - ${verdict.reason}` : ""}`;
+	}
 	return `ABORT: ${verdict.reason ?? "(no reason)"}`;
 }
 
@@ -251,7 +288,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 					});
 
 					// 把 Judge 判定报给 UI(用于可视化),在副作用执行前就报,保证 UI 即时。
-					writeLiveLog(`🧑‍⚖️ Judge | ${formatJudgeVerdictForLog(verdict)}`);
+					writeLiveLog(`[Judge] ${formatJudgeVerdictForLog(verdict)}`);
 					try {
 						opts.onJudgeVerdict?.(verdict);
 					} catch {

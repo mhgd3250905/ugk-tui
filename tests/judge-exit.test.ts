@@ -11,9 +11,12 @@ import {
 import {
 	registerJudge,
 	setJudgeDriverFactoryForTests,
+	setOpenLiveLogTerminalForTests,
 	setJudgeVerdictProviderForTests,
 } from "../extensions/judge/judge.ts";
 import type { DriverSessionFactory } from "../extensions/shared/driver-session.ts";
+
+const noopLiveLogOpener = () => ({ ok: true });
 
 type DriverEvent = {
 	type?: string;
@@ -106,7 +109,9 @@ function makePi() {
 }
 
 function makeCtx() {
+	setOpenLiveLogTerminalForTests(noopLiveLogOpener);
 	const notifications: Array<{ message: string; type?: string }> = [];
+	const widgetCalls: Array<{ key: string; content: unknown }> = [];
 	const ctx = {
 		hasUI: true,
 		mode: "tui",
@@ -127,9 +132,12 @@ function makeCtx() {
 			editor() {
 				return "";
 			},
+			setWidget(key: string, content: unknown) {
+				widgetCalls.push({ key, content });
+			},
 		},
 	};
-	return { ctx, notifications };
+	return { ctx, notifications, widgetCalls };
 }
 
 function assistantWithSpec() {
@@ -310,12 +318,14 @@ test("extension abort wakeup updates Judge state and notifies the user", async (
 
 test("extension passes maxSteer and reports driver escalation", async () => {
 	const { pi, commands, handlers, entries, sentMessages } = makePi();
-	const { ctx, notifications } = makeCtx();
+	const { ctx, notifications, widgetCalls } = makeCtx();
 	const received: any[] = [];
 	setJudgeDriverFactoryForTests(async (options: any) => {
 		received.push(options);
 		return {
 			async start() {
+				options.onTranscriptUpdate?.();
+				await new Promise((resolve) => setTimeout(resolve, 0));
 				await options.onEscalate({
 					reason: "maxSteer reached (5/5)",
 					summary: {
@@ -341,6 +351,12 @@ test("extension passes maxSteer and reports driver escalation", async () => {
 			getSummary() {
 				return { pathsTried: [], artifacts: [], turnCount: 0, completed: false, steerCount: 0 };
 			},
+			getWidgetLines() {
+				return ["driver still visible"];
+			},
+			getTranscriptText() {
+				return "driver still visible";
+			},
 		};
 	});
 	registerJudge(pi as any);
@@ -364,4 +380,5 @@ test("extension passes maxSteer and reports driver escalation", async () => {
 	assert.equal(sentMessages.at(-1)?.message.display, true);
 	assert.deepEqual(sentMessages.at(-1)?.options, { triggerTurn: false });
 	assert.match(sentMessages.at(-1)?.message.content, /仍在重复失败/);
+	assert.deepEqual(widgetCalls.at(-1), { key: "judge-driver-view", content: undefined });
 });

@@ -51,10 +51,13 @@ import {
 	type DriverSession,
 	type DriverSessionFactory,
 } from "../shared/driver-session.ts";
+import { resolveBashCommand } from "../doctor/checks.ts";
 import registerQuestionnaire from "./questionnaire.ts";
 
 const JUDGE_ALIGNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
+const JUDGE_NORMAL_TOOLS = ["read", "bash", "edit", "write"];
 const JUDGE_MENU_OPTIONS = ["委派 driver 执行", "继续澄清", "改需求"];
+const JUDGE_COMMAND_MENU_OPTIONS = ["Toggle Judge", "检查 bash 新窗口打开", "Exit"];
 const JUDGE_PHASES = new Set(["aligning", "driving", "delivering", "aborted", "done"]);
 const JUDGE_DRIVER_WIDGET_KEY = "judge-driver-view";
 
@@ -85,37 +88,27 @@ function quotePowerShellLiteral(value: string): string {
 	return `'${value.replace(/'/g, "''")}'`;
 }
 
-function quoteCmdArgument(value: string): string {
-	return `"${value}"`;
+function quoteBashLiteral(value: string): string {
+	return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-export function buildWindowsLiveLogLauncher(liveLogPath: string): { path: string; content: string } {
-	const launcherPath = path.join(path.dirname(liveLogPath), "judge-live-launcher.cmd");
-	return {
-		path: launcherPath,
-		content: [
-			"@echo off",
-			"chcp 65001 >nul",
-			// PowerShell 显式设 UTF-8 输出,避免 conhost 默认 GBK 把 UTF-8 的 live.log 解码成乱码。
-			`powershell -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content -LiteralPath ${quotePowerShellLiteral(liveLogPath)} -Wait -Encoding UTF8"`,
-			"pause",
-			"",
-		].join("\r\n"),
-	};
+export function buildBashLiveLogCommand(liveLogPath: string): string {
+	const bashPath = liveLogPath.replace(/\\/g, "/");
+	const quotedDir = quoteBashLiteral(path.posix.dirname(bashPath));
+	const quotedPath = quoteBashLiteral(bashPath);
+	return `mkdir -p ${quotedDir}; touch ${quotedPath}; tail -n +1 -f ${quotedPath}; printf '\\n[Judge live log exited]\\n'; read -r -p 'Press Enter to close...' _`;
 }
 
 type WindowsLiveLogLaunchPlan = {
 	command: string;
 	args: string[];
-	launcher: { path: string; content: string };
 };
 
-export function buildWindowsLiveLogLaunchPlan(liveLogPath: string): WindowsLiveLogLaunchPlan {
-	const launcher = buildWindowsLiveLogLauncher(liveLogPath);
+export function buildWindowsLiveLogLaunchPlan(liveLogPath: string, bashExecutable = resolveBashCommand().command): WindowsLiveLogLaunchPlan {
+	const bashCommand = buildBashLiveLogCommand(liveLogPath);
 	return {
 		command: "cmd.exe",
-		args: ["/d", "/s", "/c", `start "" ${quoteCmdArgument(launcher.path)}`],
-		launcher,
+		args: ["/d", "/s", "/c", "start", "\"\"", bashExecutable, "--noprofile", "--norc", "-lc", bashCommand],
 	};
 }
 
@@ -136,11 +129,27 @@ function spawnDetached(command: string, args: string[], options: { windowsHide?:
 	}
 }
 
+function ensureLiveLogFile(liveLogPath: string): { ok: boolean; error?: string } {
+	try {
+		mkdirSync(path.dirname(liveLogPath), { recursive: true });
+		appendFileSync(liveLogPath, "", "utf8");
+		return { ok: true };
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+function openPreparedLiveLogTerminal(liveLogPath: string): { ok: boolean; error?: string } {
+	const prepared = ensureLiveLogFile(liveLogPath);
+	if (!prepared.ok) return prepared;
+	return (openLiveLogTerminalForTests ?? openLiveLogTerminal)(liveLogPath);
+}
+
 /**
  * 在新终端窗口打开 live.log 的实时跟踪(tail -f / Get-Content -Wait)。
  * 零污染主 agent context:过程数据只写文件、只在新终端显示。
  * 跨平台兼容(macOS / Linux / Windows):
- *   - Windows:写项目内 .cmd 批处理文件(避免多层引号嵌套),交给系统打开过程终端窗口。
+ *   - Windows:用 cmd start 打开承载 bash tail 的可见过程终端窗口。
  *   - macOS:osascript 让 Terminal.app 跑 tail(路径转义处理空格)。
  *   - Linux:which 检测可用终端(gnome-terminal -- / konsole -e / xterm -e / x-terminal-emulator),用各自正确的参数语法。
  * 开窗失败不抛错(只返回 error),因为这只是辅助查看,不影响 Judge 主流程。
@@ -148,10 +157,8 @@ function spawnDetached(command: string, args: string[], options: { windowsHide?:
 function openLiveLogTerminal(liveLogPath: string): { ok: boolean; error?: string } {
 	try {
 		if (process.platform === "win32") {
-			// Windows 不绑定具体终端实现,只让系统打开一个独立过程终端窗口。
+			// Windows 不写 launcher 文件,通过 cmd start 让系统打开一个可见的独立 bash tail 过程终端。
 			const plan = buildWindowsLiveLogLaunchPlan(liveLogPath);
-			mkdirSync(path.dirname(plan.launcher.path), { recursive: true });
-			writeFileSync(plan.launcher.path, plan.launcher.content, "utf8");
 			return spawnDetached(plan.command, plan.args, {
 				windowsHide: false,
 			});
@@ -182,6 +189,14 @@ end tell`;
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
+}
+
+let openLiveLogTerminalForTests:
+	| ((liveLogPath: string) => { ok: boolean; error?: string })
+	| undefined;
+
+export function setOpenLiveLogTerminalForTests(opener: typeof openLiveLogTerminalForTests): void {
+	openLiveLogTerminalForTests = opener;
 }
 
 /** 同步检测 Linux 上可用的终端模拟器(预检,避免 spawn 异步错误无法捕获)。 */
@@ -248,10 +263,6 @@ function getCwd(ctx: ExtensionContext): string {
 	return typeof cwd === "string" ? cwd : process.cwd();
 }
 
-export function sliceNewTranscript(before: string, after: string): string {
-	return after.startsWith(before) ? after.slice(before.length) : "";
-}
-
 function formatJudgeEscalation(context: JudgeEscalationContext): string {
 	return [
 		"[JUDGE ESCALATION]",
@@ -302,23 +313,12 @@ function createJudgeVerdictProviderHandle(options: {
 		async decide(context) {
 			const judgeSession = await getSession();
 			const decidePrompt = context.decidePrompt || buildDecidePrompt(options.specText, context.summary, context.tail);
-			const before = judgeSession.getTranscriptText();
-			await judgeSession.sendUserInput(decidePrompt);
-			const after = judgeSession.getTranscriptText();
-			const currentTurn = sliceNewTranscript(before, after);
+			const currentTurn = await judgeSession.ask(decidePrompt);
 			const verdict = parseJudgeVerdict(currentTurn);
-			// parse 失败不 ABORT 整个 driver —— Judge LLM 偶发输出格式异常(被截断/无 JSON/前缀漂移)
+			// parse 失败不 ABORT 整个 driver —— Judge LLM 偶发输出格式异常(被截断/无 JSON)
 			// 不该让一个跑了 N 步、方向正确的任务被判死刑。返回显式 parse_failed,
 			// 由 driver 层按 maxSteer 预算兜底,避免无限放行。
 			if (!verdict) {
-				// 运行时遥测(非临时诊断,长期保留):parse 失败时记录 sliceNewTranscript 现场,
-				// 用于定位前缀失配/transcript 漂移是否频繁(防 Judge 频繁兜底 pass)。
-				try {
-					const diagPath = path.join(options.runDir, "decide-parse-fail.log");
-					appendFileSync(diagPath, `[${new Date().toISOString()}] prefixMatched=${after.startsWith(before)} before.len=${before.length} after.len=${after.length} currentTurn.len=${currentTurn.length}\ncurrentTurn.head=${JSON.stringify(currentTurn.slice(0, 200))}\n---\n`);
-				} catch {
-					// 遥测失败不影响主流程
-				}
 				return {
 					action: "parse_failed",
 					keepWatching: true,
@@ -330,10 +330,7 @@ function createJudgeVerdictProviderHandle(options: {
 		async finalize(context) {
 			const judgeSession = await getSession();
 			const finalizePrompt = context.finalizePrompt || buildFinalizePrompt(options.specText, context.summary, context.tail);
-			const before = judgeSession.getTranscriptText();
-			await judgeSession.sendUserInput(finalizePrompt);
-			const after = judgeSession.getTranscriptText();
-			const currentTurn = sliceNewTranscript(before, after);
+			const currentTurn = await judgeSession.ask(finalizePrompt);
 			const verdict = parseJudgeFinalVerdict(currentTurn);
 			return verdict ?? {
 				status: "fail",
@@ -389,9 +386,22 @@ function formatDeliveryReport(options: {
 		}
 		return truncateForDisplay(trimmed, maxLength);
 	};
+	const extractEvidenceArtifacts = (): string[] => {
+		const paths = new Set<string>();
+		for (const item of options.finalVerdict.evidence) {
+			const matches = item.matchAll(/(?:[A-Za-z]:[\\/]|\/)[^\s`"',;，；。)）\]]+\.[A-Za-z0-9]{1,8}/g);
+			for (const match of matches) {
+				paths.add(match[0]);
+			}
+		}
+		return Array.from(paths).slice(0, 8);
+	};
 	const formatArtifact = (artifact: DriverSummary["artifacts"][number]): string => `- 📄 ${artifact.path}`;
+	const evidenceArtifacts = extractEvidenceArtifacts();
 	const outputLines = options.summary.artifacts.length > 0
 		? options.summary.artifacts.map(formatArtifact)
+		: evidenceArtifacts.length > 0
+			? evidenceArtifacts.map((path) => `- 📄 ${path}`)
 		: options.tail.assistantOutput.trim()
 			? [
 				"- driver 未产出文件,以下为 driver 的结果摘要:",
@@ -574,27 +584,115 @@ export function registerJudge(pi: ExtensionAPI): void {
 	let activeDriver: JudgeDriverHandle | undefined;
 	let activeJudgeVerdictProvider: JudgeVerdictProviderHandle | undefined;
 
+	function setJudgeStatus(ctx: ExtensionContext, label?: string): void {
+		const ui = ctx.ui as {
+			setStatus?: (key: string, value: string | undefined) => void;
+			theme?: { fg?: (tone: string, text: string) => string };
+		};
+		ui.setStatus?.("judge-mode", label ? (ui.theme?.fg?.("warning", label) ?? label) : undefined);
+	}
+
+	function isJudgeActive(): boolean {
+		return state.phase === "aligning" || state.phase === "driving" || state.phase === "delivering";
+	}
+
+	function enableJudge(ctx: ExtensionContext): void {
+		state = enterAligning(state);
+		pi.setActiveTools(JUDGE_ALIGNING_TOOLS);
+		ctx.ui.notify(`Judge aligning mode enabled. Tools: ${JUDGE_ALIGNING_TOOLS.join(", ")}`, "info");
+		setJudgeStatus(ctx, "⚖ judge");
+		persistState(pi, state);
+	}
+
+	function disableJudge(ctx: ExtensionContext): void {
+		activeDriver?.dispose();
+		activeDriver = undefined;
+		activeJudgeVerdictProvider?.dispose();
+		activeJudgeVerdictProvider = undefined;
+		state = abortJudge(state);
+		persistState(pi, state);
+		pi.setActiveTools(JUDGE_NORMAL_TOOLS);
+		clearJudgeDriverWidget(ctx.ui);
+		setJudgeStatus(ctx, undefined);
+		ctx.ui.notify("Judge disabled.", "info");
+	}
+
+	function checkBashLiveLogWindow(ctx: ExtensionContext): void {
+		const runDir = path.join(getCwd(ctx), ".judge", `judge-live-check-${Date.now()}`);
+		const liveLogPath = path.join(runDir, "live.log");
+		try {
+			mkdirSync(runDir, { recursive: true });
+			writeFileSync(liveLogPath, `[${new Date().toISOString()}] Judge bash live log check started\n`, "utf8");
+		} catch (error) {
+			ctx.ui.notify(`创建 bash 窗口检查日志失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+			return;
+		}
+
+		const result = openPreparedLiveLogTerminal(liveLogPath);
+		if (!result.ok) {
+			ctx.ui.notify(`打开 bash 新窗口失败(${result.error})。可手动 tail -f ${liveLogPath}`, "warning");
+			return;
+		}
+
+		for (let i = 1; i <= 3; i += 1) {
+			const timer = setTimeout(() => {
+				try {
+					appendFileSync(liveLogPath, `[${new Date().toISOString()}] Judge bash live log check update ${i}/3\n`, "utf8");
+				} catch {
+					// 检查日志后续写入失败不影响 Judge 主流程
+				}
+			}, i * 750);
+			timer.unref?.();
+		}
+		ctx.ui.notify(`已打开 bash 新窗口检查日志:${liveLogPath}`, "info");
+	}
+
+	async function resolveJudgeCommandArgs(args: unknown, ctx: ExtensionContext): Promise<string | undefined> {
+		const raw = String(args ?? "").trim();
+		if (raw) return raw;
+		if (!ctx.ui?.select) return "toggle";
+
+		const selection = await ctx.ui.select("Judge", JUDGE_COMMAND_MENU_OPTIONS);
+		if (!selection || selection === "Exit") return undefined;
+		if (selection === "Toggle Judge") return "toggle";
+		if (selection === "检查 bash 新窗口打开") return "check-bash-window";
+		return undefined;
+	}
+
 	registerQuestionnaire(pi);
 	pi.registerTool(judgeCompleteTool);
 
 	pi.registerCommand("judge", {
 		description: "Enter Judge aligning mode",
 		handler: async (args, ctx) => {
-			if (String(args ?? "").trim().toLowerCase() === "ack") {
+			const resolvedArgs = await resolveJudgeCommandArgs(args, ctx);
+			if (resolvedArgs === undefined) return;
+			const action = resolvedArgs.trim().toLowerCase();
+			if (action === "ack") {
 				if (state.phase === "delivering" && state.pendingAckStatus === "pass") {
 					state = completeJudge(state);
 					persistState(pi, state);
 					ctx.ui.notify("Judge delivery accepted.", "info");
 					clearJudgeDriverWidget(ctx.ui);
+					setJudgeStatus(ctx, undefined);
 					return;
 				}
 				ctx.ui.notify("No pending PASS Judge delivery to accept.", "warning");
 				return;
 			}
-			state = enterAligning(state);
-			pi.setActiveTools(JUDGE_ALIGNING_TOOLS);
-			ctx.ui.notify(`Judge aligning mode enabled. Tools: ${JUDGE_ALIGNING_TOOLS.join(", ")}`, "info");
-			persistState(pi, state);
+			if (action === "toggle") {
+				if (isJudgeActive()) {
+					disableJudge(ctx);
+					return;
+				}
+				enableJudge(ctx);
+				return;
+			}
+			if (action === "check-bash-window" || action === "check-bash" || action === "bash-window") {
+				checkBashLiveLogWindow(ctx);
+				return;
+			}
+			enableJudge(ctx);
 		},
 	});
 
@@ -637,6 +735,13 @@ export function registerJudge(pi: ExtensionAPI): void {
 		state = restored;
 		if (state.phase === "aligning") {
 			pi.setActiveTools(JUDGE_ALIGNING_TOOLS);
+			setJudgeStatus(ctx, "⚖ judge");
+		} else if (state.phase === "driving") {
+			setJudgeStatus(ctx, "⚖ driving");
+		} else if (state.phase === "delivering") {
+			setJudgeStatus(ctx, "⚖ delivering");
+		} else {
+			setJudgeStatus(ctx, undefined);
 		}
 	});
 
@@ -646,6 +751,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 		activeJudgeVerdictProvider?.dispose();
 		activeJudgeVerdictProvider = undefined;
 		if (ctx?.ui) clearJudgeDriverWidget(ctx.ui);
+		if (ctx?.ui) setJudgeStatus(ctx, undefined);
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -675,6 +781,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 			}
 			state = startDriving(state);
 			persistState(pi, state);
+			setJudgeStatus(ctx, "⚖ driving");
 			activeDriver?.dispose();
 			clearJudgeDriverWidget(ctx.ui); // 清理上一轮 driver 的 widget,新一轮会重建
 			const runId = `judge-${Date.now()}`;
@@ -695,8 +802,10 @@ export function registerJudge(pi: ExtensionAPI): void {
 			let lastWidgetSnapshot = "";
 			let lastJudgeVerdictLine = "";
 			let transcriptRefreshQueued = false;
+			let widgetActive = true;
 
 			function clearDriverWidget() {
+				widgetActive = false;
 				lastWidgetSnapshot = "";
 				lastJudgeVerdictLine = "";
 				clearJudgeDriverWidget(ctx.ui);
@@ -704,6 +813,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 
 			function refreshDriverWidget() {
 				transcriptRefreshQueued = false;
+				if (!widgetActive) return;
 				if (!activeDriver) return;
 				let lines: string[];
 				try {
@@ -764,11 +874,13 @@ export function registerJudge(pi: ExtensionAPI): void {
 						persistState(pi, state);
 						ctx.ui.notify(`Judge aborted driver: ${reason}`, "error");
 						clearDriverWidget();
+						setJudgeStatus(ctx, undefined);
 					},
 					async onFinalize(context) {
 						const canContinueAfterFail = state.keepWatching && context.summary.steerCount < state.maxSteer;
 						state = enterDelivering(state);
 						persistState(pi, state);
+						setJudgeStatus(ctx, "⚖ delivering");
 						const finalizePrompt = buildFinalizePrompt(specText, context.summary, context.tail);
 						const finalVerdict = await activeJudgeVerdictProvider!.finalize({
 							...context,
@@ -803,10 +915,13 @@ export function registerJudge(pi: ExtensionAPI): void {
 								persistState(pi, state);
 								ctx.ui.notify("Judge delivery accepted.", "info");
 								clearDriverWidget();
+								setJudgeStatus(ctx, undefined);
 								return { action: "pass", keepWatching: false };
 							}
 							state = markPendingAck(enterDelivering({ ...state, summary: deliveryReport }), "pass");
 							persistState(pi, state);
+							setJudgeStatus(ctx, "⚖ delivering");
+							clearDriverWidget();
 							ctx.ui.notify("Judge delivery is waiting for user acknowledgement. Run /judge ack to accept it later.", "warning");
 							return { action: "pass", keepWatching: false };
 						}
@@ -814,12 +929,14 @@ export function registerJudge(pi: ExtensionAPI): void {
 						if (!canContinueAfterFail) {
 							state = enterDelivering({ ...state, summary: deliveryReport });
 							persistState(pi, state);
+							clearDriverWidget();
 							ctx.ui.notify(`Judge final delivery failed and cannot continue automatically: ${finalVerdict.reason}`, "warning");
 							return { action: "pass", keepWatching: false };
 						}
 
 						state = startDriving({ ...state, summary: deliveryReport });
 						persistState(pi, state);
+						setJudgeStatus(ctx, "⚖ driving");
 						return {
 							action: "steer",
 							direction: [
@@ -838,6 +955,8 @@ export function registerJudge(pi: ExtensionAPI): void {
 					const escalationSummary = formatJudgeEscalation(context);
 					state = recordJudgeEscalation(state, escalationSummary);
 					persistState(pi, state);
+					setJudgeStatus(ctx, undefined);
+					clearDriverWidget();
 					pi.sendMessage(
 						{
 							customType: "judge-escalation",
@@ -856,19 +975,14 @@ export function registerJudge(pi: ExtensionAPI): void {
 					refreshDriverWidget();
 				},
 			});
-			// 委派后弹菜单:要不要开新终端实时看 driver + Judge 过程(零污染主 agent context)。
+			// 委派后自动打开新终端实时看 driver + Judge 过程(零污染主 agent context)。
 			if (ctx.hasUI) {
-				const viewChoice = await ctx.ui.select("Judge driver 即将开始。是否打开过程查看终端?", [
-					"打开(新窗口实时显示 driver + Judge 工作过程)",
-					"不打开(只在主界面看 widget)",
-				]);
-				if (viewChoice.startsWith("打开")) {
-					const result = openLiveLogTerminal(activeDriver.getLiveLogPath());
-					if (result.ok) {
-						ctx.ui.notify(`已打开过程终端,实时显示:${activeDriver.getLiveLogPath()}`, "info");
-					} else {
-						ctx.ui.notify(`打开过程终端失败(${result.error})。可手动 tail -f ${activeDriver.getLiveLogPath()}`, "warning");
-					}
+				const liveLogPath = activeDriver.getLiveLogPath?.() ?? path.join(runDir, "live.log");
+				const result = openPreparedLiveLogTerminal(liveLogPath);
+				if (result.ok) {
+					ctx.ui.notify(`已打开过程终端,实时显示:${liveLogPath}`, "info");
+				} else {
+					ctx.ui.notify(`打开过程终端失败(${result.error})。可手动 tail -f ${liveLogPath}`, "warning");
 				}
 			}
 			await activeDriver.start();
@@ -880,6 +994,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 		if (choice === "继续澄清") {
 			state = enterAligning(state);
 			persistState(pi, state);
+			setJudgeStatus(ctx, "⚖ judge");
 			pi.sendUserMessage("继续澄清 Judge RequirementsSpec。请优先使用 questionnaire，并重新输出可解析 JSON。");
 			return;
 		}
@@ -888,6 +1003,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 			const edited = await ctx.ui.editor("改需求", formatRequirementsSpec(spec));
 			state = enterAligning(state);
 			persistState(pi, state);
+			setJudgeStatus(ctx, "⚖ judge");
 			if (edited?.trim()) {
 				pi.sendUserMessage(`按以下修改后的需求继续 Judge aligning：\n\n${edited.trim()}`);
 			}

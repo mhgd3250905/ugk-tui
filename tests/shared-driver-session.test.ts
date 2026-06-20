@@ -56,6 +56,42 @@ test("shared driver session exposes the base creator and Flow compatibility alia
 	assert.equal(driver.visibleSession, sessionHandle);
 });
 
+test("driver session can collect assistant text for a single prompt without transcript diffing", async () => {
+	let listener: ((event: any) => void) | undefined;
+	const prompts: string[] = [];
+	const sessionHandle = {
+		isStreaming: false,
+		subscribe(callback: (event: any) => void) {
+			listener = callback;
+			listener({
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: "old verdict" },
+			});
+			return () => {};
+		},
+		async prompt(text: string) {
+			prompts.push(text);
+			listener?.({
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: `response for ${text}` },
+			});
+		},
+		async steer() {},
+		async followUp() {},
+		dispose() {},
+	};
+	const factory: DriverSessionFactory = async () => ({ session: sessionHandle });
+	const driver = await createDriverSession(createOptions(), factory);
+
+	const first = await driver.ask("first");
+	const second = await driver.ask("second");
+
+	assert.deepEqual(prompts, ["first", "second"]);
+	assert.equal(first, "response for first");
+	assert.equal(second, "response for second");
+	assert.equal(driver.getTranscriptText(), "old verdictresponse for firstresponse for second");
+});
+
 test("driver resource loader can inject an explicit agent definition", () => {
 	const agentDefinitionPath = path.resolve("agents/driver.md");
 	const options = createFlowDriverResourceLoaderOptions({

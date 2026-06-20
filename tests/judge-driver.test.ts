@@ -98,6 +98,32 @@ test("wakes up when the driver starts a guarded network or write-capable tool", 
 	]);
 });
 
+test("driver summary exposes running tools while waiting for tool results", async () => {
+	const harness = makeDriverHarness();
+	const wakeups: Array<{ runningTools?: Array<{ toolName: string; argsSummary: string; elapsedMs: number }> }> = [];
+	const driver = await createJudgeDriver(createOptions({
+		sessionFactory: harness.sessionFactory,
+		onWakeup: async ({ summary }) => {
+			wakeups.push({ runningTools: summary.runningTools });
+			return { action: "pass", keepWatching: true };
+		},
+	}));
+
+	harness.emit({ type: "tool_execution_start", toolName: "bash", input: { command: "python E:/AII/TUI/transcribe_full.py" } });
+	await harness.flush();
+
+	assert.equal(driver.getSummary().runningTools?.length, 1);
+	assert.equal(driver.getSummary().runningTools?.[0]?.toolName, "bash");
+	assert.match(driver.getSummary().runningTools?.[0]?.argsSummary ?? "", /transcribe_full\.py/);
+	assert.equal(typeof driver.getSummary().runningTools?.[0]?.elapsedMs, "number");
+	assert.equal(wakeups[0].runningTools?.[0]?.toolName, "bash");
+
+	harness.emit({ type: "tool_execution_end", toolName: "bash", isError: false, result: { ok: true } });
+	await harness.flush();
+
+	assert.deepEqual(driver.getSummary().runningTools, []);
+});
+
 test("wakeup summary snapshots do not mutate the driver summary", async () => {
 	const harness = makeDriverHarness();
 	const driver = await createJudgeDriver(createOptions({
@@ -355,6 +381,45 @@ test("agent_end does not wake Judge again after judge_complete completed", async
 	await harness.flush();
 
 	assert.deepEqual(wakeupReasons, ["judge_complete"]);
+});
+
+test("stale guarded wakeups queued before successful judge_complete cannot abort completed driver", async () => {
+	const harness = makeDriverHarness();
+	const wakeups: Array<{ reason: string; completed: boolean }> = [];
+	let releaseGuardedWakeup: (() => void) | undefined;
+
+	const driver = await createJudgeDriver(createOptions({
+		sessionFactory: harness.sessionFactory,
+		onWakeup: async ({ reason, summary }) => {
+			wakeups.push({ reason, completed: summary.completed });
+			if (reason === "guarded_tool_start") {
+				await new Promise<void>((resolve) => {
+					releaseGuardedWakeup = resolve;
+				});
+				return { action: "abort", reason: "stale guarded wakeup" };
+			}
+			return { action: "pass", keepWatching: true };
+		},
+	}));
+
+	harness.emit({ type: "tool_execution_start", toolName: "bash" });
+	await harness.flush();
+	assert.equal(typeof releaseGuardedWakeup, "function", "guarded wakeup should be pending");
+
+	harness.emit({ type: "tool_execution_start", toolName: "judge_complete" });
+	harness.emit({ type: "tool_execution_end", toolName: "judge_complete", isError: false });
+	releaseGuardedWakeup?.();
+	await harness.flush();
+
+	assert.deepEqual(wakeups, [
+		{ reason: "guarded_tool_start", completed: false },
+		{ reason: "judge_complete", completed: true },
+	]);
+	assert.equal(driver.getSummary().completed, true);
+	assert.notEqual(driver.getSummary().aborted, true);
+	assert.equal(driver.getSummary().abortReason, undefined);
+	assert.equal(harness.disposed, false);
+	assert.deepEqual(harness.userInputs, []);
 });
 
 test("agent_end wakes on the next turn after a completed turn is steered back", async () => {

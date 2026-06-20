@@ -18,9 +18,17 @@ export interface DriverArtifact {
 	kind: string;
 }
 
+export interface DriverRunningTool {
+	toolName: string;
+	argsSummary: string;
+	startedAtMs: number;
+	elapsedMs: number;
+}
+
 export interface DriverSummary {
 	pathsTried: DriverPathTried[];
 	artifacts: DriverArtifact[];
+	runningTools: DriverRunningTool[];
 	lastError?: string;
 	turnCount: number;
 	steerCount: number;

@@ -1,17 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
+	buildBashLiveLogCommand,
 	buildWindowsLiveLogLaunchPlan,
-	buildWindowsLiveLogLauncher,
 	registerJudge,
 	setJudgeDecisionSessionFactoryForTests,
 	setJudgeDriverFactoryForTests,
+	setOpenLiveLogTerminalForTests,
 	setJudgeVerdictProviderForTests,
-	sliceNewTranscript,
 } from "../extensions/judge/judge.ts";
 import { ALIGN_PROMPT } from "../extensions/judge/judge-prompts.ts";
+
+const noopLiveLogOpener = () => ({ ok: true });
 
 function makePi() {
 	const commands = new Map<string, any>();
@@ -57,10 +60,12 @@ function makePi() {
 }
 
 function makeCtx() {
+	setOpenLiveLogTerminalForTests(noopLiveLogOpener);
 	const notifications: Array<{ message: string; type?: string }> = [];
 	const selections: Array<{ title: string; options: string[] }> = [];
 	const editorPrompts: string[] = [];
 	const widgetCalls: Array<{ key: string; content: unknown }> = [];
+	const statusCalls: Array<{ key: string; value: unknown }> = [];
 	const ctx = {
 		hasUI: true,
 		mode: "tui",
@@ -87,9 +92,12 @@ function makeCtx() {
 			setWidget(key: string, content: unknown) {
 				widgetCalls.push({ key, content });
 			},
+			setStatus(key: string, value: unknown) {
+				statusCalls.push({ key, value });
+			},
 		},
 	};
-	return { ctx, notifications, selections, editorPrompts, widgetCalls };
+	return { ctx, notifications, selections, editorPrompts, widgetCalls, statusCalls };
 }
 
 function assistantWithSpec() {
@@ -125,24 +133,6 @@ function emitQuestionnaireConfirmed(handlers: { get(key: string): Array<(event: 
 	toolCallHandlers[0]({ toolName: "questionnaire", input: {} }, ctx);
 }
 
-test("sliceNewTranscript returns only the current turn when transcript keeps the old prefix", () => {
-	assert.equal(
-		sliceNewTranscript("old transcript\n", "old transcript\n```json\n{\"action\":\"pass\",\"keepWatching\":true}\n```"),
-		"```json\n{\"action\":\"pass\",\"keepWatching\":true}\n```",
-	);
-});
-
-test("sliceNewTranscript returns empty text on transcript prefix drift instead of reusing old verdicts", () => {
-	const driftedWindow = [
-		"```json",
-		"{\"action\":\"abort\",\"reason\":\"old verdict\"}",
-		"```",
-		"new undecidable turn",
-	].join("\n");
-
-	assert.equal(sliceNewTranscript("older transcript that was trimmed away", driftedWindow), "");
-});
-
 test("judge extension module avoids CommonJS require in ESM runtime paths", () => {
 	const source = readFileSync(path.resolve("extensions/judge/judge.ts"), "utf8");
 
@@ -163,40 +153,33 @@ test("registerJudge registers /judge, questionnaire, and judge_complete tool", a
 	assert.deepEqual(result.details, { completed: true, summary: "完成阶段 3 骨架" });
 });
 
-test("Windows live log launcher is written next to live.log with a stable filename", () => {
-	const liveLogPath = path.join("E:/workspace/project/.judge/judge-123", "live.log");
-	const launcher = buildWindowsLiveLogLauncher(liveLogPath);
-
-	assert.equal(
-		launcher.path,
-		path.join("E:/workspace/project/.judge/judge-123", "judge-live-launcher.cmd"),
-	);
-	assert.match(launcher.content, /Get-Content/);
-	assert.match(launcher.content, /live\.log/);
-	assert.match(launcher.content, /chcp 65001/);
-	assert.match(launcher.content, /-Encoding UTF8/);
-});
-
 test("Windows live log launch plan has no Windows Terminal special casing", () => {
 	const source = readFileSync(path.resolve("extensions/judge/judge.ts"), "utf8");
 
 	assert.doesNotMatch(source, /WT_SESSION|wt\.exe|commandExists/);
 });
 
-test("Windows live log launch plan opens a system-managed terminal window (conhost)", () => {
+test("bash live log command tails the normalized live.log path", () => {
+	const command = buildBashLiveLogCommand("E:\\workspace\\project with spaces\\.judge\\judge-123\\live.log");
+
+	assert.match(command, /mkdir -p/);
+	assert.match(command, /tail -n \+1 -f/);
+	assert.match(command, /E:\/workspace\/project with spaces\/\.judge\/judge-123\/live\.log/);
+	assert.doesNotMatch(command, /Get-Content/);
+});
+
+test("Windows live log launch plan opens bash tail in a visible system terminal", () => {
 	const liveLogPath = path.join("E:/workspace/project with spaces/.judge/judge-123", "live.log");
-	const plan = buildWindowsLiveLogLaunchPlan(liveLogPath);
+	const plan = buildWindowsLiveLogLaunchPlan(liveLogPath, "D:\\Git\\bin\\bash.exe");
 
 	assert.equal(plan.command, "cmd.exe");
 	assert.equal("shell" in plan, false);
-	assert.deepEqual(plan.args.slice(0, 3), ["/d", "/s", "/c"]);
-	assert.equal(plan.args.length, 4);
-	assert.equal(
-		plan.args[3],
-		`start "" "${path.join("E:/workspace/project with spaces/.judge/judge-123", "judge-live-launcher.cmd")}"`,
-	);
-	assert.equal(plan.launcher?.path, path.join("E:/workspace/project with spaces/.judge/judge-123", "judge-live-launcher.cmd"));
-	assert.match(plan.launcher?.content ?? "", /-Encoding UTF8/);
+	assert.deepEqual(plan.args.slice(0, 5), ["/d", "/s", "/c", "start", "\"\""]);
+	assert.equal(plan.args[5], "D:\\Git\\bin\\bash.exe");
+	assert.deepEqual(plan.args.slice(6, 9), ["--noprofile", "--norc", "-lc"]);
+	assert.match(plan.args[9], /tail -n \+1 -f/);
+	assert.equal("launcher" in plan, false);
+	assert.doesNotMatch(plan.args.join(" "), /Get-Content/);
 });
 
 test("/judge enters aligning mode, switches to readonly tools, and injects ALIGN_PROMPT", async () => {
@@ -212,6 +195,91 @@ test("/judge enters aligning mode, switches to readonly tools, and injects ALIGN
 	assert.equal(injected.message.customType, "judge-align-context");
 	assert.equal(injected.message.content, ALIGN_PROMPT);
 	assert.equal(injected.message.display, false);
+});
+
+test("/judge with no args opens an action menu whose toggle enables Judge", async () => {
+	const { pi, commands, handlers, activeTools } = makePi();
+	const { ctx, selections, statusCalls } = makeCtx();
+	registerJudge(pi as any);
+
+	await commands.get("judge").handler("", ctx);
+	const injected = await handlers.get("before_agent_start")![0]({}, ctx);
+
+	assert.deepEqual(selections.at(-1)?.options, ["Toggle Judge", "检查 bash 新窗口打开", "Exit"]);
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
+	assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: "⚖ judge" });
+	assert.equal(injected.message.content, ALIGN_PROMPT);
+});
+
+test("/judge toggle disables an active Judge session", async () => {
+	const { pi, commands, handlers, activeTools } = makePi();
+	const { ctx, notifications, statusCalls, widgetCalls } = makeCtx();
+	registerJudge(pi as any);
+
+	await commands.get("judge").handler("toggle", ctx);
+	await commands.get("judge").handler("toggle", ctx);
+	const injected = await handlers.get("before_agent_start")![0]({}, ctx);
+
+	assert.equal(injected, undefined);
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write"]);
+	assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: undefined });
+	assert.deepEqual(widgetCalls.at(-1), { key: "judge-driver-view", content: undefined });
+	assert.match(notifications.at(-1)?.message ?? "", /Judge disabled/);
+});
+
+test("/judge menu can check opening a bash live log window", async () => {
+	const { pi, commands } = makePi();
+	const { ctx, notifications } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-menu-"));
+	const openedPaths: string[] = [];
+	(ctx as any).cwd = tmp;
+	(ctx.ui as any).select = (_title: string, options: string[]) => options.find((option) => option.includes("检查 bash")) ?? options[0];
+	setOpenLiveLogTerminalForTests((liveLogPath) => {
+		openedPaths.push(liveLogPath);
+		return { ok: true };
+	});
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+
+		assert.equal(openedPaths.length, 1);
+		assert.match(openedPaths[0], /judge-live-check-\d+[/\\]live\.log$/);
+		assert.equal(existsSync(openedPaths[0]), true);
+		assert.match(readFileSync(openedPaths[0], "utf8"), /Judge bash live log check started/);
+		assert.match(notifications.at(-1)?.message ?? "", /已打开 bash 新窗口检查日志/);
+	} finally {
+		setOpenLiveLogTerminalForTests(noopLiveLogOpener);
+		rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test("judge mode writes footer status like plan mode and clears it on shutdown", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx, statusCalls } = makeCtx();
+	setJudgeDriverFactoryForTests(async () => ({
+		async start() {},
+		dispose() {},
+		getSummary: () => ({ pathsTried: [], turnCount: 1, completed: false }),
+		getWidgetLines: () => [],
+		getTranscriptText: () => "",
+		getLiveLogPath: () => "E:/tmp/live.log",
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: "⚖ judge" });
+
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+		assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: "⚖ driving" });
+
+		await handlers.get("session_shutdown")![0]({}, ctx);
+		assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: undefined });
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+	}
 });
 
 test("agent_end parses RequirementsSpec and delegate choice starts a real Judge driver", async () => {
@@ -260,6 +328,40 @@ test("agent_end parses RequirementsSpec and delegate choice starts a real Judge 
 	assert.match((wakeupResults[0] as any).decidePrompt, /DriverSummary/);
 	assert.match((wakeupResults[0] as any).spec, /完成 Judge 阶段 2/);
 	assert.match(notifications.at(-1)?.message ?? "", /Judge driver started/);
+});
+
+test("delegating a Judge driver automatically opens the live log terminal", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-delegate-"));
+	const openedPaths: string[] = [];
+	const liveLogPath = path.join(tmp, ".judge", "run-1", "live.log");
+	setJudgeDriverFactoryForTests(async () => ({
+		async start() {},
+		dispose() {},
+		getSummary: () => ({ pathsTried: [], artifacts: [], runningTools: [], turnCount: 1, steerCount: 0, completed: false }),
+		getWidgetLines: () => [],
+		getTranscriptText: () => "",
+		getLiveLogPath: () => liveLogPath,
+	}));
+	setOpenLiveLogTerminalForTests((liveLogPath) => {
+		assert.equal(existsSync(liveLogPath), true);
+		openedPaths.push(liveLogPath);
+		return { ok: true };
+	});
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+
+		assert.deepEqual(openedPaths, [liveLogPath]);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		setOpenLiveLogTerminalForTests(noopLiveLogOpener);
+		rmSync(tmp, { recursive: true, force: true });
+	}
 });
 
 test("delegate driver uses ctx.cwd for cwd and runDir", async () => {
@@ -510,10 +612,67 @@ test("default Judge wakeup path does not reuse an old verdict when the current t
 	]);
 });
 
+test("default Judge wakeup path parses the collected current response even when transcript text drifts", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	const wakeupResults: unknown[] = [];
+	setJudgeDecisionSessionFactoryForTests(async () => {
+		let listener: ((event: any) => void) | undefined;
+		return {
+			session: {
+				isStreaming: false,
+				subscribe(callback: (event: any) => void) {
+					listener = callback;
+					return () => {};
+				},
+				async prompt() {
+					listener?.({
+						type: "message_update",
+						assistantMessageEvent: {
+							type: "text_delta",
+							delta: '{"action":"pass","reason":"current response","keepWatching":true}',
+						},
+					});
+				},
+				async steer() {},
+				async followUp() {},
+				dispose() {},
+			},
+		};
+	});
+	setJudgeDriverFactoryForTests(async (options: any) => ({
+		async start() {
+			wakeupResults.push(await options.onWakeup({
+				reason: "guarded_tool_start",
+				summary: { pathsTried: ["bash"], turnCount: 1, completed: false },
+				transcript: "trimmed window without old prefix",
+			}));
+		},
+		dispose() {},
+		getSummary() {
+			return { pathsTried: [], turnCount: 0, completed: false };
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		setJudgeDecisionSessionFactoryForTests(undefined);
+	}
+
+	assert.deepEqual(wakeupResults, [
+		{ action: "pass", reason: "current response", keepWatching: true },
+	]);
+});
+
 test("agent_end continue clarification keeps aligning and asks the agent to clarify", async () => {
 	const { pi, commands, handlers, userMessages } = makePi();
 	const { ctx } = makeCtx();
-	ctx.ui.select = () => "继续澄清";
+	ctx.ui.select = (title: string, options: string[]) => title === "Judge" ? options[0] : "继续澄清";
 	registerJudge(pi as any);
 
 	await commands.get("judge").handler("", ctx);
@@ -527,7 +686,7 @@ test("agent_end continue clarification keeps aligning and asks the agent to clar
 test("agent_end edit requirements returns to aligning with editor text", async () => {
 	const { pi, commands, handlers, userMessages } = makePi();
 	const { ctx } = makeCtx();
-	ctx.ui.select = () => "改需求";
+	ctx.ui.select = (title: string, options: string[]) => title === "Judge" ? options[0] : "改需求";
 	registerJudge(pi as any);
 
 	await commands.get("judge").handler("", ctx);

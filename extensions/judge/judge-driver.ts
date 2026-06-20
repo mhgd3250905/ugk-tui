@@ -94,9 +94,14 @@ export const DRIVER_AGENT_DEFINITION_PATH = path.resolve(
 );
 
 function cloneSummary(summary: DriverSummary): DriverSummary {
+	const now = Date.now();
 	return {
 		pathsTried: summary.pathsTried.map((path) => ({ ...path })),
 		artifacts: summary.artifacts.map((artifact) => ({ ...artifact })),
+		runningTools: summary.runningTools.map((tool) => ({
+			...tool,
+			elapsedMs: Math.max(0, now - tool.startedAtMs),
+		})),
 		lastError: summary.lastError,
 		turnCount: summary.turnCount,
 		steerCount: summary.steerCount,
@@ -137,6 +142,13 @@ function upsertToolResult(summary: DriverSummary, event: DriverSessionEvent): vo
 	}
 	path.resultSummary = summarizeToolResult(event.result ?? event.output);
 	path.failed = event.isError === true;
+}
+
+function removeRunningTool(summary: DriverSummary, toolName: string): void {
+	const index = summary.runningTools.findIndex((tool) => tool.toolName === toolName);
+	if (index >= 0) {
+		summary.runningTools.splice(index, 1);
+	}
 }
 
 function defaultWakeup(): JudgeVerdict {
@@ -242,6 +254,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 	const summary: DriverSummary = {
 		pathsTried: [],
 		artifacts: [],
+		runningTools: [],
 		turnCount: 0,
 		steerCount: 0,
 		completed: false,
@@ -254,6 +267,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 	let consecutiveParseFailures = 0;
 	const transcriptEvents: DriverSessionEvent[] = [];
 	let wakeupQueue = Promise.resolve();
+	let wakeupGeneration = 0;
 	const decide = opts.onWakeup ?? defaultWakeup;
 
 	// live.log:把每个 driver 事件 append 到 <runDir>/live.log,供外部终端 tail -f 实时查看。
@@ -271,6 +285,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 
 	function enqueueWakeup(reason: string, toolName?: string): void {
 		if (!watching || disposed) return;
+		const generation = wakeupGeneration;
 		const snapshot = cloneSummary(summary);
 		const tail = extractTail(transcriptEvents);
 		const transcript = driver?.getTranscriptText() ?? "";
@@ -279,6 +294,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 			.catch(() => undefined)
 			.then(async () => {
 				if (!watching || disposed) return;
+				if (generation !== wakeupGeneration) return;
 				try {
 					const verdict = await decide({
 						reason,
@@ -288,6 +304,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 						transcript,
 						decidePrompt,
 					});
+					if (generation !== wakeupGeneration) return;
 
 					// 把 Judge 判定报给 UI(用于可视化),在副作用执行前就报,保证 UI 即时。
 					writeLiveLog(`[Judge] ${formatJudgeVerdictForLog(verdict)}`);
@@ -373,11 +390,18 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 		if (!event.toolName) return;
 
 		if (event.type === "tool_execution_start") {
+			const argsSummary = summarizeToolArgs(event.input);
 			summary.pathsTried.push({
 				toolName: event.toolName,
-				argsSummary: summarizeToolArgs(event.input),
+				argsSummary,
 				resultSummary: "",
 				failed: false,
+			});
+			summary.runningTools.push({
+				toolName: event.toolName,
+				argsSummary,
+				startedAtMs: Date.now(),
+				elapsedMs: 0,
 			});
 			addArtifacts(summary, extractArtifactsFromToolInput(event.toolName, event.input));
 			if (event.toolName === "judge_complete") {
@@ -392,6 +416,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 
 		if (event.type === "tool_execution_end") {
 			upsertToolResult(summary, event);
+			removeRunningTool(summary, event.toolName);
 			if (event.toolName === "judge_complete") {
 				completionStarted = false;
 				if (event.isError) {
@@ -400,6 +425,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 					return;
 				}
 				summary.completed = true;
+				wakeupGeneration += 1;
 				enqueueWakeup("judge_complete", event.toolName);
 				return;
 			}

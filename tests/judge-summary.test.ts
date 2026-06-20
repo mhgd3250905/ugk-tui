@@ -135,6 +135,8 @@ test("judge driver maintains structured summary, artifacts, and wakeup tail", as
 		},
 	]);
 	assert.deepEqual(summary.artifacts, [{ path: "E:/AII/ugk-core/out/zhihu.md", kind: "file" }]);
+	assert.equal(summary.runningTools.length, 1);
+	assert.equal(summary.runningTools[0].toolName, "write");
 	assert.equal(wakeups.at(-1).tail.assistantOutput, "拿到了第三方聚合数据。");
 	assert.deepEqual(wakeups.at(-1).tail.toolCalls.map((call: any) => call.toolName), ["chrome_cdp", "write"]);
 });
@@ -147,6 +149,7 @@ test("buildDecidePrompt includes spec, structured summary, and transcript tail",
 				{ toolName: "chrome_cdp", argsSummary: "url=https://tophub.today", resultSummary: "200 OK", failed: false },
 			],
 			artifacts: [{ path: "E:/out.md", kind: "file" }],
+			runningTools: [{ toolName: "bash", argsSummary: "python transcribe.py", startedAtMs: 10, elapsedMs: 120000 }],
 			turnCount: 1,
 			completed: false,
 		},
@@ -161,6 +164,8 @@ test("buildDecidePrompt includes spec, structured summary, and transcript tail",
 	assert.match(prompt, /RequirementsSpec/);
 	assert.match(prompt, /DriverSummary/);
 	assert.match(prompt, /TranscriptTail/);
+	assert.match(prompt, /runningTools/);
+	assert.match(prompt, /python transcribe\.py/);
 	assert.match(prompt, /tophub\.today/);
 	assert.match(prompt, /对照 RequirementsSpec/);
 });

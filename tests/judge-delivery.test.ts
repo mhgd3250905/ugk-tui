@@ -4,9 +4,12 @@ import {
 	registerJudge,
 	setJudgeDecisionSessionFactoryForTests,
 	setJudgeDriverFactoryForTests,
+	setOpenLiveLogTerminalForTests,
 } from "../extensions/judge/judge.ts";
 import { buildFinalizePrompt } from "../extensions/judge/judge-prompts.ts";
 import { parseJudgeFinalVerdict } from "../extensions/judge/judge-utils.ts";
+
+const noopLiveLogOpener = () => ({ ok: true });
 
 function makePi() {
 	const commands = new Map<string, any>();
@@ -40,7 +43,9 @@ function makePi() {
 }
 
 function makeCtx(confirmResult = true) {
+	setOpenLiveLogTerminalForTests(noopLiveLogOpener);
 	const notifications: Array<{ message: string; type?: string }> = [];
+	const widgetCalls: Array<{ key: string; content: unknown }> = [];
 	const ctx = {
 		hasUI: true,
 		mode: "tui",
@@ -64,9 +69,12 @@ function makeCtx(confirmResult = true) {
 			confirm() {
 				return confirmResult;
 			},
+			setWidget(key: string, content: unknown) {
+				widgetCalls.push({ key, content });
+			},
 		},
 	};
-	return { ctx, notifications };
+	return { ctx, notifications, widgetCalls };
 }
 
 function assistantWithSpec() {
@@ -183,7 +191,7 @@ test("buildFinalizePrompt asks Judge to compare every acceptance item", () => {
 
 test("final PASS displays delivery report and user ack marks Judge done", async () => {
 	const { pi, commands, handlers, sentMessages, entries } = makePi();
-	const { ctx } = makeCtx(true);
+	const { ctx, widgetCalls } = makeCtx(true);
 	const prompts: string[] = [];
 	installDecisionSession([
 		JSON.stringify({
@@ -194,11 +202,19 @@ test("final PASS displays delivery report and user ack marks Judge done", async 
 	], prompts);
 	setJudgeDriverFactoryForTests(async (options: any) => ({
 		async start() {
+			options.onTranscriptUpdate?.();
+			await new Promise((resolve) => setTimeout(resolve, 0));
 			await options.onWakeup(completedWakeupContext());
 		},
 		dispose() {},
 		getSummary() {
 			return completedWakeupContext().summary;
+		},
+		getWidgetLines() {
+			return ["driver delivery visible"];
+		},
+		getTranscriptText() {
+			return "driver delivery visible";
 		},
 	}));
 	registerJudge(pi as any);
@@ -221,6 +237,7 @@ test("final PASS displays delivery report and user ack marks Judge done", async 
 	assert.match(report, /📦 产出/);
 	assert.match(report, /🛣️ 走过的路径\(1 步,steer 0\/5\)/);
 	assert.match(report, /pathsTried 显示 write 成功/);
+	assert.deepEqual(widgetCalls.at(-1), { key: "judge-driver-view", content: undefined });
 });
 
 test("final PASS delivery report prioritizes decision evidence and hides raw logs", async () => {
@@ -287,16 +304,31 @@ test("final PASS delivery report prioritizes decision evidence and hides raw log
 	assert.doesNotMatch(report, /TranscriptTail/);
 });
 
-test("final PASS without user ack can be accepted later with /judge ack", async () => {
-	const { pi, commands, handlers, entries } = makePi();
-	const { ctx, notifications } = makeCtx(false);
+test("final PASS delivery report uses evidence file paths when driver artifacts are empty", async () => {
+	const { pi, commands, handlers, sentMessages } = makePi();
+	const { ctx } = makeCtx(true);
 	const prompts: string[] = [];
 	installDecisionSession([
-		JSON.stringify({ status: "pass", reason: "满足", evidence: ["文件存在"] }),
+		JSON.stringify({
+			status: "pass",
+			reason: "交付内容满足全部验收条件",
+			evidence: [
+				"切片文件存在: E:/AII/TUI/demo/slice_10min.m4a",
+				"转录结果存在: E:/AII/TUI/demo/slice_10min_transcript.txt",
+				"POSIX 报告存在: /tmp/ugk-demo/report.md",
+			],
+		}),
 	], prompts);
 	setJudgeDriverFactoryForTests(async (options: any) => ({
 		async start() {
-			await options.onWakeup(completedWakeupContext());
+			await options.onWakeup(completedWakeupContext({
+				summary: {
+					pathsTried: [{ toolName: "judge_complete", argsSummary: "", resultSummary: "ok", failed: false }],
+					artifacts: [],
+					steerCount: 0,
+				},
+				tail: { assistantOutput: "" },
+			}));
 		},
 		dispose() {},
 		getSummary() {
@@ -314,10 +346,54 @@ test("final PASS without user ack can be accepted later with /judge ack", async 
 		setJudgeDecisionSessionFactoryForTests(undefined);
 	}
 
+	const report = sentMessages.map((entry) => entry.message.content).join("\n");
+	assert.match(report, /📦 产出/);
+	assert.match(report, /E:\/AII\/TUI\/demo\/slice_10min\.m4a/);
+	assert.match(report, /E:\/AII\/TUI\/demo\/slice_10min_transcript\.txt/);
+	assert.match(report, /\/tmp\/ugk-demo\/report\.md/);
+	assert.doesNotMatch(report, /未产出/);
+});
+
+test("final PASS without user ack can be accepted later with /judge ack", async () => {
+	const { pi, commands, handlers, entries } = makePi();
+	const { ctx, notifications, widgetCalls } = makeCtx(false);
+	const prompts: string[] = [];
+	installDecisionSession([
+		JSON.stringify({ status: "pass", reason: "满足", evidence: ["文件存在"] }),
+	], prompts);
+	setJudgeDriverFactoryForTests(async (options: any) => ({
+		async start() {
+			options.onTranscriptUpdate?.();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			await options.onWakeup(completedWakeupContext());
+		},
+		dispose() {},
+		getSummary() {
+			return completedWakeupContext().summary;
+		},
+		getWidgetLines() {
+			return ["driver delivery visible"];
+		},
+		getTranscriptText() {
+			return "driver delivery visible";
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire", input: {} }, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		setJudgeDecisionSessionFactoryForTests(undefined);
+	}
+
 	assert.equal(entries.at(-1)?.data.phase, "delivering");
 	assert.equal(entries.at(-1)?.data.pendingAckStatus, "pass");
 	assert.notEqual(entries.at(-1)?.data.phase, "done");
 	assert.match(notifications.map((entry) => entry.message).join("\n"), /\/judge ack/);
+	assert.deepEqual(widgetCalls.at(-1), { key: "judge-driver-view", content: undefined });
 
 	await commands.get("judge").handler("ack", ctx);
 

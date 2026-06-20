@@ -85,4 +85,6 @@ test("parseJudgeVerdict rejects malformed verdicts", () => {
 test("DECIDE_PROMPT requires pass and steer verdicts to include a reason", () => {
 	assert.match(DECIDE_PROMPT, /"action":"pass","reason"/);
 	assert.match(DECIDE_PROMPT, /"action":"steer","direction".*"reason"/);
+	assert.match(DECIDE_PROMPT, /runningTools/);
+	assert.match(DECIDE_PROMPT, /waiting for tool results/);
 });

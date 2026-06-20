@@ -32,6 +32,10 @@ type DriverSessionEvent = {
 		type?: string;
 		delta?: string;
 	};
+	message?: {
+		role?: string;
+		content?: unknown;
+	};
 	toolName?: string;
 	isError?: boolean;
 };
@@ -104,6 +108,22 @@ function formatRuntimeEvent(event: DriverSessionEvent): string | undefined {
 		return `[tool] ${event.toolName} ${event.isError ? "failed" : "completed"}`;
 	}
 	return undefined;
+}
+
+function getAssistantMessageText(event: DriverSessionEvent): string {
+	if (event.type !== "message_end") return "";
+	if (event.message?.role !== "assistant") return "";
+	const content = event.message.content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((block) => {
+			if (!block || typeof block !== "object" || Array.isArray(block)) return "";
+			const record = block as Record<string, unknown>;
+			return record.type === "text" && typeof record.text === "string" ? record.text : "";
+		})
+		.filter(Boolean)
+		.join("\n");
 }
 
 const SUPPRESSED_DRIVER_UI_METHODS = new Set<PropertyKey>([
@@ -216,6 +236,7 @@ export interface DriverSession {
 	readonly visibleSession?: unknown;
 	start(): Promise<void>;
 	sendUserInput(text: string): Promise<void>;
+	ask(text: string): Promise<string>;
 	getTranscriptText(): string;
 	getWidgetLines(): string[];
 	dispose(): void;
@@ -230,6 +251,7 @@ export async function createDriverSession(
 	const { session } = await factory(options);
 	assertExpectedDriverTools(session, options.expectedToolNames);
 	const transcript = new DriverTranscriptTail();
+	const activeCaptures: Array<{ chunks: string[] }> = [];
 	const unsubscribe = session.subscribe((event) => {
 		if (
 			event.type === "message_update" &&
@@ -237,8 +259,19 @@ export async function createDriverSession(
 			typeof event.assistantMessageEvent.delta === "string"
 		) {
 			transcript.appendText(event.assistantMessageEvent.delta);
+			for (const capture of activeCaptures) {
+				capture.chunks.push(event.assistantMessageEvent.delta);
+			}
 			options.onTranscriptUpdate?.();
 			return;
+		}
+		if (event.type === "message_end") {
+			const text = getAssistantMessageText(event);
+			for (const capture of activeCaptures) {
+				if (capture.chunks.length === 0 && text) {
+					capture.chunks.push(text);
+				}
+			}
 		}
 
 		const runtimeLine = formatRuntimeEvent(event);
@@ -263,6 +296,23 @@ export async function createDriverSession(
 				return;
 			}
 			await session.prompt(text);
+		},
+		async ask(text: string) {
+			const capture = { chunks: [] as string[] };
+			activeCaptures.push(capture);
+			try {
+				if (session.isStreaming) {
+					await session.steer(text);
+				} else {
+					await session.prompt(text);
+				}
+				return capture.chunks.join("");
+			} finally {
+				const index = activeCaptures.indexOf(capture);
+				if (index >= 0) {
+					activeCaptures.splice(index, 1);
+				}
+			}
 		},
 		getTranscriptText() {
 			return transcript.toText();

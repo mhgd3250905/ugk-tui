@@ -19,6 +19,7 @@
 - `cron` — 定时任务管理(status/list/add/remove/history,代理常驻 cron 服务)
 - `chrome_cdp` — 受保护的本地登录态 Chrome 控制(status/tabs/navigate/evaluate/screenshot,默认 ask-gated)
 - `judge` — 实时监督模式:先对齐 RequirementsSpec,再委派 Driver 执行,由 Judge 在关键节点放行/纠偏/终止/最终验收
+- `mcp` — MCP stdio client:从 user/project/local 配置连接外部 MCP server,把 tools 注册为 `server__tool`,含 spawn policy、per-tool ask/on/off、reload stale 处理和 session 清理
 
 ### plan-mode 只读探索模式
 - `/plan` 切换只读模式(或 Ctrl+Alt+P)
@@ -41,6 +42,16 @@
 - 仅用于 SSO/cookie/CAPTCHA/私有工作区/本地 Chrome 状态,不替代普通联网检索
 - 详见 `skills/chrome-cdp-guide/SKILL.md` 与 `extensions/chrome-cdp/README.md`
 
+### MCP tools 接入
+- `/mcp status|ask|on|off|reload|enable <server>|disable <server>`
+- 配置路径:user `~/.config/ugk/mcp.json`(Win `%APPDATA%\ugk\mcp.json`),project `.mcp.json`,local `.mcp.local.json`
+- scope 合并:user < project < local;同名 server 高 scope 完全覆盖低 scope
+- project/local scope 连接前必须确认;非交互模式 fail-closed,只允许 user scope
+- 工具名统一 `server__tool`,server/tool 名会 provider-safe 规范化
+- `/mcp reload` 不调用不存在的 unregisterTool;消失 server 的工具从 active tools 下线,stale 工具被调用时返回 disconnected
+- `/doctor` 的 MCP 项只读配置和当前 registry 状态,绝不 spawn server
+- 详见 `skills/mcp-guide/SKILL.md`
+
 ### Judge 实时监督模式
 - `/judge` 打开 Judge 菜单;`/judge toggle` 开关;`/judge check-bash-window` 检查 bash 新窗口 live log;`/judge ack` 接受等待确认的 PASS 交付。
 - 三阶段:aligning(用 questionnaire 对齐 Spec) → driving(Driver 执行 + Judge 监督纠偏) → delivering(最终验收和用户确认)。
@@ -59,6 +70,7 @@
 - `/check-env` — 一键自检 adb/scrcpy/设备连接,缺失项给 winget 安装命令
 - `/update` — 手动检查 GitHub main 并用 UGK 语境提示“现在更新/跳过本次/跳过到下个版本”
 - `/cdp` — 管理本地 Chrome CDP 访问模式、端口、启动和标签页
+- `/mcp` — 管理 MCP server 状态、权限模式、reload、enable/disable
 - `/ugk-ui` — 开关 ugk 品牌 UI
 - `/implement` `/scout-and-plan` `/implement-and-review` — subagent 流水线
 
@@ -78,6 +90,7 @@
 - `subagent-guide` — 子代理委派指南(@mention/三模式/自定义)
 - `cron-guide` — 定时任务指南(服务启动/crontab 速查/安全说明)
 - `chrome-cdp-guide` — 本地登录态 Chrome/CDP 使用边界与安全流程
+- `mcp-guide` — MCP server 配置、权限、命令和排障指南
 - `skill-creator` — 创建、改进和评测 agent skill(来自 Anthropic skills)
 - `docx` — 创建、读取、编辑 Word `.docx` 文档(来自 Anthropic skills)
 

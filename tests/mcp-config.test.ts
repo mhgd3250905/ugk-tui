@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
 	interpolateEnv,
+	loadInstallConfig,
 	loadMcpConfig,
 	loadProjectConfig,
 	loadUserConfig,
@@ -46,7 +47,37 @@ test("loads a valid project .mcp.json", () => {
 	});
 });
 
-test("merges scopes with local overriding project overriding user", () => {
+test("loads install config from the UGK package root", () => {
+	const packageRoot = makeTempDir();
+	writeJson(path.join(packageRoot, "mcp.json"), {
+		mcpServers: {
+			packaged: {
+				command: "node",
+				args: ["server.mjs"],
+			},
+		},
+	});
+
+	const config = loadInstallConfig(packageRoot);
+	const packaged = config.servers.get("packaged");
+
+	assert.equal(config.errors.length, 0);
+	assert.equal(packaged?.name, "packaged");
+	assert.equal(packaged?.scope, "install");
+	assert.deepEqual(packaged?.config, {
+		command: "node",
+		args: ["server.mjs"],
+	});
+});
+
+test("merges scopes with local overriding project overriding user overriding install", () => {
+	const install = {
+		servers: new Map([
+			["shared", { name: "shared", scope: "install" as const, config: { command: "install-cmd" } }],
+			["installOnly", { name: "installOnly", scope: "install" as const, config: { command: "install-only" } }],
+		]),
+		errors: [],
+	};
 	const user = {
 		servers: new Map([
 			["shared", { name: "shared", scope: "user" as const, config: { command: "user-cmd" } }],
@@ -69,11 +100,12 @@ test("merges scopes with local overriding project overriding user", () => {
 		errors: [],
 	};
 
-	const merged = mergeConfigs(user, project, local);
+	const merged = mergeConfigs(install, user, project, local);
 
 	assert.equal(merged.errors.length, 0);
 	assert.equal(merged.servers.get("shared")?.scope, "local");
 	assert.equal(merged.servers.get("shared")?.config.command, "local-cmd");
+	assert.equal(merged.servers.get("installOnly")?.config.command, "install-only");
 	assert.equal(merged.servers.get("userOnly")?.config.command, "user-only");
 	assert.equal(merged.servers.get("projectOnly")?.config.command, "project-only");
 	assert.equal(merged.servers.get("localOnly")?.config.command, "local-only");
@@ -81,7 +113,16 @@ test("merges scopes with local overriding project overriding user", () => {
 
 test("higher scope replaces a same-name server without field-level merging", () => {
 	const cwd = makeTempDir();
+	const packageRoot = path.join(cwd, "package");
 	const appData = path.join(cwd, "appdata");
+	writeJson(path.join(packageRoot, "mcp.json"), {
+		mcpServers: {
+			shared: {
+				command: "install-cmd",
+				args: ["from-install"],
+			},
+		},
+	});
 	writeJson(path.join(appData, "ugk", "mcp.json"), {
 		mcpServers: {
 			shared: {
@@ -108,6 +149,7 @@ test("higher scope replaces a same-name server without field-level merging", () 
 	});
 
 	const merged = loadMcpConfig(cwd, {
+		packageRoot,
 		platform: "win32",
 		env: { APPDATA: appData },
 		homedir: () => path.join(cwd, "home"),
@@ -179,6 +221,7 @@ test("returns an empty config when no config files exist", () => {
 	const cwd = makeTempDir();
 
 	const config = loadMcpConfig(cwd, {
+		packageRoot: path.join(cwd, "package"),
 		platform: "linux",
 		env: {},
 		homedir: () => path.join(cwd, "home"),

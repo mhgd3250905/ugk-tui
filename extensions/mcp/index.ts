@@ -32,6 +32,7 @@ type McpRuntimeContext = {
 type McpExtensionDeps = {
 	registry?: McpRegistry;
 	permissionState?: McpPermissionState;
+	packageRoot?: string;
 	loadConfig?: (cwd: string) => McpConfig | Promise<McpConfig>;
 };
 
@@ -102,6 +103,7 @@ export function registerMcp(pi: ExtensionAPI, deps: McpExtensionDeps = {}): McpE
 
 export function createMcpDoctorCheck(deps: {
 	registry: Pick<McpRegistry, "connections">;
+	packageRoot?: string;
 	loadConfig?: (cwd: string) => McpConfig | Promise<McpConfig>;
 	cwd?: () => string;
 }): DoctorCheck {
@@ -111,7 +113,7 @@ export function createMcpDoctorCheck(deps: {
 		category: "mcp",
 		async run() {
 			const cwd = deps.cwd?.() ?? process.cwd();
-			const config = deps.loadConfig ? await deps.loadConfig(cwd) : loadMcpConfig(cwd);
+			const config = deps.loadConfig ? await deps.loadConfig(cwd) : loadMcpConfig(cwd, { packageRoot: deps.packageRoot });
 			const connected = Array.from(deps.registry.connections.values()).filter(
 				(connection) => connection.status === "connected",
 			).length;
@@ -136,7 +138,7 @@ async function connectConfiguredServers(
 	deps: McpExtensionDeps,
 ): Promise<McpStartupResult> {
 	const cwd = resolveCwd(ctx);
-	const config = deps.loadConfig ? await deps.loadConfig(cwd) : loadMcpConfig(cwd);
+	const config = deps.loadConfig ? await deps.loadConfig(cwd) : loadMcpConfig(cwd, { packageRoot: deps.packageRoot });
 	const failed = configErrorsToFailedServers(config);
 	const warnings: string[] = [];
 	const connections: McpConnection[] = [];

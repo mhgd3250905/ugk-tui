@@ -38,6 +38,18 @@ test("spawn policy allows user scope without confirmation", () => {
 	assert.deepEqual(result, { allowed: true, requiresConfirmation: false });
 });
 
+test("spawn policy allows install scope without confirmation", () => {
+	const state = createMcpPermissionState();
+
+	const result = checkMcpSpawnPolicy(
+		state,
+		{ serverName: "packaged", scope: "install", command: "node" },
+		false,
+	);
+
+	assert.deepEqual(result, { allowed: true, requiresConfirmation: false });
+});
+
 test("spawn policy requires confirmation for project scope in interactive mode", () => {
 	const state = createMcpPermissionState();
 

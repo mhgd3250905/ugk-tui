@@ -38,13 +38,13 @@ test("bundles MCP guide as a preinstalled skill", () => {
 	assert.match(skill, /^---\s*\nname: mcp-guide/m);
 	assert.match(skill, /description: Use when the user wants to configure or manage MCP servers in UGK/);
 	assert.match(skill, /pastes.*mcpServers JSON/i);
-	assert.match(skill, /UGK\/system-level MCP/);
+	assert.match(skill, /install scope/);
 	assert.match(skill, /npm link/);
 	assert.match(skill, /\/mcp status/);
 	assert.equal(fs.existsSync(mcpConfigureScriptPath), true);
 });
 
-test("MCP guide configure script merges pasted mcpServers JSON into local config", () => {
+test("MCP guide configure script merges pasted mcpServers JSON into install config", () => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-guide-"));
 	const input = path.join(cwd, "input.json");
 	fs.writeFileSync(
@@ -64,7 +64,9 @@ test("MCP guide configure script merges pasted mcpServers JSON into local config
 		[
 			fileURLToPath(mcpConfigureScriptPath),
 			"--scope",
-			"local",
+			"install",
+			"--package-root",
+			cwd,
 			"--cwd",
 			cwd,
 			"--input",
@@ -73,10 +75,10 @@ test("MCP guide configure script merges pasted mcpServers JSON into local config
 		{ encoding: "utf8" },
 	);
 	const summary = JSON.parse(output);
-	const configPath = path.join(cwd, ".mcp.local.json");
+	const configPath = path.join(cwd, "mcp.json");
 	const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 
-	assert.equal(summary.scope, "local");
+	assert.equal(summary.scope, "install");
 	assert.equal(summary.server_count, 1);
 	assert.equal(summary.config_path, configPath);
 	assert.deepEqual(config.mcpServers["funasr-transcriber"], {

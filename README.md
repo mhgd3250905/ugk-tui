@@ -229,8 +229,9 @@ UGK_CLEAR_STARTUP=0 ugk
 
 UGK 可以作为 MCP client 连接外部 stdio MCP server,把 server 暴露的 tools 注册成 `server__tool`。一期只支持 stdio + tools;resources、prompts、sampling、HTTP transport 暂不启用。
 
-配置文件按三档合并:
+配置文件按四档合并:
 
+- install: UGK 安装目录 `mcp.json`(npm link 开发时即仓库根目录 `mcp.json`)
 - user: `~/.config/ugk/mcp.json`(Windows 为 `%APPDATA%\ugk\mcp.json`)
 - project: 当前项目 `.mcp.json`
 - local: 当前项目 `.mcp.local.json`(已进 `.gitignore`,用于本机 token/path)
@@ -255,7 +256,7 @@ UGK 可以作为 MCP client 连接外部 stdio MCP server,把 server 暴露的 t
 }
 ```
 
-project/local scope 第一次 spawn 前默认弹确认;非交互模式只允许 user scope,project/local 会 fail-closed。工具调用权限复用 `ask/on/off`:
+install/user scope 视为 UGK 级可信配置;project/local scope 第一次 spawn 前默认弹确认;非交互模式只允许 install/user scope,project/local 会 fail-closed。工具调用权限复用 `ask/on/off`:
 
 ```text
 /mcp status
@@ -392,7 +393,7 @@ A: `ugk` 首次启动会默认在 `~/.pi/agent/settings.json` 写入:
 已有用户如果之前手动配置过 `clearStartupScreen` 或 `skills`,ugk 不会覆盖;需要启用默认行为时可手动补上对应字段。
 
 **Q: `.mcp.json` 配了 server,为什么非交互模式不连接?**
-A: project/local scope 会执行项目内命令,非交互模式没有 UI 可确认,所以 UGK fail-closed。把可信 server 放到 user scope(`~/.config/ugk/mcp.json` 或 `%APPDATA%\ugk\mcp.json`),或在交互 TUI 中确认后使用。
+A: project/local scope 会执行项目内命令,非交互模式没有 UI 可确认,所以 UGK fail-closed。把可信 server 放到 install scope(UGK 安装目录 `mcp.json`)或 user scope(`~/.config/ugk/mcp.json` / `%APPDATA%\ugk\mcp.json`),或在交互 TUI 中确认后使用。
 
 **Q: `/mcp reload` 后旧工具还在模型上下文里怎么办?**
 A: UGK 会把消失 server 的工具从 active tools 下线,但 pi 目前没有真正的 unregisterTool API。若 stale 工具被调用,它会返回 server disconnected,不会自动重连。重新出现的 server 可通过 `/mcp reload` 和 `/mcp enable <server>` 恢复 active。

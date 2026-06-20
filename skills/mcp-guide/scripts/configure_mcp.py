@@ -10,14 +10,15 @@ from typing import Any
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Merge MCP server config into a UGK MCP config file.")
-    parser.add_argument("--scope", choices=["local", "project", "user"], required=True)
+    parser.add_argument("--scope", choices=["install", "local", "project", "user"], required=True)
     parser.add_argument("--cwd", default=os.getcwd())
+    parser.add_argument("--package-root", default=None)
     parser.add_argument("--input", required=True, help="JSON file containing either {mcpServers:{...}} or a raw server map")
     args = parser.parse_args()
 
     incoming = load_json(Path(args.input))
     servers = extract_servers(incoming)
-    config_path = resolve_config_path(args.scope, Path(args.cwd))
+    config_path = resolve_config_path(args.scope, Path(args.cwd), args.package_root)
     existing = load_existing_config(config_path)
 
     existing_servers = existing.setdefault("mcpServers", {})
@@ -63,7 +64,9 @@ def extract_servers(payload: Any) -> dict[str, Any]:
     return servers
 
 
-def resolve_config_path(scope: str, cwd: Path) -> Path:
+def resolve_config_path(scope: str, cwd: Path, package_root: str | None = None) -> Path:
+    if scope == "install":
+        return (Path(package_root) if package_root else find_package_root()) / "mcp.json"
     if scope == "local":
         return cwd / ".mcp.local.json"
     if scope == "project":
@@ -73,6 +76,14 @@ def resolve_config_path(scope: str, cwd: Path) -> Path:
     if os.name == "nt" and appdata:
         return Path(appdata) / "ugk" / "mcp.json"
     return Path.home() / ".config" / "ugk" / "mcp.json"
+
+
+def find_package_root() -> Path:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "package.json").exists():
+            return parent
+    raise SystemExit("Could not locate UGK package root from configure_mcp.py")
 
 
 def load_existing_config(path: Path) -> dict[str, Any]:

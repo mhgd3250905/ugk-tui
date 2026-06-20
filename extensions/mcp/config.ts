@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export type McpConfigScope = "user" | "project" | "local";
+export type McpConfigScope = "install" | "user" | "project" | "local";
 
 export type McpServerConfig = {
 	command: string;
@@ -30,11 +30,19 @@ export type McpConfig = {
 };
 
 export type McpConfigLoadOptions = {
+	packageRoot?: string;
 	env?: Record<string, string | undefined>;
 	sourceEnv?: Record<string, string | undefined>;
 	platform?: NodeJS.Platform;
 	homedir?: () => string;
 };
+
+export function loadInstallConfig(packageRoot: string | undefined, opts: McpConfigLoadOptions = {}): McpConfig {
+	if (!packageRoot) {
+		return { servers: new Map(), errors: [] };
+	}
+	return loadConfigFile(path.join(packageRoot, "mcp.json"), "install", opts);
+}
 
 export function loadUserConfig(opts: McpConfigLoadOptions = {}): McpConfig {
 	return loadConfigFile(resolveUserConfigPath(opts), "user", opts);
@@ -49,12 +57,17 @@ export function loadLocalConfig(cwd: string, opts: McpConfigLoadOptions = {}): M
 }
 
 export function loadMcpConfig(cwd: string, opts: McpConfigLoadOptions = {}): McpConfig {
-	return mergeConfigs(loadUserConfig(opts), loadProjectConfig(cwd, opts), loadLocalConfig(cwd, opts));
+	return mergeConfigs(
+		loadInstallConfig(opts.packageRoot, opts),
+		loadUserConfig(opts),
+		loadProjectConfig(cwd, opts),
+		loadLocalConfig(cwd, opts),
+	);
 }
 
-export function mergeConfigs(user: McpConfig, project: McpConfig, local: McpConfig): McpConfig {
+export function mergeConfigs(...configs: McpConfig[]): McpConfig {
 	const servers = new Map<string, McpConfigEntry>();
-	for (const config of [user, project, local]) {
+	for (const config of configs) {
 		for (const error of config.errors) {
 			if (error.serverName) {
 				servers.delete(error.serverName);
@@ -67,7 +80,7 @@ export function mergeConfigs(user: McpConfig, project: McpConfig, local: McpConf
 
 	return {
 		servers,
-		errors: [...user.errors, ...project.errors, ...local.errors],
+		errors: configs.flatMap((config) => config.errors),
 	};
 }
 

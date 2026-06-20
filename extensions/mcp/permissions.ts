@@ -53,7 +53,7 @@ export function checkMcpSpawnPolicy(
 	request: McpSpawnPolicyRequest,
 	hasUI: boolean,
 ): PolicyResult {
-	if (request.scope === "user") {
+	if (request.scope === "install" || request.scope === "user") {
 		return { allowed: true, requiresConfirmation: false };
 	}
 

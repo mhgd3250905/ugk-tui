@@ -13,12 +13,13 @@ UGK is an MCP client for stdio tools. It does not expose an MCP server. It does 
 
 ## Config Files
 
-UGK loads three config scopes and merges them in this order:
+UGK loads four config scopes and merges them in this order:
 
-1. user: `~/.config/ugk/mcp.json`
+1. install: `<ugk package root>/mcp.json`
+2. user: `~/.config/ugk/mcp.json`
    - Windows: `%APPDATA%\ugk\mcp.json`
-2. project: `<workspace>/.mcp.json`
-3. local: `<workspace>/.mcp.local.json`
+3. project: `<workspace>/.mcp.json`
+4. local: `<workspace>/.mcp.local.json`
 
 Higher scope fully replaces a same-name server from a lower scope. `.mcp.local.json` is ignored by git and should hold local-only tokens or paths.
 
@@ -43,7 +44,8 @@ When the user provides a JSON block such as `{ "mcpServers": { ... } }`, configu
 
 Default target scope:
 
-- Use `user` (`~/.config/ugk/mcp.json`, Windows `%APPDATA%\ugk\mcp.json`) when the user wants a UGK/system-level MCP, runs UGK through `npm link`, or expects the server to be available from every working directory.
+- Use `install` (`<ugk package root>/mcp.json`) when the user wants a UGK/system-level MCP, runs UGK through `npm link`, or expects the server to be available from every working directory.
+- Use `user` (`~/.config/ugk/mcp.json`, Windows `%APPDATA%\ugk\mcp.json`) only when the user explicitly wants a personal override outside the UGK installation directory.
 - Use `local` (`<workspace>/.mcp.local.json`) for workspace-specific servers, project-local paths, private tokens tied to the current project, or when the user explicitly wants the config scoped to the current workspace.
 - Use `project` (`<workspace>/.mcp.json`) only when the user explicitly wants the config committed/shared.
 
@@ -53,7 +55,7 @@ Workflow:
 2. Run the bundled merge script:
 
    ```bash
-   python skills/mcp-guide/scripts/configure_mcp.py --scope user --cwd . --input /path/to/input.json
+   python skills/mcp-guide/scripts/configure_mcp.py --scope install --cwd . --input /path/to/input.json
    ```
 
 3. Report the written config path and server names.
@@ -79,6 +81,7 @@ Do not print secret env values back to the user. Mention only variable names suc
 There are two gates:
 
 1. Spawn policy before starting a server:
+   - install scope: allowed
    - user scope: allowed
    - project/local scope: ask in interactive UI
    - project/local without UI: blocked fail-closed

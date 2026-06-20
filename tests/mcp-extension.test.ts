@@ -7,9 +7,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import registerUgkExtension from "../extensions/index.ts";
 import { registerMcp, createMcpDoctorCheck } from "../extensions/mcp/index.ts";
+import { loadMcpConfig } from "../extensions/mcp/config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const stubServerPath = path.join(__dirname, "fixtures", "mcp-stub-server.mjs");
+const isolatedUserConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-test-user-"));
+const isolatedHome = path.join(isolatedUserConfigRoot, "home");
 
 function makePi(initialTools: string[] = []) {
 	const handlers = new Map<string, Function[]>();
@@ -79,6 +82,21 @@ function writeProjectConfig(cwd: string, servers: Record<string, unknown>) {
 	fs.writeFileSync(path.join(cwd, ".mcp.json"), JSON.stringify({ mcpServers: servers }, null, 2));
 }
 
+function registerMcpForTest(pi: ReturnType<typeof makePi>, deps: Parameters<typeof registerMcp>[1] = {}) {
+	return registerMcp(pi as any, {
+		...deps,
+		loadConfig:
+			deps.loadConfig ??
+			((cwd) =>
+				loadMcpConfig(cwd, {
+					packageRoot: deps.packageRoot,
+					platform: "win32",
+					env: { APPDATA: isolatedUserConfigRoot },
+					homedir: () => isolatedHome,
+				})),
+	});
+}
+
 function listNodeCommandLines() {
 	if (process.platform !== "win32") {
 		return execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8" });
@@ -113,7 +131,7 @@ test("session_start connects configured MCP servers and registers tools", async 
 	const pi = makePi(["greet"]);
 	const ctx = makeCtx(cwd);
 
-	const state = registerMcp(pi as any);
+	const state = registerMcpForTest(pi);
 	await emit(pi, "session_start", { reason: "startup" }, ctx);
 
 	assert.equal(pi.registeredTools.has("alpha__echo"), true);
@@ -125,12 +143,37 @@ test("session_start connects configured MCP servers and registers tools", async 
 	await waitForNoProcess(/mcp-stub-server\.mjs/);
 });
 
+test("session_start loads install-scope MCP servers from the UGK package root", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-install-cwd-"));
+	const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-install-package-"));
+	fs.writeFileSync(
+		path.join(packageRoot, "mcp.json"),
+		JSON.stringify({
+			mcpServers: {
+				packaged: { command: process.execPath, args: [stubServerPath] },
+			},
+		}),
+	);
+	const pi = makePi(["greet"]);
+	const ctx = makeCtx(cwd, { hasUI: false, ui: undefined });
+
+	const state = registerMcpForTest(pi, { packageRoot });
+	await emit(pi, "session_start", { reason: "startup" }, ctx);
+
+	assert.equal(pi.registeredTools.has("packaged__echo"), true);
+	assert.deepEqual(state.serverTools.get("packaged"), ["packaged__echo", "packaged__sum"]);
+	assert.equal(state.failedServers?.size, 0);
+
+	await emit(pi, "session_shutdown", { reason: "quit" }, ctx);
+	await waitForNoProcess(/mcp-stub-server\.mjs/);
+});
+
 test("no MCP config has zero side effects", async () => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-empty-"));
 	const pi = makePi(["greet"]);
 	const ctx = makeCtx(cwd);
 
-	registerMcp(pi as any);
+	registerMcpForTest(pi);
 	await emit(pi, "session_start", { reason: "startup" }, ctx);
 
 	assert.equal(pi.registeredTools.size, 0);
@@ -150,7 +193,7 @@ test("session_shutdown disconnects all registry connections", async () => {
 	};
 	const pi = makePi();
 	const ctx = makeCtx(process.cwd());
-	registerMcp(pi as any, {
+	registerMcpForTest(pi, {
 		registry: registry as any,
 		loadConfig: () => ({
 			servers: new Map([["alpha", { name: "alpha", scope: "user", config: { command: "node" } }]]),
@@ -173,7 +216,7 @@ test("before_agent_start appends MCP server instructions", async () => {
 	const pi = makePi();
 	const ctx = makeCtx(cwd);
 
-	registerMcp(pi as any);
+	registerMcpForTest(pi);
 	await emit(pi, "session_start", { reason: "startup" }, ctx);
 	const injected = (await emit(pi, "before_agent_start", { systemPrompt: "Base prompt" }, ctx)).at(-1);
 
@@ -227,7 +270,7 @@ test("end-to-end registered MCP tool calls the stub server", async () => {
 	const pi = makePi();
 	const ctx = makeCtx(cwd);
 
-	registerMcp(pi as any);
+	registerMcpForTest(pi);
 	await emit(pi, "session_start", { reason: "startup" }, ctx);
 
 	const echo = pi.registeredTools.get("alpha__echo");
@@ -284,7 +327,7 @@ test("/mcp reload treats command contexts with confirm UI as interactive even wi
 	const notifications: string[] = [];
 	let confirmations = 0;
 
-	registerMcp(pi as any);
+	registerMcpForTest(pi);
 	await pi.commands.get("mcp")!.handler("reload", {
 		cwd,
 		ui: {

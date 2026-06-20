@@ -177,26 +177,18 @@ test("Windows live log launcher is written next to live.log with a stable filena
 	assert.match(launcher.content, /-Encoding UTF8/);
 });
 
-test("Windows live log launch plan opens a Windows Terminal tab when WT_SESSION is set", () => {
-	const liveLogPath = path.join("E:/workspace/project/.judge/judge-123", "live.log");
-	const plan = buildWindowsLiveLogLaunchPlan(liveLogPath, { WT_SESSION: "session-1" });
+test("Windows live log launch plan has no Windows Terminal special casing", () => {
+	const source = readFileSync(path.resolve("extensions/judge/judge.ts"), "utf8");
 
-	assert.equal(plan.command, "wt.exe");
-	assert.equal(plan.shell, true);
-	assert.deepEqual(plan.args.slice(0, 4), ["new-tab", "--title", "Judge driver live", "--"]);
-	assert.equal(plan.args[4], "powershell.exe");
-	assert.ok(plan.args.includes("-Command"));
-	assert.match(plan.args.at(-1) ?? "", /Get-Content/);
-	assert.match(plan.args.at(-1) ?? "", /-Encoding UTF8/);
-	assert.equal(plan.launcher, undefined);
+	assert.doesNotMatch(source, /WT_SESSION|wt\.exe|commandExists/);
 });
 
-test("Windows live log launch plan falls back to a system-managed terminal window outside WT", () => {
+test("Windows live log launch plan opens a system-managed terminal window (conhost)", () => {
 	const liveLogPath = path.join("E:/workspace/project/.judge/judge-123", "live.log");
-	const plan = buildWindowsLiveLogLaunchPlan(liveLogPath, {});
+	const plan = buildWindowsLiveLogLaunchPlan(liveLogPath);
 
 	assert.equal(plan.command, "cmd.exe");
-	assert.equal(plan.shell, false);
+	assert.equal("shell" in plan, false);
 	assert.deepEqual(plan.args.slice(0, 3), ["/c", "start", "Judge driver live"]);
 	assert.equal(plan.launcher?.path, path.join("E:/workspace/project/.judge/judge-123", "judge-live-launcher.cmd"));
 	assert.match(plan.launcher?.content ?? "", /-Encoding UTF8/);

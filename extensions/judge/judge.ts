@@ -103,43 +103,19 @@ export function buildWindowsLiveLogLauncher(liveLogPath: string): { path: string
 type WindowsLiveLogLaunchPlan = {
 	command: string;
 	args: string[];
-	shell: boolean;
-	launcher?: { path: string; content: string };
+	launcher: { path: string; content: string };
 };
 
-export function buildWindowsLiveLogLaunchPlan(
-	liveLogPath: string,
-	env: Record<string, string | undefined> = process.env,
-): WindowsLiveLogLaunchPlan {
-	if (env.WT_SESSION) {
-		return {
-			command: "wt.exe",
-			args: [
-				"new-tab",
-				"--title",
-				"Judge driver live",
-				"--",
-				"powershell.exe",
-				"-NoProfile",
-				"-ExecutionPolicy",
-				"Bypass",
-				"-Command",
-				`[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content -LiteralPath ${quotePowerShellLiteral(liveLogPath)} -Wait -Encoding UTF8`,
-			],
-			shell: true,
-		};
-	}
-
+export function buildWindowsLiveLogLaunchPlan(liveLogPath: string): WindowsLiveLogLaunchPlan {
 	const launcher = buildWindowsLiveLogLauncher(liveLogPath);
 	return {
 		command: "cmd.exe",
 		args: ["/c", "start", "Judge driver live", launcher.path],
 		launcher,
-		shell: false,
 	};
 }
 
-function spawnDetached(command: string, args: string[], options: { windowsHide?: boolean; shell?: boolean } = {}): { ok: boolean; error?: string } {
+function spawnDetached(command: string, args: string[], options: { windowsHide?: boolean } = {}): { ok: boolean; error?: string } {
 	try {
 		const child = spawn(command, args, {
 			detached: true,
@@ -153,15 +129,6 @@ function spawnDetached(command: string, args: string[], options: { windowsHide?:
 		return { ok: true };
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
-	}
-}
-
-function commandExists(command: string): boolean {
-	try {
-		execFileSync("where", [command], { stdio: "ignore", windowsHide: true });
-		return true;
-	} catch {
-		return false;
 	}
 }
 
@@ -179,16 +146,10 @@ function openLiveLogTerminal(liveLogPath: string): { ok: boolean; error?: string
 		if (process.platform === "win32") {
 			// Windows 不绑定具体终端实现,只让系统打开一个独立过程终端窗口。
 			const plan = buildWindowsLiveLogLaunchPlan(liveLogPath);
-			if (plan.command === "wt.exe" && !commandExists(plan.command)) {
-				return { ok: false, error: "wt.exe not found on PATH" };
-			}
-			if (plan.launcher) {
-				mkdirSync(path.dirname(plan.launcher.path), { recursive: true });
-				writeFileSync(plan.launcher.path, plan.launcher.content, "utf8");
-			}
+			mkdirSync(path.dirname(plan.launcher.path), { recursive: true });
+			writeFileSync(plan.launcher.path, plan.launcher.content, "utf8");
 			return spawnDetached(plan.command, plan.args, {
 				windowsHide: false,
-				shell: plan.shell,
 			});
 		}
 

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import {
+	buildWindowsLiveLogLauncher,
 	registerJudge,
 	setJudgeDecisionSessionFactoryForTests,
 	setJudgeDriverFactoryForTests,
@@ -56,6 +57,7 @@ function makeCtx() {
 	const notifications: Array<{ message: string; type?: string }> = [];
 	const selections: Array<{ title: string; options: string[] }> = [];
 	const editorPrompts: string[] = [];
+	const widgetCalls: Array<{ key: string; content: unknown }> = [];
 	const ctx = {
 		hasUI: true,
 		mode: "tui",
@@ -69,6 +71,9 @@ function makeCtx() {
 				notifications.push({ message, type });
 			},
 			select(title: string, options: string[]) {
+				// 过程查看终端菜单:测试环境默认"不打开"(避免 spawn 真终端 + getLiveLogPath 依赖),
+				// 且不记入 selections(避免干扰其他测试对 selections 顺序的断言)。
+				if (title.includes("过程查看终端")) return options.find((o) => o.startsWith("不打开")) ?? options[0];
 				selections.push({ title, options });
 				return options[0];
 			},
@@ -76,9 +81,12 @@ function makeCtx() {
 				editorPrompts.push(`${title}:${value}`);
 				return "请补充验收标准";
 			},
+			setWidget(key: string, content: unknown) {
+				widgetCalls.push({ key, content });
+			},
 		},
 	};
-	return { ctx, notifications, selections, editorPrompts };
+	return { ctx, notifications, selections, editorPrompts, widgetCalls };
 }
 
 function assistantWithSpec() {
@@ -101,6 +109,19 @@ function assistantWithSpec() {
 	};
 }
 
+/**
+ * 模拟 Judge 在 aligning 阶段调过 questionnaire(C-2 机制闸的前置条件)。
+ * 任何要走"委派 driver"路径的测试,在触发 agent_end 之前必须先调这个,
+ * 否则 agent_end 的委派分支会被 C-2 闸拦下(没确认假设不让委派)。
+ */
+function emitQuestionnaireConfirmed(handlers: { get(key: string): Array<(event: unknown, ctx: unknown) => unknown> | undefined }, ctx: unknown) {
+	const toolCallHandlers = handlers.get("tool_call");
+	if (!toolCallHandlers || toolCallHandlers.length === 0) {
+		throw new Error("tool_call handler not registered; call registerJudge first");
+	}
+	toolCallHandlers[0]({ toolName: "questionnaire", input: {} }, ctx);
+}
+
 test("registerJudge registers /judge, questionnaire, and judge_complete tool", async () => {
 	const { pi, commands, tools } = makePi();
 
@@ -113,6 +134,18 @@ test("registerJudge registers /judge, questionnaire, and judge_complete tool", a
 	const result = await completeTool.execute("call-1", { summary: "完成阶段 3 骨架" });
 	assert.match(result.content[0].text, /judge_complete/);
 	assert.deepEqual(result.details, { completed: true, summary: "完成阶段 3 骨架" });
+});
+
+test("Windows live log launcher is written next to live.log with a stable filename", () => {
+	const liveLogPath = path.join("E:/workspace/project/.judge/judge-123", "live.log");
+	const launcher = buildWindowsLiveLogLauncher(liveLogPath);
+
+	assert.equal(
+		launcher.path,
+		path.join("E:/workspace/project/.judge/judge-123", "judge-live-launcher.cmd"),
+	);
+	assert.match(launcher.content, /Get-Content/);
+	assert.match(launcher.content, /live\.log/);
 });
 
 test("/judge enters aligning mode, switches to readonly tools, and injects ALIGN_PROMPT", async () => {
@@ -161,6 +194,7 @@ test("agent_end parses RequirementsSpec and delegate choice starts a real Judge 
 
 	try {
 		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
 		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);
@@ -196,6 +230,7 @@ test("delegate driver uses ctx.cwd for cwd and runDir", async () => {
 
 	try {
 		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
 		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);
@@ -222,6 +257,7 @@ test("session_shutdown disposes the active Judge driver", async () => {
 
 	try {
 		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
 		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 		await handlers.get("session_shutdown")![0]({}, ctx);
 		await handlers.get("session_shutdown")![0]({}, ctx);
@@ -268,6 +304,7 @@ test("injected Judge verdict provider can steer and abort through the delegated 
 
 	try {
 		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
 		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);
@@ -338,6 +375,7 @@ test("default Judge wakeup path prompts a Judge decision session and parses pass
 
 	try {
 		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
 		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);
@@ -407,6 +445,7 @@ test("default Judge wakeup path does not reuse an old verdict when the current t
 
 	try {
 		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
 		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);
@@ -521,4 +560,120 @@ test("session_start ignores malformed persisted Judge state without enabling ali
 
 	assert.deepEqual(activeTools, []);
 	assert.equal(injected, undefined);
+});
+
+// C-2 机制闸回归测试:aligning 阶段没调过 questionnaire 就选"委派 driver 执行",
+// 必须被拒绝(driver 不启动),并 sendUserMessage 把 Judge 踢回 aligning 确认假设。
+// 防止 Judge 偷懒跳过 questionnaire 直接拍 Spec(2026-06-19 知乎验证暴露的问题)。
+test("delegate is rejected when aligning phase never called questionnaire (C-2 guard)", async () => {
+	const { pi, commands, handlers, userMessages } = makePi();
+	const { ctx, notifications } = makeCtx();
+	let driverStarted = false;
+	setJudgeDriverFactoryForTests(async () => {
+		driverStarted = true;
+		return { async start() {}, dispose() {}, getSummary: () => ({ pathsTried: [], turnCount: 0, completed: false }) };
+	});
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		// 故意不调 emitQuestionnaireConfirmed —— 模拟 Judge 偷懒直接产 Spec
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+
+		// 闸:driver 不该启动
+		assert.equal(driverStarted, false, "driver must NOT start when questionnaire was skipped");
+		// 闸:应该有拒绝通知
+		assert.ok(notifications.some((n) => /未用 questionnaire 确认假设|拒绝委派/.test(n.message)),
+			"should notify that delegation was rejected for missing questionnaire");
+		// 闸:应该 sendUserMessage 让 Judge 回去问
+		assert.ok(userMessages.some((msg) => /questionnaire/.test(msg) && /假设/.test(msg)),
+			"should send user message instructing Judge to call questionnaire and confirm assumptions");
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+	}
+});
+
+// ---- driver 过程可视化 widget 接线测试 ----
+
+test("delegated driver shows a widget with transcript and Judge verdict, and clears it on abort", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx, widgetCalls } = makeCtx();
+	let capturedOnTranscriptUpdate: (() => void) | undefined;
+	let capturedOnJudgeVerdict: ((v: unknown) => void) | undefined;
+
+	setJudgeDriverFactoryForTests(async (options: any) => {
+		capturedOnTranscriptUpdate = options.onTranscriptUpdate;
+		capturedOnJudgeVerdict = options.onJudgeVerdict;
+		return {
+			async start() {},
+			dispose() {},
+			getSummary() { return { pathsTried: [], turnCount: 1, completed: false, steerCount: 0 }; },
+			getWidgetLines() { return ["[tool] chrome_cdp started", "好的"]; },
+			getTranscriptText() { return "stub transcript"; },
+		};
+	});
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+
+		// driver 起来后,refreshDriverWidget 被调一次(start 后立即刷),widget 应被设置
+		const setCalls = widgetCalls.filter((c) => c.key === "judge-driver-view" && c.content !== undefined);
+		assert.ok(setCalls.length >= 1, "widget should be set with content after driver starts");
+		const firstContent = setCalls[0].content as string[];
+		assert.ok(firstContent.some((l) => /Judge driver/i.test(l)), "widget should contain driver title line");
+		assert.ok(firstContent.some((l) => /chrome_cdp/.test(l)), "widget should contain driver transcript");
+
+		// 触发一次 Judge verdict,widget 应含 verdict 行
+		widgetCalls.length = 0;
+		capturedOnJudgeVerdict!({ action: "steer", direction: "换 cdp 路径", keepWatching: true });
+		const afterVerdict = widgetCalls.filter((c) => c.key === "judge-driver-view" && c.content !== undefined);
+		assert.ok(afterVerdict.length >= 1, "widget should refresh on Judge verdict");
+		const verdictContent = afterVerdict[afterVerdict.length - 1].content as string[];
+		assert.ok(verdictContent.some((l) => /STEER.*换 cdp 路径/.test(l)), "widget should contain the verdict line");
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+	}
+});
+
+test("clearJudgeDriverWidget removes the widget via setWidget undefined", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx, widgetCalls } = makeCtx();
+	// onAbort 路径:让 verdict provider 返回 abort,触发 clearDriverWidget
+	let triggerAbort: ((reason: string) => void) | undefined;
+	setJudgeVerdictProviderForTests(async () => ({ action: "pass", keepWatching: true }));
+	setJudgeDriverFactoryForTests(async (options: any) => {
+		const onWakeup = options.onWakeup;
+		return {
+			async start() {
+				// 起来后模拟一次 abort wakeup
+				const verdict = await onWakeup({ reason: "tool_error", summary: { pathsTried: [], turnCount: 1, completed: false }, transcript: "" });
+				if (verdict.action === "abort" && options.onWakeup) {
+					// 触发 abort 后 judge.ts 的 onAbort 会清 widget
+				}
+			},
+			dispose() {},
+			getSummary() { return { pathsTried: [], turnCount: 1, completed: false, steerCount: 0 }; },
+			getWidgetLines() { return []; },
+			getTranscriptText() { return ""; },
+		};
+	});
+	void triggerAbort;
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+
+		// session_shutdown 应触发清理:widget 被 setWidget undefined 移除
+		await handlers.get("session_shutdown")![0]({}, ctx);
+		const clearCalls = widgetCalls.filter((c) => c.key === "judge-driver-view" && c.content === undefined);
+		assert.ok(clearCalls.length >= 1, "widget should be cleared (setWidget undefined) on session_shutdown");
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		setJudgeVerdictProviderForTests(undefined);
+	}
 });

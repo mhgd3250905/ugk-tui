@@ -383,3 +383,206 @@ test("agent_end wakes on the next turn after a completed turn is steered back", 
 	]);
 	assert.deepEqual(harness.userInputs, ["继续补齐验收证据。"]);
 });
+
+// 回归测试:wrapFactoryForJudgeEvents 必须透传 prototype 上的方法。
+// 真 AgentSession 的 getAllTools/prompt/steer/dispose 在 prototype 上,不在 own 属性。
+// 之前用 {...session} 对象展开会丢掉 prototype 方法,导致 getAllTools 返回 undefined,
+// assertExpectedDriverTools 误报 "Missing judge_complete"(createJudgeDriver 内部传 expectedToolNames)。
+// 改用 Proxy 后,prototype 方法必须能透传 —— 若回归到对象展开,createJudgeDriver 会抛 "Missing judge_complete"。
+test("createJudgeDriver tolerates session whose methods live on the prototype (regression: proxy must forward getAllTools)", async () => {
+	// 模拟真 AgentSession 结构:方法在 prototype 上,不在 own 属性
+	class PrototypeMethodSession {
+		subscribe() {
+			return () => {};
+		}
+		getAllTools() {
+			return [{ name: "judge_complete" }];
+		}
+		// eslint-disable-next-line @typescript-eslint/no-empty-function
+		async prompt() {}
+		// eslint-disable-next-line @typescript-eslint/no-empty-function
+		async steer() {}
+		// eslint-disable-next-line @typescript-eslint/no-empty-function
+		async followUp() {}
+		// eslint-disable-next-line @typescript-eslint/no-empty-function
+		dispose() {}
+	}
+
+	const sessionFactory: DriverSessionFactory = async () => ({
+		session: new PrototypeMethodSession() as any,
+	});
+
+	// createJudgeDriver 内部会调 createDriverSession(..., expectedToolNames: ["judge_complete"]),
+	// 进而调 assertExpectedDriverTools → session.getAllTools()。
+	// 如果包装丢了 getAllTypes(回归到 {...session} 展开或其它丢 prototype 的写法),这里会抛错。
+	const driver = await createJudgeDriver(createOptions({
+		sessionFactory,
+		onWakeup: async () => ({ action: "pass", keepWatching: true }),
+	}));
+
+	assert.ok(driver, "createJudgeDriver should not throw when session methods are on the prototype");
+});
+
+// ---- driver 过程可视化回调测试 ----
+
+test("getWidgetLines and getTranscriptText reflect driver transcript accumulated from subscribe events", async () => {
+	let emit: ((e: DriverEvent) => void) | undefined;
+	const sessionFactory: DriverSessionFactory = async () => ({
+		session: {
+			isStreaming: true,
+			getAllTools() { return [{ name: "judge_complete" }]; },
+			subscribe(callback) { emit = callback as (e: DriverEvent) => void; return () => {}; },
+			async prompt() {},
+			async steer() {},
+			async followUp() {},
+			dispose() {},
+		},
+	});
+
+	const driver = await createJudgeDriver(createOptions({ sessionFactory, onWakeup: async () => ({ action: "pass", keepWatching: true }) }));
+
+	// 初始:transcript 空,getWidgetLines 返回占位
+	const beforeLines = driver.getWidgetLines();
+	assert.ok(beforeLines.some((l) => /no driver output|Judge driver/i.test(l)), "empty transcript should show placeholder");
+
+	// emit 一个 runtime 事件让 transcript 累积
+	emit!({ type: "tool_execution_start", toolName: "chrome_cdp" });
+	await new Promise((r) => setTimeout(r, 0));
+
+	// 现在 getWidgetLines 应反映累积的内容(含 chrome_cdp 的 runtime 行)
+	const afterLines = driver.getWidgetLines();
+	assert.ok(afterLines.some((l) => /chrome_cdp/i.test(l)), "getWidgetLines should reflect accumulated tool events");
+	assert.ok(driver.getTranscriptText().length > 0, "getTranscriptText should be non-empty after events");
+});
+
+test("onJudgeVerdict is called with the verdict after each wakeup", async () => {
+	const sessionFactory: DriverSessionFactory = async () => ({
+		session: {
+			isStreaming: true,
+			getAllTools() { return [{ name: "judge_complete" }]; },
+			subscribe(callback) { (callback as (e: DriverEvent) => void)({ type: "agent_start" }); return () => {}; },
+			async prompt() {},
+			async steer() {},
+			async followUp() {},
+			dispose() {},
+			getWidgetLines() { return []; },
+			getTranscriptText() { return ""; },
+		},
+	});
+
+	const verdicts: Array<{ action: string; direction?: string }> = [];
+	let emit: ((e: DriverEvent) => void) | undefined;
+	const sessionFactory2: DriverSessionFactory = async () => ({
+		session: {
+			isStreaming: true,
+			getAllTools() { return [{ name: "judge_complete" }]; },
+			subscribe(callback) { emit = callback as (e: DriverEvent) => void; return () => {}; },
+			async prompt() {},
+			async steer() {},
+			async followUp() {},
+			dispose() {},
+			getWidgetLines() { return []; },
+			getTranscriptText() { return ""; },
+		},
+	});
+
+	await createJudgeDriver(createOptions({
+		sessionFactory: sessionFactory2,
+		onWakeup: async () => ({ action: "steer", direction: "换 cdp", keepWatching: true }),
+		onJudgeVerdict: (v) => { verdicts.push(v as { action: string; direction?: string }); },
+	}));
+
+	// 触发一次需要唤醒的事件(chrome_cdp start,硬规则唤醒)
+	emit!({ type: "tool_execution_start", toolName: "chrome_cdp" });
+	await new Promise((r) => setTimeout(r, 10));
+
+	assert.equal(verdicts.length, 1, "onJudgeVerdict should fire once after wakeup");
+	assert.equal(verdicts[0].action, "steer");
+	assert.equal(verdicts[0].direction, "换 cdp");
+
+	// 抑制未使用变量(sessionFactory 在此测试里不用,保留以对照)
+	void sessionFactory;
+});
+
+test("onTranscriptUpdate is forwarded to createDriverSession options", async () => {
+	let capturedOnTranscriptUpdate: (() => void) | undefined;
+	const sessionFactory: DriverSessionFactory = async (options) => {
+		capturedOnTranscriptUpdate = options.onTranscriptUpdate;
+		return {
+			session: {
+				isStreaming: true,
+				getAllTools() { return [{ name: "judge_complete" }]; },
+				subscribe() { return () => {}; },
+				async prompt() {},
+				async steer() {},
+				async followUp() {},
+				dispose() {},
+				getWidgetLines() { return []; },
+				getTranscriptText() { return ""; },
+			},
+		};
+	};
+
+	let transcriptUpdateCalled = false;
+	await createJudgeDriver(createOptions({
+		sessionFactory,
+		onWakeup: async () => ({ action: "pass", keepWatching: true }),
+		onTranscriptUpdate: () => { transcriptUpdateCalled = true; },
+	}));
+
+	// onTranscriptUpdate 应被透传给 session options
+	assert.equal(typeof capturedOnTranscriptUpdate, "function", "onTranscriptUpdate should be forwarded to session options");
+	capturedOnTranscriptUpdate!();
+	assert.equal(transcriptUpdateCalled, true, "forwarded callback should invoke the original onTranscriptUpdate");
+});
+
+// ---- live.log 实时过程日志测试 ----
+
+test("driver events append readable lines to live.log and getLiveLogPath returns the path", async () => {
+	const { mkdtempSync, rmSync } = await import("node:fs");
+	const os = await import("node:os");
+	const pathMod = await import("node:path");
+	const runDir = mkdtempSync(pathMod.join(os.tmpdir(), "ugk-live-"));
+
+	let emit: ((e: DriverEvent) => void) | undefined;
+	const sessionFactory: DriverSessionFactory = async () => ({
+		session: {
+			isStreaming: true,
+			getAllTools() { return [{ name: "judge_complete" }]; },
+			subscribe(callback) { emit = callback as (e: DriverEvent) => void; return () => {}; },
+			async prompt() {},
+			async steer() {},
+			async followUp() {},
+			dispose() {},
+		},
+	});
+
+	const driver = await createJudgeDriver({
+		cwd: runDir,
+		runDir,
+		spec: "test spec",
+		sessionFactory,
+		onWakeup: async () => ({ action: "steer", direction: "换 cdp", keepWatching: true }),
+	});
+
+	// getLiveLogPath 指向 runDir/live.log
+	const liveLogPath = driver.getLiveLogPath();
+	assert.equal(liveLogPath, pathMod.join(runDir, "live.log"));
+
+	// emit 几个事件,live.log 应被追加可读行
+	emit!({ type: "tool_execution_start", toolName: "chrome_cdp" });
+	emit!({ type: "tool_execution_end", toolName: "chrome_cdp", isError: false });
+	emit!({ type: "tool_execution_end", toolName: "bash", isError: true });
+	await new Promise((r) => setTimeout(r, 10));
+
+	const { readFileSync } = await import("node:fs");
+	const logContent = readFileSync(liveLogPath, "utf8");
+	assert.ok(logContent.includes("chrome_cdp"), "live.log should contain chrome_cdp tool events");
+	assert.ok(logContent.includes("started"), "live.log should mark tool start");
+	assert.ok(logContent.includes("completed"), "live.log should mark tool completed");
+	assert.ok(logContent.includes("FAILED"), "live.log should mark failed tools");
+	// steer verdict 也应进 live.log
+	assert.ok(logContent.includes("STEER"), "live.log should contain Judge steer verdict");
+
+	rmSync(runDir, { recursive: true, force: true });
+});

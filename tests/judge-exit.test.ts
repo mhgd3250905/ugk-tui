@@ -119,7 +119,9 @@ function makeCtx() {
 			notify(message: string, type?: string) {
 				notifications.push({ message, type });
 			},
-			select(_title: string, options: string[]) {
+			select(title: string, options: string[]) {
+				// 过程查看终端菜单:测试默认"不打开"
+				if (title.includes("过程查看终端")) return options.find((o) => o.startsWith("不打开")) ?? options[0];
 				return options[0];
 			},
 			editor() {
@@ -241,6 +243,7 @@ test("extension abort wakeup updates Judge state and notifies the user", async (
 
 	try {
 		await commands.get("judge").handler("", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire", input: {} }, ctx);
 		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);
@@ -291,6 +294,7 @@ test("extension passes maxSteer and reports driver escalation", async () => {
 
 	try {
 		await commands.get("judge").handler("", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire", input: {} }, ctx);
 		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);

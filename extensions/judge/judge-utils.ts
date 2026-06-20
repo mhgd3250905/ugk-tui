@@ -345,5 +345,26 @@ export function parseJudgeFinalVerdict(text: string): JudgeFinalVerdict | undefi
 		return parseFinalVerdictCandidate(trimmed.slice(firstBrace, lastBrace + 1));
 	}
 
+	// Fallback: extract verdict from non-JSON text when model fails to produce structured output.
+	// Scans for explicit PASS/FAIL indicators in the raw LLM output.
+	const hasPass = /\bPASS\b/i.test(trimmed) || /通过|放行|满足|验收通过|所有验收/.test(trimmed);
+	const hasFail = /\bFAIL\b/i.test(trimmed) || /不通过|不满足|未满足|拒绝|驳回|缺失/.test(trimmed);
+	if (hasPass && !hasFail) {
+		// Extract a reason from the text (first meaningful sentence, max 200 chars)
+		const reasonMatch = trimmed.match(/PASS[：:]?\s*(.+?)(?:\n|$)/i) || trimmed.match(/通过[：:]?\s*(.+?)(?:\n|$)/);
+		const reason = reasonMatch ? reasonMatch[1].trim().slice(0, 200) : "验收项已满足（从非JSON输出推断）";
+		// Extract evidence lines (look for checkmarks, bullet points, numbered items)
+		const evidenceLines = trimmed.match(/[✓✅✔].+/g) || [];
+		const evidence = evidenceLines.length > 0
+			? evidenceLines.map((l) => l.replace(/^[✓✅✔]\s*/, "").trim()).filter(Boolean).slice(0, 10)
+			: ["验收通过（从非JSON文本推断）"];
+		return { status: "pass", reason, evidence };
+	}
+	if (hasFail && !hasPass) {
+		const reasonMatch = trimmed.match(/FAIL[：:]?\s*(.+?)(?:\n|$)/i) || trimmed.match(/不通过[：:]?\s*(.+?)(?:\n|$)/);
+		const reason = reasonMatch ? reasonMatch[1].trim().slice(0, 200) : "验收未满足（从非JSON输出推断）";
+		return { status: "fail", reason, evidence: ["验收未通过（从非JSON文本推断）"] };
+	}
+
 	return undefined;
 }

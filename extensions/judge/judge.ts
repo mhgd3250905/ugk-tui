@@ -1,4 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { Type, type AssistantMessage, type TextContent } from "@earendil-works/pi-ai";
 import {
 	defineTool,
@@ -15,6 +17,7 @@ import {
 	createJudgeState,
 	enterDelivering,
 	enterAligning,
+	markAligningQuestionnaireUsed,
 	markPendingAck,
 	recordJudgeEscalation,
 	recordJudgeSteer,
@@ -53,6 +56,125 @@ import registerQuestionnaire from "./questionnaire.ts";
 const JUDGE_ALIGNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const JUDGE_MENU_OPTIONS = ["委派 driver 执行", "继续澄清", "改需求"];
 const JUDGE_PHASES = new Set(["aligning", "driving", "delivering", "aborted", "done"]);
+const JUDGE_DRIVER_WIDGET_KEY = "judge-driver-view";
+
+/** 把 Judge verdict 格式化成 widget 用的单行文本。 */
+function formatJudgeVerdictLine(verdict: { action: string; direction?: string; reason?: string; keepWatching?: boolean }): string {
+	if (verdict.action === "pass") {
+		return verdict.keepWatching === false ? "PASS" : "PASS (keepWatching)";
+	}
+	if (verdict.action === "steer") {
+		return `STEER: ${verdict.direction ?? "(no direction)"}`;
+	}
+	return `ABORT: ${verdict.reason ?? "(no reason)"}`;
+}
+
+/** 移除 driver 过程可视化 widget。可在任何拿到 ui 的清理点调用。 */
+function clearJudgeDriverWidget(ui: { setWidget?: (key: string, content: unknown, options?: { placement: string }) => void }): void {
+	try {
+		ui.setWidget?.(JUDGE_DRIVER_WIDGET_KEY, undefined, { placement: "aboveEditor" });
+	} catch {
+		// setWidget 在非 TUI 模式可能不可用,忽略
+	}
+}
+
+function quotePowerShellLiteral(value: string): string {
+	return `'${value.replace(/'/g, "''")}'`;
+}
+
+export function buildWindowsLiveLogLauncher(liveLogPath: string): { path: string; content: string } {
+	const launcherPath = path.join(path.dirname(liveLogPath), "judge-live-launcher.cmd");
+	return {
+		path: launcherPath,
+		content: [
+			"@echo off",
+			`powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath ${quotePowerShellLiteral(liveLogPath)} -Wait"`,
+			"pause",
+			"",
+		].join("\r\n"),
+	};
+}
+
+/**
+ * 在新终端窗口打开 live.log 的实时跟踪(tail -f / Get-Content -Wait)。
+ * 零污染主 agent context:过程数据只写文件、只在新终端显示。
+ * 跨平台兼容(macOS / Linux / Windows):
+ *   - Windows:写临时 .cmd 批处理文件(避免多层引号嵌套),用 start 开独立窗口跑。
+ *   - macOS:osascript 让 Terminal.app 跑 tail(路径转义处理空格)。
+ *   - Linux:which 检测可用终端(gnome-terminal -- / konsole -e / xterm -e / x-terminal-emulator),用各自正确的参数语法。
+ * 开窗失败不抛错(只返回 error),因为这只是辅助查看,不影响 Judge 主流程。
+ */
+function openLiveLogTerminal(liveLogPath: string): { ok: boolean; error?: string } {
+	try {
+		if (process.platform === "win32") {
+			// Windows:多层引号嵌套(cmd start + cmd /k + powershell -Command "...")在 spawn 下极易出错。
+			// 解法:写一个临时 .cmd 批处理文件,路径写死在文件里(纯文本,无引号嵌套问题),start 开窗跑它。
+			const launcher = buildWindowsLiveLogLauncher(liveLogPath);
+			// PowerShell 单引号包路径(路径不含单引号时安全),-Wait 实时跟踪。最后 pause 让用户看完。
+			mkdirSync(path.dirname(launcher.path), { recursive: true });
+			writeFileSync(launcher.path, launcher.content, "utf8");
+			// start 第一个带引号参数当窗口标题(怪癖),然后跑批处理。
+			spawn("cmd.exe", ["/c", "start", "Judge driver live", launcher.path], {
+				detached: true,
+				stdio: "ignore",
+				windowsHide: false,
+				shell: false,
+			}).unref();
+			return { ok: true };
+		}
+
+		if (process.platform === "darwin") {
+			// macOS:osascript 指挥 Terminal.app。路径里的双引号和反斜杠转义。
+			const escapedPath = liveLogPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+			const script = `tell application "Terminal"
+  activate
+  do script "tail -f \\"${escapedPath}\\""
+end tell`;
+			spawn("osascript", ["-e", script], { detached: true, stdio: "ignore" }).unref();
+			return { ok: true };
+		}
+
+		// Linux:同步检测可用终端(预检避免 spawn 异步 ENOENT 无法捕获的问题)。
+		const term = detectLinuxTerminal();
+		if (!term) {
+			return { ok: false, error: "no supported terminal emulator found (tried x-terminal-emulator, gnome-terminal, konsole, xterm)" };
+		}
+		// 各终端的"执行命令"参数语法不同:
+		//   gnome-terminal: -- <cmd> <args>
+		//   konsole: -e <cmd> <args>
+		//   xterm: -e <cmd> <args>
+		//   x-terminal-emulator: -e <cmd> <args>(Debian 系别名,语法同 -e)
+		const sep = term.bin === "gnome-terminal" ? "--" : "-e";
+		spawn(term.bin, [sep, "tail", "-f", liveLogPath], {
+			detached: true,
+			stdio: "ignore",
+		}).unref();
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
+	}
+}
+
+/** 同步检测 Linux 上可用的终端模拟器(预检,避免 spawn 异步错误无法捕获)。 */
+function detectLinuxTerminal(): { bin: string } | null {
+	const candidates = [
+		{ bin: "x-terminal-emulator" }, // Debian 系默认别名
+		{ bin: "gnome-terminal" }, // GNOME
+		{ bin: "konsole" }, // KDE
+		{ bin: "xterm" }, // 兜底,大多装了
+	];
+	const { execFileSync } = require("node:child_process") as { execFileSync: (cmd: string, args: string[]) => string };
+	const which = process.platform === "win32" ? "where" : "which";
+	for (const c of candidates) {
+		try {
+			execFileSync(which, [c.bin], { stdio: "ignore" });
+			return c;
+		} catch {
+			// 这个终端没装,试下一个
+		}
+	}
+	return null;
+}
 export const JUDGE_AGENT_DEFINITION_PATH = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
 	"..",
@@ -281,6 +403,7 @@ function persistState(pi: ExtensionAPI, state: JudgeState): void {
 		maxSteer: state.maxSteer,
 		keepWatching: state.keepWatching,
 		pendingAckStatus: state.pendingAckStatus,
+		aligningQuestionnaireUsed: state.aligningQuestionnaireUsed,
 	});
 }
 
@@ -326,6 +449,7 @@ function restoreJudgeState(data: unknown): JudgeState | undefined {
 		maxSteer: record.maxSteer,
 		keepWatching: record.keepWatching,
 		pendingAckStatus: record.pendingAckStatus as JudgeState["pendingAckStatus"],
+		aligningQuestionnaireUsed: record.aligningQuestionnaireUsed === true,
 	};
 }
 
@@ -369,6 +493,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 					state = completeJudge(state);
 					persistState(pi, state);
 					ctx.ui.notify("Judge delivery accepted.", "info");
+					clearJudgeDriverWidget(ctx.ui);
 					return;
 				}
 				ctx.ui.notify("No pending PASS Judge delivery to accept.", "warning");
@@ -393,6 +518,11 @@ export function registerJudge(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_call", async (event) => {
+		// C-2 机制闸:aligning 阶段调过 questionnaire 就置标志,agent_end 时据此判断能否委派。
+		if (state.phase === "aligning" && event.toolName === "questionnaire") {
+			state = markAligningQuestionnaireUsed(state);
+			persistState(pi, state);
+		}
 		if (state.phase !== "aligning" || event.toolName !== "bash") return undefined;
 
 		const command = event.input.command as string;
@@ -418,11 +548,12 @@ export function registerJudge(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
 		activeDriver?.dispose();
 		activeDriver = undefined;
 		activeJudgeVerdictProvider?.dispose();
 		activeJudgeVerdictProvider = undefined;
+		if (ctx?.ui) clearJudgeDriverWidget(ctx.ui);
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -442,9 +573,18 @@ export function registerJudge(pi: ExtensionAPI): void {
 
 		const choice = await ctx.ui.select("Judge next step", JUDGE_MENU_OPTIONS);
 		if (choice === "委派 driver 执行") {
+			// C-2 机制闸:aligning 阶段没调过 questionnaire 就选了委派,拒绝,逼 Judge 回去确认假设。
+			// 防止 Judge 偷懒跳过 questionnaire 直接拍 Spec(参见 2026-06-19 知乎验证暴露的问题)。
+			// 注意:闸只在"委派"时触发;继续澄清/改需求本来就是要回去问,不需要 questionnaire。
+			if (!state.aligningQuestionnaireUsed) {
+				ctx.ui.notify("Judge 产出 Spec 前未用 questionnaire 确认假设,拒绝委派。已让 Judge 回到对齐阶段确认各维度假设。", "warning");
+				pi.sendUserMessage("你刚才在没有调用 questionnaire 确认假设的情况下直接产出了 RequirementsSpec。这违反 ALIGN_PROMPT 的强制要求。请立即调用 questionnaire 工具,把 goal/scope/source/timeliness/format 等维度的假设摆给用户确认或修改,然后再产出 Spec。不要再说\"需求清晰无需澄清\"。");
+				return;
+			}
 			state = startDriving(state);
 			persistState(pi, state);
 			activeDriver?.dispose();
+			clearJudgeDriverWidget(ctx.ui); // 清理上一轮 driver 的 widget,新一轮会重建
 			const runId = `judge-${Date.now()}`;
 			const specText = formatRequirementsSpec(spec);
 			const initialPrompt = [
@@ -456,6 +596,50 @@ export function registerJudge(pi: ExtensionAPI): void {
 			const createDriver = judgeDriverFactoryForTests ?? createJudgeDriver;
 			const cwd = getCwd(ctx);
 			const runDir = path.join(cwd, ".judge", runId);
+
+			// ---- driver 过程可视化 widget ----
+			// 搬 Flow 的 setWidget + onTranscriptUpdate 机制,实时显示 driver 过程 + Judge 判定。
+			// 常量 JUDGE_DRIVER_WIDGET_KEY、formatJudgeVerdictLine、clearJudgeDriverWidget 在模块顶层。
+			let lastWidgetSnapshot = "";
+			let lastJudgeVerdictLine = "";
+			let transcriptRefreshQueued = false;
+
+			function clearDriverWidget() {
+				lastWidgetSnapshot = "";
+				lastJudgeVerdictLine = "";
+				clearJudgeDriverWidget(ctx.ui);
+			}
+
+			function refreshDriverWidget() {
+				transcriptRefreshQueued = false;
+				if (!activeDriver) return;
+				let lines: string[];
+				try {
+					const summary = activeDriver.getSummary();
+					const transcriptLines = activeDriver.getWidgetLines();
+					const titleLine = `─── Judge driver (turn ${summary.turnCount}, steer ${summary.steerCount}/${state.maxSteer}) ───`;
+					const verdictBlock = lastJudgeVerdictLine ? ["─── Judge ───", lastJudgeVerdictLine] : [];
+					lines = [titleLine, ...transcriptLines, ...verdictBlock];
+				} catch {
+					return;
+				}
+				const snapshot = lines.join("\n");
+				if (snapshot === lastWidgetSnapshot) return; // 去重,避免 TUI 重建导致滚动跳动
+				lastWidgetSnapshot = snapshot;
+				try {
+					(ctx.ui as { setWidget?: (key: string, content: unknown, options?: { placement: string }) => void })
+						.setWidget?.(JUDGE_DRIVER_WIDGET_KEY, lines, { placement: "aboveEditor" });
+				} catch {
+					// setWidget 在非 TUI 模式可能不可用,忽略
+				}
+			}
+
+			function scheduleDriverWidgetRefresh() {
+				if (transcriptRefreshQueued) return;
+				transcriptRefreshQueued = true;
+				queueMicrotask(refreshDriverWidget);
+			}
+
 			activeJudgeVerdictProvider?.dispose();
 			const defaultJudgeVerdictProvider = createJudgeVerdictProviderHandle({
 				cwd,
@@ -487,6 +671,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 						state = abortJudge(state);
 						persistState(pi, state);
 						ctx.ui.notify(`Judge aborted driver: ${reason}`, "error");
+						clearDriverWidget();
 					},
 					async onFinalize(context) {
 						const canContinueAfterFail = state.keepWatching && context.summary.steerCount < state.maxSteer;
@@ -525,6 +710,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 								state = completeJudge({ ...state, summary: deliveryReport });
 								persistState(pi, state);
 								ctx.ui.notify("Judge delivery accepted.", "info");
+								clearDriverWidget();
 								return { action: "pass", keepWatching: false };
 							}
 							state = markPendingAck(enterDelivering({ ...state, summary: deliveryReport }), "pass");
@@ -572,8 +758,29 @@ export function registerJudge(pi: ExtensionAPI): void {
 				},
 				uiContext: ctx.ui,
 				extensionMode: ctx.mode,
+				onTranscriptUpdate: scheduleDriverWidgetRefresh,
+				onJudgeVerdict: (verdict) => {
+					lastJudgeVerdictLine = formatJudgeVerdictLine(verdict);
+					refreshDriverWidget();
+				},
 			});
+			// 委派后弹菜单:要不要开新终端实时看 driver + Judge 过程(零污染主 agent context)。
+			if (ctx.hasUI) {
+				const viewChoice = await ctx.ui.select("Judge driver 即将开始。是否打开过程查看终端?", [
+					"打开(新窗口实时显示 driver + Judge 工作过程)",
+					"不打开(只在主界面看 widget)",
+				]);
+				if (viewChoice.startsWith("打开")) {
+					const result = openLiveLogTerminal(activeDriver.getLiveLogPath());
+					if (result.ok) {
+						ctx.ui.notify(`已打开过程终端,实时显示:${activeDriver.getLiveLogPath()}`, "info");
+					} else {
+						ctx.ui.notify(`打开过程终端失败(${result.error})。可手动 tail -f ${activeDriver.getLiveLogPath()}`, "warning");
+					}
+				}
+			}
 			await activeDriver.start();
+			refreshDriverWidget(); // driver 起来后立即显示一次 widget
 			ctx.ui.notify("Judge driver started.", "info");
 			return;
 		}

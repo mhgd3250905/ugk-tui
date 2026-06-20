@@ -1,4 +1,5 @@
 import type { ExtensionMode, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { appendFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -54,6 +55,10 @@ export interface JudgeDriverOptions {
 	onEscalate?: (context: JudgeEscalationContext) => Promise<void> | void;
 	uiContext?: ExtensionUIContext;
 	extensionMode?: ExtensionMode;
+	/** driver transcript 有更新时回调(用于刷新可视化 widget)。 */
+	onTranscriptUpdate?: () => void;
+	/** Judge 每次 wakeup 产出 verdict 后回调(用于把判定显示到 UI)。 */
+	onJudgeVerdict?: (verdict: JudgeVerdict) => void;
 }
 
 export interface JudgeEscalationContext {
@@ -67,6 +72,12 @@ export interface JudgeDriverHandle {
 	start(): Promise<void>;
 	dispose(): void;
 	getSummary(): DriverSummary;
+	/** driver transcript 的 widget 行(格式化好的尾部,直接喂 setWidget)。 */
+	getWidgetLines(): string[];
+	/** driver 累积的完整 transcript 文本(截断到 DriverTranscriptTail 上限)。 */
+	getTranscriptText(): string;
+	/** live.log 文件路径(外部终端可 tail -f 实时查看 driver + Judge 过程)。 */
+	getLiveLogPath(): string;
 }
 
 export const JUDGE_WAKEUP_TOOL_NAMES = new Set(["chrome_cdp", "bash", "write", "edit"]);
@@ -139,6 +150,28 @@ function formatWakeupError(error: unknown): string {
 	return `judge wakeup failed: ${String(error)}`;
 }
 
+/** 把 driver 事件格式化成 live.log 的一行。message_update(text_delta)太碎不写,返回空串跳过。 */
+function formatEventLine(event: DriverSessionEvent): string {
+	if (event.type === "agent_start") return "🔄 driver turn started";
+	if (event.type === "agent_end") return "🔄 driver turn ended";
+	if (event.type === "tool_execution_start") {
+		return `🔧 ${event.toolName ?? "(tool)"} | started`;
+	}
+	if (event.type === "tool_execution_end") {
+		const status = event.isError ? "FAILED" : "completed";
+		return `🔧 ${event.toolName ?? "(tool)"} | ${status}`;
+	}
+	// message_update / 其他:不写(避免逐 token 刷屏)
+	return "";
+}
+
+/** 把 Judge verdict 格式化成 live.log 的一行。 */
+function formatJudgeVerdictForLog(verdict: { action: string; direction?: string; reason?: string }): string {
+	if (verdict.action === "pass") return "PASS";
+	if (verdict.action === "steer") return `STEER: ${verdict.direction ?? "(no direction)"}`;
+	return `ABORT: ${verdict.reason ?? "(no reason)"}`;
+}
+
 function wrapFactoryForJudgeEvents(
 	factory: DriverSessionFactory,
 	handleEvent: (event: DriverSessionEvent) => void,
@@ -146,15 +179,23 @@ function wrapFactoryForJudgeEvents(
 	return async (options) => {
 		const result = await factory(options);
 		const session = result.session;
-		const wrapped: DriverSessionLike = {
-			...session,
-			subscribe(listener) {
-				return session.subscribe((event) => {
-					listener(event);
-					handleEvent(event);
-				});
+		// 用 Proxy 透传,只覆盖 subscribe 把事件喂给 Judge。
+		// 不能用 {...session} 展开 —— 会丢掉 prototype 上的方法(getAllTools/prompt/steer/dispose 等),
+		// 导致 assertExpectedDriverTools 的 getAllTools 返回空,误报 "Missing judge_complete"。
+		const wrapped: DriverSessionLike = new Proxy(session as object, {
+			get(target, property, receiver) {
+				if (property === "subscribe") {
+					return function subscribe(listener: (event: DriverSessionEvent) => void) {
+						return session.subscribe((event) => {
+							listener(event);
+							handleEvent(event);
+						});
+					};
+				}
+				const value = Reflect.get(target as object, property, receiver);
+				return typeof value === "function" ? value.bind(target) : value;
 			},
-		};
+		}) as unknown as DriverSessionLike;
 		return { session: wrapped };
 	};
 }
@@ -176,6 +217,19 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 	let wakeupQueue = Promise.resolve();
 	const decide = opts.onWakeup ?? defaultWakeup;
 
+	// live.log:把每个 driver 事件 append 到 <runDir>/live.log,供外部终端 tail -f 实时查看。
+	// 零污染主 agent context(不进 state.messages)。写入失败不影响 Judge 主流程。
+	const liveLogPath = path.join(opts.runDir, "live.log");
+	function writeLiveLog(line: string): void {
+		if (!line) return; // 空行(如 message_update)跳过
+		try {
+			const ts = new Date().toLocaleTimeString("en-GB", { hour12: false });
+			appendFileSync(liveLogPath, `[${ts}] ${line}\n`);
+		} catch {
+			// 写日志失败不影响 Judge 主流程
+		}
+	}
+
 	function enqueueWakeup(reason: string, toolName?: string): void {
 		if (!watching || disposed) return;
 		const snapshot = cloneSummary(summary);
@@ -195,6 +249,14 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 						transcript,
 						decidePrompt,
 					});
+
+					// 把 Judge 判定报给 UI(用于可视化),在副作用执行前就报,保证 UI 即时。
+					writeLiveLog(`🧑‍⚖️ Judge | ${formatJudgeVerdictForLog(verdict)}`);
+					try {
+						opts.onJudgeVerdict?.(verdict);
+					} catch {
+						// UI 回调失败不影响 Judge 主流程
+					}
 
 					if (verdict.action === "pass") {
 						watching = verdict.keepWatching;
@@ -234,6 +296,9 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 		if (transcriptEvents.length > 200) {
 			transcriptEvents.splice(0, transcriptEvents.length - 200);
 		}
+
+		// 实时写 live.log(供外部终端 tail -f)。
+		writeLiveLog(formatEventLine(event));
 
 		if (event.type === "agent_start") {
 			summary.turnCount += 1;
@@ -300,6 +365,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 			uiContext: opts.uiContext,
 			extensionMode: opts.extensionMode,
 			agentDefinitionPath: DRIVER_AGENT_DEFINITION_PATH,
+			onTranscriptUpdate: opts.onTranscriptUpdate,
 		},
 		factory,
 	);
@@ -316,6 +382,15 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 		},
 		getSummary() {
 			return cloneSummary(summary);
+		},
+		getWidgetLines() {
+			return driver?.getWidgetLines() ?? ["(driver not started)"];
+		},
+		getTranscriptText() {
+			return driver?.getTranscriptText() ?? "";
+		},
+		getLiveLogPath() {
+			return liveLogPath;
 		},
 	};
 }

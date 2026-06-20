@@ -230,8 +230,8 @@ function getCwd(ctx: ExtensionContext): string {
 	return typeof cwd === "string" ? cwd : process.cwd();
 }
 
-function sliceNewTranscript(before: string, after: string): string {
-	return after.startsWith(before) ? after.slice(before.length) : after;
+export function sliceNewTranscript(before: string, after: string): string {
+	return after.startsWith(before) ? after.slice(before.length) : "";
 }
 
 function formatJudgeEscalation(context: JudgeEscalationContext): string {

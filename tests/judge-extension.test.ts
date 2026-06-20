@@ -8,6 +8,7 @@ import {
 	setJudgeDecisionSessionFactoryForTests,
 	setJudgeDriverFactoryForTests,
 	setJudgeVerdictProviderForTests,
+	sliceNewTranscript,
 } from "../extensions/judge/judge.ts";
 import { ALIGN_PROMPT } from "../extensions/judge/judge-prompts.ts";
 
@@ -122,6 +123,24 @@ function emitQuestionnaireConfirmed(handlers: { get(key: string): Array<(event: 
 	}
 	toolCallHandlers[0]({ toolName: "questionnaire", input: {} }, ctx);
 }
+
+test("sliceNewTranscript returns only the current turn when transcript keeps the old prefix", () => {
+	assert.equal(
+		sliceNewTranscript("old transcript\n", "old transcript\n```json\n{\"action\":\"pass\",\"keepWatching\":true}\n```"),
+		"```json\n{\"action\":\"pass\",\"keepWatching\":true}\n```",
+	);
+});
+
+test("sliceNewTranscript returns empty text on transcript prefix drift instead of reusing old verdicts", () => {
+	const driftedWindow = [
+		"```json",
+		"{\"action\":\"abort\",\"reason\":\"old verdict\"}",
+		"```",
+		"new undecidable turn",
+	].join("\n");
+
+	assert.equal(sliceNewTranscript("older transcript that was trimmed away", driftedWindow), "");
+});
 
 test("registerJudge registers /judge, questionnaire, and judge_complete tool", async () => {
 	const { pi, commands, tools } = makePi();

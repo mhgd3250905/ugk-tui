@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
 	buildWindowsLiveLogLaunchPlan,
@@ -140,6 +141,12 @@ test("sliceNewTranscript returns empty text on transcript prefix drift instead o
 	].join("\n");
 
 	assert.equal(sliceNewTranscript("older transcript that was trimmed away", driftedWindow), "");
+});
+
+test("judge extension module avoids CommonJS require in ESM runtime paths", () => {
+	const source = readFileSync(path.resolve("extensions/judge/judge.ts"), "utf8");
+
+	assert.doesNotMatch(source, /\brequire\(/);
 });
 
 test("registerJudge registers /judge, questionnaire, and judge_complete tool", async () => {

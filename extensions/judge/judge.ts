@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { Type, type AssistantMessage, type TextContent } from "@earendil-works/pi-ai";
 import {
 	defineTool,
@@ -173,7 +173,6 @@ function detectLinuxTerminal(): { bin: string } | null {
 		{ bin: "konsole" }, // KDE
 		{ bin: "xterm" }, // 兜底,大多装了
 	];
-	const { execFileSync } = require("node:child_process") as { execFileSync: (cmd: string, args: string[]) => string };
 	const which = process.platform === "win32" ? "where" : "which";
 	for (const c of candidates) {
 		try {
@@ -296,7 +295,6 @@ function createJudgeVerdictProviderHandle(options: {
 				// 运行时遥测(非临时诊断,长期保留):parse 失败时记录 sliceNewTranscript 现场,
 				// 用于定位前缀失配/transcript 漂移是否频繁(防 Judge 频繁兜底 pass)。
 				try {
-					const { appendFileSync } = require("node:fs") as { appendFileSync: (p: string, c: string) => void };
 					const diagPath = path.join(options.runDir, "decide-parse-fail.log");
 					appendFileSync(diagPath, `[${new Date().toISOString()}] prefixMatched=${after.startsWith(before)} before.len=${before.length} after.len=${after.length} currentTurn.len=${currentTurn.length}\ncurrentTurn.head=${JSON.stringify(currentTurn.slice(0, 200))}\n---\n`);
 				} catch {

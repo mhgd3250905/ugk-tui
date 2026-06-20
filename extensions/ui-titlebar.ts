@@ -29,18 +29,29 @@ export default function (pi: ExtensionAPI) {
 			timer = null;
 		}
 		frameIndex = 0;
-		ctx.ui.setTitle(getBaseTitle(pi));
+		try {
+			ctx.ui.setTitle(getBaseTitle(pi));
+		} catch {
+			// The session may already be stale during replacement/reload teardown.
+		}
 	}
 
 	function startAnimation(ctx: ExtensionContext) {
 		stopAnimation(ctx);
 		timer = setInterval(() => {
-			const frame = BRAILLE_FRAMES[frameIndex % BRAILLE_FRAMES.length];
-			const cwd = path.basename(process.cwd());
-			const session = pi.getSessionName();
-			const title = session ? `${frame} π - ${session} - ${cwd}` : `${frame} π - ${cwd}`;
-			ctx.ui.setTitle(title);
-			frameIndex++;
+			try {
+				const frame = BRAILLE_FRAMES[frameIndex % BRAILLE_FRAMES.length];
+				const cwd = path.basename(process.cwd());
+				const session = pi.getSessionName();
+				const title = session ? `${frame} π - ${session} - ${cwd}` : `${frame} π - ${cwd}`;
+				ctx.ui.setTitle(title);
+				frameIndex++;
+			} catch {
+				if (timer) {
+					clearInterval(timer);
+					timer = null;
+				}
+			}
 		}, 80);
 	}
 

@@ -88,34 +88,16 @@ export function buildWindowsLiveLogLauncher(liveLogPath: string): { path: string
 		path: launcherPath,
 		content: [
 			"@echo off",
-			`powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath ${quotePowerShellLiteral(liveLogPath)} -Wait"`,
+			"chcp 65001 >nul",
+			// PowerShell 显式设 UTF-8 输出,避免 conhost 默认 GBK 把 UTF-8 的 live.log 解码成乱码。
+			`powershell -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content -LiteralPath ${quotePowerShellLiteral(liveLogPath)} -Wait -Encoding UTF8"`,
 			"pause",
 			"",
 		].join("\r\n"),
 	};
 }
 
-export function buildWindowsLiveLogLaunchPlan(
-	liveLogPath: string,
-	env: Record<string, string | undefined> = process.env,
-): { command: string; args: string[]; launcher?: { path: string; content: string } } {
-	if (env.WT_SESSION) {
-		return {
-			command: "wt.exe",
-			args: [
-				"new-tab",
-				"--title",
-				"Judge driver live",
-				"powershell.exe",
-				"-NoProfile",
-				"-ExecutionPolicy",
-				"Bypass",
-				"-Command",
-				`Get-Content -LiteralPath ${quotePowerShellLiteral(liveLogPath)} -Wait`,
-			],
-		};
-	}
-
+export function buildWindowsLiveLogLaunchPlan(liveLogPath: string): { command: string; args: string[]; launcher?: { path: string; content: string } } {
 	const launcher = buildWindowsLiveLogLauncher(liveLogPath);
 	return {
 		command: "cmd.exe",
@@ -128,8 +110,7 @@ export function buildWindowsLiveLogLaunchPlan(
  * 在新终端窗口打开 live.log 的实时跟踪(tail -f / Get-Content -Wait)。
  * 零污染主 agent context:过程数据只写文件、只在新终端显示。
  * 跨平台兼容(macOS / Linux / Windows):
- *   - Windows Terminal:用 wt.exe new-tab 直接跑 PowerShell tail。
- *   - Windows conhost:写项目内 .cmd 批处理文件(避免多层引号嵌套),用 start 开独立窗口跑。
+ *   - Windows:写项目内 .cmd 批处理文件(避免多层引号嵌套),交给系统打开过程终端窗口。
  *   - macOS:osascript 让 Terminal.app 跑 tail(路径转义处理空格)。
  *   - Linux:which 检测可用终端(gnome-terminal -- / konsole -e / xterm -e / x-terminal-emulator),用各自正确的参数语法。
  * 开窗失败不抛错(只返回 error),因为这只是辅助查看,不影响 Judge 主流程。
@@ -137,7 +118,7 @@ export function buildWindowsLiveLogLaunchPlan(
 function openLiveLogTerminal(liveLogPath: string): { ok: boolean; error?: string } {
 	try {
 		if (process.platform === "win32") {
-			// Windows Terminal 里优先开 new-tab；非 WT 回退 conhost + 项目内 launcher.cmd。
+			// Windows 不绑定具体终端实现,只让系统打开一个独立过程终端窗口。
 			const plan = buildWindowsLiveLogLaunchPlan(liveLogPath);
 			if (plan.launcher) {
 				mkdirSync(path.dirname(plan.launcher.path), { recursive: true });

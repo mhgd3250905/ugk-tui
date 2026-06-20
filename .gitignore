@@ -1,5 +1,7 @@
 # Dependencies (local resolution for extension TS imports)
 node_modules/
+mcp.json
+.mcp.local.json
 
 # Lockfile (peer-dep resolution, not a real app)
 package-lock.json

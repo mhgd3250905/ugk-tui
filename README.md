@@ -2,7 +2,7 @@
 
 **ugk** — 一个开箱即用的终端编码 agent。一条命令安装,打 `ugk` 即用。
 
-> 基于 [pi](https://github.com/earendil-works/pi) 构建,但用户无需关心 pi——`npm i -g ugk-agent` 装完就拥有全部能力(投屏、子代理、定时任务、plan 模式、judge 委托验收等)。
+> 基于 [pi](https://github.com/earendil-works/pi) 构建,但用户无需关心 pi——`npm i -g ugk-agent` 装完就拥有全部能力(投屏、子代理、定时任务、plan 模式、judge 委托验收、MCP tools 接入等)。
 
 ---
 
@@ -90,6 +90,7 @@ cp agents/*.md ~/.pi/agent/agents/
 | `@scout 列出项目目录` | 调 `subagent` 委派 scout(需先装预设 agent) |
 | `/plan` | 切换只读探索模式 |
 | `/judge` | 查看 judge 委托验收菜单 |
+| `/mcp status` | 查看已配置/已连接的 MCP server |
 | `rm -rf /tmp/test` | 触发权限门(弹确认) |
 
 ---
@@ -113,6 +114,7 @@ ugk --model deepseek-reasoner
 - `/implement 加个 Redis 缓存` — scout→planner→worker 全链路
 - `/plan` — 先只读规划再执行
 - `/judge` — 打开 judge 委托验收菜单
+- `/mcp status` — 查看外部 MCP tools 连接状态
 
 ---
 
@@ -155,6 +157,7 @@ Release notes: https://github.com/mhgd3250905/ugk-tui/commits/main
 | `subagent` | 子代理委派(single/parallel/chain 三模式) |
 | `cron` | 定时任务管理(status/list/add/remove/history) |
 | `chrome_cdp` | 受保护的本地登录态 Chrome 控制(status/tabs/navigate/evaluate/screenshot) |
+| `mcp` | 外部 MCP stdio server 的 tools 接入,注册为 `server__tool` |
 
 ### ugk 品牌 UI
 
@@ -193,6 +196,7 @@ UGK_CLEAR_STARTUP=0 ugk
 | `/check-env` | 一键自检 adb/scrcpy/设备连接 |
 | `/update` | 检查并更新 UGK |
 | `/cdp` | 管理本地 Chrome CDP 访问模式、端口、启动和标签页 |
+| `/mcp` | 管理 MCP server 状态、权限模式、reload、enable/disable |
 | `/ugk-ui` | 开关 ugk 品牌 UI |
 | `/plan` | 切换 plan-mode 只读探索模式(或 Ctrl+Alt+P) |
 | `/todos` | 查看 plan-mode 计划进度 |
@@ -220,6 +224,51 @@ UGK_CLEAR_STARTUP=0 ugk
 ```
 
 默认模式是 `ask`。非 status 操作需要提供原因并说明普通访问是否已经尝试或不适用。详见 `skills/chrome-cdp-guide/SKILL.md` 和 `extensions/chrome-cdp/README.md`。
+
+### MCP tools 接入
+
+UGK 可以作为 MCP client 连接外部 stdio MCP server,把 server 暴露的 tools 注册成 `server__tool`。一期只支持 stdio + tools;resources、prompts、sampling、HTTP transport 暂不启用。
+
+配置文件按四档合并:
+
+- install: UGK 安装目录 `mcp.json`(全局安装目录下的 `ugk-agent/mcp.json`;npm link 开发时即仓库根目录 `mcp.json`),由 UGK 包/项目维护者背书
+- user: `~/.config/ugk/mcp.json`(Windows 为 `%APPDATA%\ugk\mcp.json`)
+- project: 当前项目 `.mcp.json`
+- local: 当前项目 `.mcp.local.json`(已进 `.gitignore`,用于本机 token/path)
+
+示例:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+install/user scope 视为 UGK 级可信配置,默认直接连接;project/local scope 第一次 spawn 前默认弹确认;非交互模式只允许 install/user scope,project/local 会 fail-closed。工具调用权限复用 `ask/on/off`:
+
+```text
+/mcp status
+/mcp ask
+/mcp on
+/mcp off
+/mcp reload
+/mcp enable filesystem
+/mcp disable filesystem
+```
+
+`/mcp reload` 会断开并重连 server。pi 当前没有 unregisterTool,所以消失 server 的旧工具会从 active tools 下线;如果 stale 工具被调用,会返回 server disconnected,不会自动重连。`/doctor` 的 MCP 项只读配置和当前 registry 状态,不会 spawn 任意 MCP server。详见 `skills/mcp-guide/SKILL.md`。
 
 ### Judge 委托验收
 
@@ -262,6 +311,7 @@ npm run cron:start   # 启动常驻服务(127.0.0.1:17741)
 | `subagent-guide` | 子代理委派指南 |
 | `cron-guide` | 定时任务指南 |
 | `chrome-cdp-guide` | 本地登录态 Chrome/CDP 使用边界与安全流程 |
+| `mcp-guide` | MCP server 配置、权限、命令和排障指南 |
 | `skill-creator` | 创建、改进和评测 agent skill(来自 Anthropic skills, Apache-2.0) |
 | `docx` | 创建、读取、编辑 Word `.docx` 文档(来自 Anthropic skills,见随包 LICENSE.txt) |
 
@@ -289,13 +339,14 @@ ugk-core/
 │   ├── plan-mode.ts + plan-mode-utils/state.ts  # plan 模式
 │   ├── judge/               # Judge 委托验收模式
 │   ├── chrome-cdp/          # 本地登录态 Chrome CDP 控制
+│   ├── mcp/                 # MCP stdio client、registry、tools、permissions、/mcp
 │   └── ui-*.ts               # UI 美化(品牌层/footer/状态条/标题栏spinner)
 ├── cron/
 │   └── service.ts            # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)
 │   ├── scout.md planner.md reviewer.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
-│   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/skill-creator/docx
+│   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/skill-creator/docx
 ├── themes/
 │   └── ugk-geek.json         # ugk 极客绿主题
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)
@@ -340,6 +391,12 @@ A: `ugk` 首次启动会默认在 `~/.pi/agent/settings.json` 写入:
 `clearStartupScreen` 会让新会话启动页清理当前终端视口并占满终端高度。`skills` 会隐藏 `~/.agents/skills` 下的用户全局 skills,避免系统里装过的个人 skill 干扰 ugk。ugk 通过扩展注入的 `adb-guide` / `scrcpy-guide` / `subagent-guide` / `cron-guide` / `chrome-cdp-guide` / `ugk-guide` / `skill-creator` / `docx` 仍会加载。
 
 已有用户如果之前手动配置过 `clearStartupScreen` 或 `skills`,ugk 不会覆盖;需要启用默认行为时可手动补上对应字段。
+
+**Q: `.mcp.json` 配了 server,为什么非交互模式不连接?**
+A: project/local scope 会执行项目内命令,非交互模式没有 UI 可确认,所以 UGK fail-closed。把可信 server 放到 install scope(UGK 安装目录 `mcp.json`)或 user scope(`~/.config/ugk/mcp.json` / `%APPDATA%\ugk\mcp.json`),或在交互 TUI 中确认后使用。
+
+**Q: `/mcp reload` 后旧工具还在模型上下文里怎么办?**
+A: UGK 会把消失 server 的工具从 active tools 下线,但 pi 目前没有真正的 unregisterTool API。若 stale 工具被调用,它会返回 server disconnected,不会自动重连。重新出现的 server 可通过 `/mcp reload` 和 `/mcp enable <server>` 恢复 active。
 
 **Q: 我之前用 pi install 装过老版本,要怎么升级?**
 A: 直接 `npm i -g ugk-agent`,然后用 `ugk` 代替 `pi` 即可。老的 ~/.pi/agent/ 配置和 auth 仍然有效(ugk 复用同一目录)。

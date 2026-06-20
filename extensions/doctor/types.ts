@@ -1,5 +1,5 @@
 export type DoctorStatus = "pass" | "warn" | "fail" | "skip";
-export type DoctorCategory = "shell" | "api" | "chrome";
+export type DoctorCategory = "shell" | "api" | "chrome" | "mcp";
 
 export interface DoctorResult {
 	status: DoctorStatus;

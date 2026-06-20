@@ -29,6 +29,8 @@ import registerFlow from "./flow/index.ts";
 import registerJudge from "./judge/judge.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
+import { createCoreDoctorChecks } from "./doctor/checks.ts";
+import registerMcp, { createMcpDoctorCheck } from "./mcp/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { renderTerminalTable } from "./terminal-table.ts";
@@ -54,9 +56,9 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
 	const apiSummary = deepseekStatus.replace(/^deepseek:\s*/, "DeepSeek ");
 	const rows = [
-		["🧰 Tools", "✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ judge"],
+		["🧰 Tools", "✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ judge  ✅ mcp"],
 		["🤖 Agents", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries"],
-		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /flow  /judge  /cdp  /ugk-ui"],
+		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /flow  /judge  /cdp  /mcp  /ugk-ui"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		["🛡️ Guard", "dangerous bash gate enabled"],
 	] as const;
@@ -69,6 +71,8 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 	// 1) 自定义工具
 	pi.registerTool(greetTool);
 	pi.registerTool(scrcpyTool);
@@ -100,8 +104,11 @@ export default function (pi: ExtensionAPI) {
 	// 1.3c) chrome-cdp:受保护的本地登录态 Chrome 控制器(/cdp + chrome_cdp tool)
 	registerChromeCdp(pi);
 
-	// 1.3c.1) doctor:只读核心能力体检(bash / api / chrome)
-	registerDoctor(pi);
+	// 1.3c.1) mcp:外部 MCP stdio tools 集成(/mcp + session lifecycle)
+	const mcpState = registerMcp(pi, { packageRoot });
+
+	// 1.3c.2) doctor:只读核心能力体检(bash / api / chrome / mcp)
+	registerDoctor(pi, { checks: [...createCoreDoctorChecks(), createMcpDoctorCheck({ registry: mcpState.registry, packageRoot })] });
 
 	// 1.3d) UGK 自管更新:只暴露 UGK 更新,不暴露 pi update
 	registerUgkUpdate(pi);
@@ -176,7 +183,6 @@ export default function (pi: ExtensionAPI) {
 	//    bin/ugk.js 用 -e 加载本扩展(只管扩展文件),skills/prompts 靠这个事件带上。
 	//    扫描包内的 skills/<name>/SKILL.md 和 prompts/*.md,返回绝对路径。
 	//    模式借自官方 examples/extensions/dynamic-resources。
-	const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 	pi.on("resources_discover", () => {
 		const skillPaths: string[] = [];
 		const skillsDir = path.join(packageRoot, "skills");

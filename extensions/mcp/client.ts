@@ -22,6 +22,18 @@ type OperationOptions = {
 	signal?: AbortSignal;
 };
 
+type KillableProcess = {
+	exitCode: number | null;
+	kill(signal?: string): boolean;
+	stdin?: { destroy(): void };
+	stdout?: { destroy(): void };
+	stderr?: { destroy(): void };
+};
+
+type StdioClientTransportWithProcess = StdioClientTransport & {
+	_process?: KillableProcess | null;
+};
+
 const transports = new WeakMap<Client, StdioClientTransport>();
 const closingClients = new WeakMap<Client, Promise<void>>();
 
@@ -74,6 +86,32 @@ export async function closeClient(client: Client): Promise<void> {
 	});
 	closingClients.set(client, closePromise);
 	return closePromise;
+}
+
+export function killClientProcess(client: Client): void {
+	const transport = transports.get(client) as StdioClientTransportWithProcess | undefined;
+	transports.delete(client);
+	if (transport) {
+		killStdioTransportProcess(transport);
+	}
+}
+
+export function killStdioTransportProcess(transport: StdioClientTransportWithProcess): void {
+	const child = transport._process;
+	if (!child) {
+		process.stderr.write(
+			"ugk-mcp: warning: StdioClientTransport._process unavailable, child may not be killed (SDK version drift?)\n",
+		);
+		return;
+	}
+
+	child.stdin?.destroy();
+	child.stdout?.destroy();
+	child.stderr?.destroy();
+	if (child.exitCode === null) {
+		child.kill("SIGTERM");
+	}
+	transport._process = undefined;
 }
 
 function toRequestOptions(opts: OperationOptions, defaultTimeoutMs: number) {

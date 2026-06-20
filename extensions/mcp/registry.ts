@@ -5,6 +5,7 @@ import {
 	closeClient,
 	connectStdio,
 	createMcpClient,
+	killClientProcess,
 	listTools,
 } from "./client.ts";
 
@@ -124,6 +125,11 @@ export class McpConnection {
 		});
 		return this.closePromise;
 	}
+
+	killProcess(): void {
+		killClientProcess(this.client);
+		this.status = "disconnected";
+	}
 }
 
 export class McpRegistry {
@@ -174,6 +180,12 @@ export class McpRegistry {
 
 	async disconnectAll(): Promise<void> {
 		await Promise.all(Array.from(this.connections.values(), (connection) => connection.disconnect()));
+	}
+
+	killAllProcesses(): void {
+		for (const connection of this.connections.values()) {
+			connection.killProcess();
+		}
 	}
 }
 

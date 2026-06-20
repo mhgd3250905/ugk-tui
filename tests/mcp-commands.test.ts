@@ -135,6 +135,21 @@ test("/mcp enable adds that server's tools without duplicates", async () => {
 	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["greet", "alpha__echo", "alpha__sum"]);
 });
 
+test("/mcp enable reports stale servers separately from missing servers", async () => {
+	const state = makeState({
+		staleServerTools: new Map([["beta", ["beta__read"]]]),
+	});
+	const pi = makePi();
+	registerMcpCommand(pi as any, state);
+
+	const stale = await runMcp(pi, "enable beta");
+	const missing = await runMcp(pi, "enable missing");
+
+	assert.match(stale.notifications.join("\n"), /stale/i);
+	assert.doesNotMatch(stale.notifications.join("\n"), /not found/i);
+	assert.match(missing.notifications.join("\n"), /not found/i);
+});
+
 test("/mcp reload disconnects, invokes reload, registers new tools, and updates state", async () => {
 	let disconnected = false;
 	let reloadCalled = 0;

@@ -334,7 +334,7 @@ function resolveCwd(ctx: McpRuntimeContext): string {
 }
 
 function hasInteractiveUi(ctx: McpRuntimeContext | undefined): boolean {
-	return Boolean(ctx && ctx.hasUI !== false && (ctx.ui?.confirm || ctx.ui?.select));
+	return Boolean(ctx?.ui?.confirm || ctx?.ui?.select);
 }
 
 function connectionErrorMessage(error: unknown): string {
@@ -355,25 +355,28 @@ export async function disconnectMcpCleanupRegistries(): Promise<void> {
 	await Promise.all(Array.from(cleanupRegistries, (item) => item.disconnectAll()));
 }
 
+export function killMcpCleanupRegistryProcesses(): void {
+	for (const registry of cleanupRegistries) {
+		registry.killAllProcesses?.();
+	}
+}
+
 function registerProcessCleanup(registry: McpRegistry): void {
 	cleanupRegistries.add(registry);
 	if (processCleanupRegistered) {
 		return;
 	}
 	processCleanupRegistered = true;
-	const cleanup = () => {
-		void disconnectMcpCleanupRegistries();
-	};
 	process.once("beforeExit", async () => {
 		await disconnectMcpCleanupRegistries();
 	});
-	process.once("exit", cleanup);
-	process.once("SIGINT", async () => {
-		await disconnectMcpCleanupRegistries();
+	process.once("exit", killMcpCleanupRegistryProcesses);
+	process.once("SIGINT", () => {
+		killMcpCleanupRegistryProcesses();
 		process.exit(130);
 	});
-	process.once("SIGTERM", async () => {
-		await disconnectMcpCleanupRegistries();
+	process.once("SIGTERM", () => {
+		killMcpCleanupRegistryProcesses();
 		process.exit(143);
 	});
 }

@@ -124,6 +124,18 @@ test("disconnectAll closes every server child process", async () => {
 	await waitForNoProcess(/mcp-stub-server\.mjs/);
 });
 
+test("killAllProcesses synchronously terminates server child processes", async () => {
+	const registry = new McpRegistry();
+
+	await registry.connect("alpha", { command: process.execPath, args: [stubServerPath] }, connectOpts);
+	assert.match(listNodeCommandLines(), /mcp-stub-server\.mjs/);
+
+	registry.killAllProcesses();
+
+	assert.equal(registry.get("alpha")?.status, "disconnected");
+	await waitForNoProcess(/mcp-stub-server\.mjs/);
+});
+
 test("disconnect and disconnectAll are idempotent", async () => {
 	const registry = new McpRegistry();
 

@@ -16,6 +16,8 @@ UGK is an MCP client for stdio tools. It does not expose an MCP server. It does 
 UGK loads four config scopes and merges them in this order:
 
 1. install: `<ugk package root>/mcp.json`
+   - Global npm installs usually place this under the package directory, such as `~/.npm-global/lib/node_modules/ugk-agent/mcp.json`; `npm link` uses the linked repo root.
+   - Intended for UGK-shipped or project-maintainer-backed default MCP servers.
 2. user: `~/.config/ugk/mcp.json`
    - Windows: `%APPDATA%\ugk\mcp.json`
 3. project: `<workspace>/.mcp.json`
@@ -81,7 +83,7 @@ Do not print secret env values back to the user. Mention only variable names suc
 There are two gates:
 
 1. Spawn policy before starting a server:
-   - install scope: allowed
+   - install scope: allowed; trusted like user scope because it is controlled by the UGK install/package maintainer
    - user scope: allowed
    - project/local scope: ask in interactive UI
    - project/local without UI: blocked fail-closed

@@ -8,6 +8,7 @@ import {
 	closeClient,
 	connectStdio,
 	createMcpClient,
+	killStdioTransportProcess,
 	listTools,
 } from "../extensions/mcp/client.ts";
 
@@ -83,6 +84,23 @@ test("closeClient is idempotent", async () => {
 
 	await closeClient(client);
 	await closeClient(client);
+});
+
+test("killStdioTransportProcess warns when SDK child process field is unavailable", () => {
+	let stderr = "";
+	const originalWrite = process.stderr.write;
+	process.stderr.write = ((chunk: unknown) => {
+		stderr += String(chunk);
+		return true;
+	}) as typeof process.stderr.write;
+
+	try {
+		killStdioTransportProcess({ _process: undefined } as any);
+	} finally {
+		process.stderr.write = originalWrite;
+	}
+
+	assert.match(stderr, /warning: StdioClientTransport\._process unavailable/);
 });
 
 test("connectStdio fails with timeout when a server never responds", async () => {

@@ -482,6 +482,7 @@ test("/mcp reload treats command contexts with confirm UI as interactive even wi
 	registerMcpForTest(pi);
 	await pi.commands.get("mcp")!.handler("reload", {
 		cwd,
+		hasUI: false,
 		ui: {
 			notify(message: string) {
 				notifications.push(message);
@@ -498,5 +499,29 @@ test("/mcp reload treats command contexts with confirm UI as interactive even wi
 	assert.match(notifications.join("\n"), /connected: 1/);
 
 	await emit(pi, "session_shutdown", { reason: "quit" }, { cwd });
+	await waitForNoProcess(/mcp-stub-server\.mjs/);
+});
+
+test("/mcp reload without confirm or select still fail-closes project scope servers", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-reload-no-ui-"));
+	writeProjectConfig(cwd, {
+		alpha: { command: process.execPath, args: [stubServerPath] },
+	});
+	const pi = makePi(["greet"]);
+	const notifications: string[] = [];
+	const state = registerMcpForTest(pi);
+
+	await pi.commands.get("mcp")!.handler("reload", {
+		cwd,
+		ui: {
+			notify(message: string) {
+				notifications.push(message);
+			},
+		},
+	});
+
+	assert.equal(pi.registeredTools.has("alpha__echo"), false);
+	assert.match(state.failedServers?.get("alpha") ?? "", /blocked by spawn policy/i);
+	assert.match(notifications.join("\n"), /failed: 1/);
 	await waitForNoProcess(/mcp-stub-server\.mjs/);
 });

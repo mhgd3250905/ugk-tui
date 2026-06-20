@@ -104,6 +104,10 @@ function enableServer(pi: ExtensionAPI, state: McpCommandState, serverName?: str
 		return "Missing server. Usage: /mcp enable <server>";
 	}
 
+	if (state.staleServerTools?.has(serverName)) {
+		return `MCP server "${serverName}" is stale (disconnected during reload). Run /mcp reload to reconnect, or fix its config first.`;
+	}
+
 	const tools = state.serverTools.get(serverName);
 	if (!tools) {
 		return `MCP server "${serverName}" not found.`;

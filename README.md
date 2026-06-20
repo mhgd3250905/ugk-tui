@@ -231,7 +231,7 @@ UGK 可以作为 MCP client 连接外部 stdio MCP server,把 server 暴露的 t
 
 配置文件按四档合并:
 
-- install: UGK 安装目录 `mcp.json`(npm link 开发时即仓库根目录 `mcp.json`)
+- install: UGK 安装目录 `mcp.json`(全局安装目录下的 `ugk-agent/mcp.json`;npm link 开发时即仓库根目录 `mcp.json`),由 UGK 包/项目维护者背书
 - user: `~/.config/ugk/mcp.json`(Windows 为 `%APPDATA%\ugk\mcp.json`)
 - project: 当前项目 `.mcp.json`
 - local: 当前项目 `.mcp.local.json`(已进 `.gitignore`,用于本机 token/path)
@@ -256,7 +256,7 @@ UGK 可以作为 MCP client 连接外部 stdio MCP server,把 server 暴露的 t
 }
 ```
 
-install/user scope 视为 UGK 级可信配置;project/local scope 第一次 spawn 前默认弹确认;非交互模式只允许 install/user scope,project/local 会 fail-closed。工具调用权限复用 `ask/on/off`:
+install/user scope 视为 UGK 级可信配置,默认直接连接;project/local scope 第一次 spawn 前默认弹确认;非交互模式只允许 install/user scope,project/local 会 fail-closed。工具调用权限复用 `ask/on/off`:
 
 ```text
 /mcp status

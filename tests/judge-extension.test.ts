@@ -467,7 +467,8 @@ test("default Judge wakeup path does not reuse an old verdict when the current t
 
 	assert.deepEqual(wakeupResults, [
 		{ action: "pass", keepWatching: true },
-		{ action: "abort", reason: "Judge verdict parse failed" },
+		// parse 失败不再 ABORT —— 兜底 pass+keepWatching,下次唤醒重新判定(防 LLM 偶发格式异常判死刑)。
+		{ action: "pass", keepWatching: true, reason: "(Judge 输出解析失败,默认放行,下次唤醒重新判定)" },
 	]);
 });
 

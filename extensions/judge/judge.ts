@@ -289,10 +289,26 @@ function createJudgeVerdictProviderHandle(options: {
 			const after = judgeSession.getTranscriptText();
 			const currentTurn = sliceNewTranscript(before, after);
 			const verdict = parseJudgeVerdict(currentTurn);
-			return verdict ?? {
-				action: "abort",
-				reason: "Judge verdict parse failed",
-			};
+			// parse 失败不 ABORT 整个 driver —— Judge LLM 偶发输出格式异常(被截断/无 JSON/前缀漂移)
+			// 不该让一个跑了 N 步、方向正确的任务被判死刑。兜底 pass+keepWatching,下次唤醒重新判定。
+			// 若真有问题,后续唤醒的 Judge 还有机会 steer/abort;连续失败由 maxSteer/escalation 兜底。
+			if (!verdict) {
+				// 运行时遥测(非临时诊断,长期保留):parse 失败时记录 sliceNewTranscript 现场,
+				// 用于定位前缀失配/transcript 漂移是否频繁(防 Judge 频繁兜底 pass)。
+				try {
+					const { appendFileSync } = require("node:fs") as { appendFileSync: (p: string, c: string) => void };
+					const diagPath = path.join(options.runDir, "decide-parse-fail.log");
+					appendFileSync(diagPath, `[${new Date().toISOString()}] prefixMatched=${after.startsWith(before)} before.len=${before.length} after.len=${after.length} currentTurn.len=${currentTurn.length}\ncurrentTurn.head=${JSON.stringify(currentTurn.slice(0, 200))}\n---\n`);
+				} catch {
+					// 遥测失败不影响主流程
+				}
+				return {
+					action: "pass",
+					keepWatching: true,
+					reason: "(Judge 输出解析失败,默认放行,下次唤醒重新判定)",
+				};
+			}
+			return verdict;
 		},
 		async finalize(context) {
 			const judgeSession = await getSession();

@@ -128,7 +128,7 @@ async function reloadMcp(
 
 	const result = deps.reload ? await deps.reload(context) : {};
 	const connections = result.connections ?? [];
-	if (connections.length > 0) {
+	if (connections.length > 0 && !result.registered) {
 		(deps.registerMcpTools ?? registerMcpTools)(pi, connections);
 	}
 

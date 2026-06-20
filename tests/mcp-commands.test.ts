@@ -167,6 +167,36 @@ test("/mcp reload disconnects, invokes reload, registers new tools, and updates 
 	assert.equal(pi.registeredTools.has("alpha__echo"), true);
 });
 
+test("/mcp reload uses pre-registered startup tools without duplicate registration warnings", async () => {
+	let registerCalls = 0;
+	const state = makeState({
+		serverTools: new Map([["alpha", ["alpha__echo"]]]),
+		warnings: [],
+	});
+	const pi = makePi(["alpha__echo"]);
+	registerMcpCommand(pi as any, state, {
+		async reload() {
+			return {
+				connections: [
+					{ name: "alpha", status: "connected", tools: [{ name: "echo", inputSchema: { type: "object" } }] },
+				] as any[],
+				registered: new Map([["alpha", ["alpha__echo"]]]),
+				warnings: [],
+			};
+		},
+		registerMcpTools() {
+			registerCalls += 1;
+			return { registered: [], skipped: [], warnings: ["duplicate"] };
+		},
+	});
+
+	await runMcp(pi, "reload");
+
+	assert.equal(registerCalls, 0);
+	assert.deepEqual(state.serverTools.get("alpha"), ["alpha__echo"]);
+	assert.deepEqual(state.warnings, []);
+});
+
 test("/mcp reload removes vanished server tools from active set and never calls unregisterTool", async () => {
 	const state = makeState({
 		registry: {

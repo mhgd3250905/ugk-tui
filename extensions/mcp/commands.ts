@@ -29,7 +29,7 @@ export type McpReloadResult = {
 };
 
 export type McpCommandDeps = {
-	reload?: () => Promise<McpReloadResult>;
+	reload?: (context?: CommandContext) => Promise<McpReloadResult>;
 	registerMcpTools?: (
 		pi: ExtensionAPI,
 		connections: McpConnection[],
@@ -38,8 +38,12 @@ export type McpCommandDeps = {
 };
 
 type CommandContext = {
+	cwd?: string;
+	hasUI?: boolean;
 	ui?: {
 		notify?: (message: string) => void;
+		confirm?: (title: string, body?: string) => boolean | Promise<boolean>;
+		select?: (title: string, options: string[]) => string | Promise<string>;
 	};
 };
 
@@ -72,7 +76,7 @@ export function registerMcpCommand(pi: ExtensionAPI, state: McpCommandState, dep
 			}
 
 			if (action === "reload") {
-				notify(context, await reloadMcp(pi, state, deps));
+				notify(context, await reloadMcp(pi, state, deps, context));
 				return;
 			}
 
@@ -113,11 +117,16 @@ function enableServer(pi: ExtensionAPI, state: McpCommandState, serverName?: str
 	return `MCP server "${serverName}" enabled (${tools.length} tools active).`;
 }
 
-async function reloadMcp(pi: ExtensionAPI, state: McpCommandState, deps: McpCommandDeps): Promise<string> {
+async function reloadMcp(
+	pi: ExtensionAPI,
+	state: McpCommandState,
+	deps: McpCommandDeps,
+	context: CommandContext,
+): Promise<string> {
 	const previousTools = new Map(state.serverTools);
 	await state.registry.disconnectAll();
 
-	const result = deps.reload ? await deps.reload() : {};
+	const result = deps.reload ? await deps.reload(context) : {};
 	const connections = result.connections ?? [];
 	if (connections.length > 0) {
 		(deps.registerMcpTools ?? registerMcpTools)(pi, connections);

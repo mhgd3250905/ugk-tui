@@ -14,6 +14,7 @@ export type McpToolPolicyContext = {
 	rawServerName: string;
 	rawToolName: string;
 	params: Record<string, unknown>;
+	ctx?: unknown;
 };
 
 export type McpToolPolicyResult =
@@ -88,7 +89,7 @@ export function createMcpToolDefinition(
 		label: registeredName,
 		description: mcpTool.description ?? `MCP tool ${rawServerName}/${rawToolName}`,
 		parameters: adaptSchema(mcpTool.inputSchema) as any,
-		async execute(_toolCallId, params, signal) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const policyContext: McpToolPolicyContext = {
 				serverName,
 				toolName,
@@ -97,6 +98,7 @@ export function createMcpToolDefinition(
 				rawServerName,
 				rawToolName,
 				params: params as Record<string, unknown>,
+				ctx,
 			};
 			const policy = normalizePolicyResult(await opts.checkToolPolicy?.(policyContext));
 			if (!policy.allowed) {

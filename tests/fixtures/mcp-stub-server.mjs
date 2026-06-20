@@ -4,7 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 
 const server = new Server(
 	{ name: "ugk-test-mcp-server", version: "1.0.0" },
-	{ capabilities: { tools: {} } },
+	{ capabilities: { tools: {} }, instructions: "Use echo for test messages." },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

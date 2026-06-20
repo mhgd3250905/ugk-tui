@@ -29,6 +29,8 @@ import registerFlow from "./flow/index.ts";
 import registerJudge from "./judge/judge.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
+import { createCoreDoctorChecks } from "./doctor/checks.ts";
+import registerMcp, { createMcpDoctorCheck } from "./mcp/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { renderTerminalTable } from "./terminal-table.ts";
@@ -100,8 +102,11 @@ export default function (pi: ExtensionAPI) {
 	// 1.3c) chrome-cdp:受保护的本地登录态 Chrome 控制器(/cdp + chrome_cdp tool)
 	registerChromeCdp(pi);
 
-	// 1.3c.1) doctor:只读核心能力体检(bash / api / chrome)
-	registerDoctor(pi);
+	// 1.3c.1) mcp:外部 MCP stdio tools 集成(/mcp + session lifecycle)
+	const mcpState = registerMcp(pi);
+
+	// 1.3c.2) doctor:只读核心能力体检(bash / api / chrome / mcp)
+	registerDoctor(pi, { checks: [...createCoreDoctorChecks(), createMcpDoctorCheck({ registry: mcpState.registry })] });
 
 	// 1.3d) UGK 自管更新:只暴露 UGK 更新,不暴露 pi update
 	registerUgkUpdate(pi);

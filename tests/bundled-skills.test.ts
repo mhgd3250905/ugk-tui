@@ -38,6 +38,8 @@ test("bundles MCP guide as a preinstalled skill", () => {
 	assert.match(skill, /^---\s*\nname: mcp-guide/m);
 	assert.match(skill, /description: Use when the user wants to configure or manage MCP servers in UGK/);
 	assert.match(skill, /pastes.*mcpServers JSON/i);
+	assert.match(skill, /UGK\/system-level MCP/);
+	assert.match(skill, /npm link/);
 	assert.match(skill, /\/mcp status/);
 	assert.equal(fs.existsSync(mcpConfigureScriptPath), true);
 });

@@ -43,9 +43,9 @@ When the user provides a JSON block such as `{ "mcpServers": { ... } }`, configu
 
 Default target scope:
 
-- Use `local` (`<workspace>/.mcp.local.json`) for local paths, project-specific servers, private tokens, or when the user does not specify a scope.
+- Use `user` (`~/.config/ugk/mcp.json`, Windows `%APPDATA%\ugk\mcp.json`) when the user wants a UGK/system-level MCP, runs UGK through `npm link`, or expects the server to be available from every working directory.
+- Use `local` (`<workspace>/.mcp.local.json`) for workspace-specific servers, project-local paths, private tokens tied to the current project, or when the user explicitly wants the config scoped to the current workspace.
 - Use `project` (`<workspace>/.mcp.json`) only when the user explicitly wants the config committed/shared.
-- Use `user` (`~/.config/ugk/mcp.json`, Windows `%APPDATA%\ugk\mcp.json`) only when the user explicitly wants the server available in all projects.
 
 Workflow:
 
@@ -53,7 +53,7 @@ Workflow:
 2. Run the bundled merge script:
 
    ```bash
-   python skills/mcp-guide/scripts/configure_mcp.py --scope local --cwd . --input /path/to/input.json
+   python skills/mcp-guide/scripts/configure_mcp.py --scope user --cwd . --input /path/to/input.json
    ```
 
 3. Report the written config path and server names.

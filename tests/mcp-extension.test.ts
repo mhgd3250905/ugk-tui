@@ -208,6 +208,46 @@ test("session_shutdown disconnects all registry connections", async () => {
 	assert.equal(disconnects, 2);
 });
 
+test("reload re-registers prior MCP tool names without duplicate warnings", async () => {
+	let generation = 0;
+	const registry = {
+		connections: new Map(),
+		async connect(name: string) {
+			generation += 1;
+			const connection = {
+				name,
+				status: "connected",
+				tools: [{ name: "echo", inputSchema: { type: "object" } }],
+				async callTool() {
+					return { content: [{ type: "text", text: `generation:${generation}` }] };
+				},
+			};
+			this.connections.set(name, connection);
+			return connection;
+		},
+		async disconnectAll() {
+			this.connections.clear();
+		},
+	};
+	const pi = makePi(["greet"]);
+	const ctx = makeCtx(process.cwd());
+	const state = registerMcpForTest(pi, {
+		registry: registry as any,
+		loadConfig: () => ({
+			servers: new Map([["alpha", { name: "alpha", scope: "user", config: { command: "node" } }]]),
+			errors: [],
+		}),
+	});
+
+	await emit(pi, "session_start", { reason: "startup" }, ctx);
+	await pi.commands.get("mcp")!.handler("reload", ctx);
+	const result = await pi.registeredTools.get("alpha__echo").execute("call-1", {}, undefined, undefined, ctx);
+
+	assert.equal(state.warnings?.length, 0);
+	assert.deepEqual(state.serverTools.get("alpha"), ["alpha__echo"]);
+	assert.deepEqual(result.content, [{ type: "text", text: "generation:2" }]);
+});
+
 test("before_agent_start appends MCP server instructions", async () => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-instructions-"));
 	writeProjectConfig(cwd, {

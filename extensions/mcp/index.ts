@@ -67,9 +67,10 @@ export function registerMcp(pi: ExtensionAPI, deps: McpExtensionDeps = {}): McpE
 	};
 
 	async function startup(ctx: McpRuntimeContext): Promise<McpStartupResult> {
+		const previousServerTools = new Map(state.serverTools);
 		const result = await connectConfiguredServers(state, ctx, deps);
 		applyStartupResult(state, result);
-		const registration = registerConnectedTools(pi, state, result.connections);
+		const registration = registerConnectedTools(pi, state, result.connections, previousServerTools);
 		mergeRegistration(state, registration, result);
 		return result;
 	}
@@ -181,16 +182,22 @@ function registerConnectedTools(
 	pi: ExtensionAPI,
 	state: McpExtensionState,
 	connections: McpConnection[],
+	previousServerTools: Map<string, string[]> = new Map(),
 ): McpToolRegistrationResult {
 	if (connections.length === 0) {
 		return { registered: [], skipped: [], warnings: [] };
 	}
 
 	return registerMcpTools(pi, connections, {
-		existingToolNames: getActiveTools(pi),
+		existingToolNames: nonMcpActiveToolNames(pi, previousServerTools),
 		warn: (message) => state.warnings?.push(message),
 		checkToolPolicy: (context) => resolveToolPolicy(state, context),
 	});
+}
+
+function nonMcpActiveToolNames(pi: ExtensionAPI, previousServerTools: Map<string, string[]>): string[] {
+	const previousMcpTools = new Set(Array.from(previousServerTools.values()).flat());
+	return getActiveTools(pi).filter((toolName) => !previousMcpTools.has(toolName));
 }
 
 async function resolveToolPolicy(state: McpExtensionState, context: McpToolPolicyContext) {

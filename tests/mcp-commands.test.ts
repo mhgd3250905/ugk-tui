@@ -202,6 +202,33 @@ test("/mcp reload removes vanished server tools from active set and never calls 
 	assert.deepEqual(state.staleServerTools.get("beta"), ["beta__read"]);
 });
 
+test("/mcp reload clears stale marker when a vanished server returns", async () => {
+	const state = makeState({
+		registry: {
+			connections: new Map([["alpha", { name: "alpha", status: "connected", tools: [] }]]) as any,
+			async disconnectAll() {},
+		},
+		serverTools: new Map([["alpha", ["alpha__echo"]]]),
+		staleServerTools: new Map([["beta", ["beta__read"]]]),
+	});
+	const pi = makePi(["greet", "alpha__echo"]);
+	registerMcpCommand(pi as any, state, {
+		async reload() {
+			return {
+				connections: [
+					{ name: "alpha", status: "connected", tools: [{ name: "echo", inputSchema: { type: "object" } }] },
+					{ name: "beta", status: "connected", tools: [{ name: "read", inputSchema: { type: "object" } }] },
+				] as any[],
+			};
+		},
+	});
+
+	await runMcp(pi, "reload");
+
+	assert.equal(state.staleServerTools.has("beta"), false);
+	assert.doesNotMatch(formatMcpStatus(state), /stale servers:.*beta/i);
+});
+
 test("stale tool execution returns disconnected without reconnecting", async () => {
 	let callAttempts = 0;
 	let reconnectAttempts = 0;

@@ -135,6 +135,9 @@ async function reloadMcp(pi: ExtensionAPI, state: McpCommandState, deps: McpComm
 	state.failedServers = result.failed ?? new Map();
 	state.warnings = result.warnings ?? [];
 	state.staleServerTools ??= new Map();
+	for (const serverName of nextServerTools.keys()) {
+		state.staleServerTools.delete(serverName);
+	}
 
 	const nextTools = new Set(Array.from(nextServerTools.values()).flat());
 	const staleTools: string[] = [];

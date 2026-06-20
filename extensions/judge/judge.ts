@@ -66,6 +66,9 @@ function formatJudgeVerdictLine(verdict: { action: string; direction?: string; r
 	if (verdict.action === "steer") {
 		return `STEER: ${verdict.direction ?? "(no direction)"}`;
 	}
+	if (verdict.action === "parse_failed") {
+		return `PARSE_FAILED: ${verdict.reason}`;
+	}
 	return `ABORT: ${verdict.reason ?? "(no reason)"}`;
 }
 
@@ -289,8 +292,8 @@ function createJudgeVerdictProviderHandle(options: {
 			const currentTurn = sliceNewTranscript(before, after);
 			const verdict = parseJudgeVerdict(currentTurn);
 			// parse 失败不 ABORT 整个 driver —— Judge LLM 偶发输出格式异常(被截断/无 JSON/前缀漂移)
-			// 不该让一个跑了 N 步、方向正确的任务被判死刑。兜底 pass+keepWatching,下次唤醒重新判定。
-			// 若真有问题,后续唤醒的 Judge 还有机会 steer/abort;连续失败由 maxSteer/escalation 兜底。
+			// 不该让一个跑了 N 步、方向正确的任务被判死刑。返回显式 parse_failed,
+			// 由 driver 层按 maxSteer 预算兜底,避免无限放行。
 			if (!verdict) {
 				// 运行时遥测(非临时诊断,长期保留):parse 失败时记录 sliceNewTranscript 现场,
 				// 用于定位前缀失配/transcript 漂移是否频繁(防 Judge 频繁兜底 pass)。
@@ -301,7 +304,7 @@ function createJudgeVerdictProviderHandle(options: {
 					// 遥测失败不影响主流程
 				}
 				return {
-					action: "pass",
+					action: "parse_failed",
 					keepWatching: true,
 					reason: "(Judge 输出解析失败,默认放行,下次唤醒重新判定)",
 				};

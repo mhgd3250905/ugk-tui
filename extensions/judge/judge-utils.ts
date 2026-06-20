@@ -32,6 +32,7 @@ type TailEvent = {
 export type JudgeVerdict =
 	| { action: "pass"; keepWatching: boolean; reason?: string }
 	| { action: "steer"; direction: string; keepWatching: boolean; reason?: string }
+	| { action: "parse_failed"; keepWatching: boolean; reason: string }
 	| { action: "abort"; reason: string };
 
 export type JudgeFinalVerdict =

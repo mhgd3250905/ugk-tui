@@ -205,6 +205,59 @@ test("driver stops steering and escalates when maxSteer is reached", async () =>
 	assert.equal(escalations[0].summary.steerCount, 2);
 });
 
+test("parse_failed verdict keeps watching below maxSteer without steering", async () => {
+	const harness = makeDriverHarness();
+	const escalations: any[] = [];
+	const driver = await createJudgeDriver(createOptions({
+		sessionFactory: harness.sessionFactory,
+		maxSteer: 2,
+		onEscalate: async (context) => {
+			escalations.push(context);
+		},
+		onWakeup: async () => ({
+			action: "parse_failed",
+			reason: "Judge 输出解析失败",
+			keepWatching: true,
+		}),
+	}));
+
+	harness.emit({ type: "tool_execution_start", toolName: "chrome_cdp", input: { url: "https://example.com/1" } });
+	await harness.flush();
+
+	assert.deepEqual(escalations, []);
+	assert.deepEqual(harness.userInputs, []);
+	assert.equal(driver.getSummary().steerCount, 0);
+});
+
+test("consecutive parse_failed verdicts escalate at maxSteer instead of passing forever", async () => {
+	const harness = makeDriverHarness();
+	const escalations: any[] = [];
+	const driver = await createJudgeDriver(createOptions({
+		sessionFactory: harness.sessionFactory,
+		maxSteer: 2,
+		onEscalate: async (context) => {
+			escalations.push(context);
+		},
+		onWakeup: async () => ({
+			action: "parse_failed",
+			reason: "Judge 输出解析失败",
+			keepWatching: true,
+		}),
+	}));
+
+	harness.emit({ type: "tool_execution_start", toolName: "chrome_cdp", input: { url: "https://example.com/1" } });
+	await harness.flush();
+	harness.emit({ type: "tool_execution_start", toolName: "chrome_cdp", input: { url: "https://example.com/2" } });
+	await harness.flush();
+	harness.emit({ type: "tool_execution_start", toolName: "chrome_cdp", input: { url: "https://example.com/3" } });
+	await harness.flush();
+
+	assert.equal(escalations.length, 1);
+	assert.match(escalations[0].reason, /parse failures reached \(2\/2\)/);
+	assert.deepEqual(harness.userInputs, []);
+	assert.equal(driver.getSummary().steerCount, 0);
+});
+
 test("abort verdict disposes the driver and records abort reason", async () => {
 	const harness = makeDriverHarness();
 	const driver = await createJudgeDriver(createOptions({

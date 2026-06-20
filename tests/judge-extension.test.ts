@@ -493,8 +493,8 @@ test("default Judge wakeup path does not reuse an old verdict when the current t
 
 	assert.deepEqual(wakeupResults, [
 		{ action: "pass", keepWatching: true },
-		// parse 失败不再 ABORT —— 兜底 pass+keepWatching,下次唤醒重新判定(防 LLM 偶发格式异常判死刑)。
-		{ action: "pass", keepWatching: true, reason: "(Judge 输出解析失败,默认放行,下次唤醒重新判定)" },
+		// parse 失败不再 ABORT,但也不伪装成真 pass;driver 层会计连续 parse_failed 并按 maxSteer 升级。
+		{ action: "parse_failed", keepWatching: true, reason: "(Judge 输出解析失败,默认放行,下次唤醒重新判定)" },
 	]);
 });
 

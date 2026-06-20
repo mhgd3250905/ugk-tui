@@ -206,6 +206,7 @@ function formatJudgeVerdictForLog(verdict: { action: string; direction?: string;
 		const direction = verdict.direction ?? "(no direction)";
 		return `STEER: ${direction}${verdict.reason ? ` - ${verdict.reason}` : ""}`;
 	}
+	if (verdict.action === "parse_failed") return `PARSE_FAILED: ${verdict.reason ?? "(no reason)"}`;
 	return `ABORT: ${verdict.reason ?? "(no reason)"}`;
 }
 
@@ -250,6 +251,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 	let disposed = false;
 	let watching = true;
 	let completionStarted = false;
+	let consecutiveParseFailures = 0;
 	const transcriptEvents: DriverSessionEvent[] = [];
 	let wakeupQueue = Promise.resolve();
 	const decide = opts.onWakeup ?? defaultWakeup;
@@ -296,10 +298,12 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 					}
 
 					if (verdict.action === "pass") {
+						consecutiveParseFailures = 0;
 						watching = verdict.keepWatching;
 						return;
 					}
 					if (verdict.action === "steer") {
+						consecutiveParseFailures = 0;
 						summary.steerCount += 1;
 						if (summary.steerCount >= maxSteer) {
 							watching = false;
@@ -316,7 +320,24 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 						await driver?.sendUserInput(verdict.direction);
 						return;
 					}
+					if (verdict.action === "parse_failed") {
+						consecutiveParseFailures += 1;
+						if (consecutiveParseFailures >= maxSteer) {
+							watching = false;
+							const escalationSummary = cloneSummary(summary);
+							await opts.onEscalate?.({
+								reason: `parse failures reached (${consecutiveParseFailures}/${maxSteer})`,
+								summary: escalationSummary,
+								tail,
+								transcript,
+							});
+							return;
+						}
+						watching = verdict.keepWatching;
+						return;
+					}
 
+					consecutiveParseFailures = 0;
 					summary.aborted = true;
 					summary.abortReason = verdict.reason;
 					watching = false;

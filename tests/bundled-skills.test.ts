@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const skillCreatorPath = new URL("../skills/skill-creator/SKILL.md", import.meta.url);
 const skillCreatorLicensePath = new URL("../skills/skill-creator/LICENSE.txt", import.meta.url);
 const docxPath = new URL("../skills/docx/SKILL.md", import.meta.url);
 const docxLicensePath = new URL("../skills/docx/LICENSE.txt", import.meta.url);
 const mcpGuidePath = new URL("../skills/mcp-guide/SKILL.md", import.meta.url);
+const mcpConfigureScriptPath = new URL("../skills/mcp-guide/scripts/configure_mcp.py", import.meta.url);
 
 test("bundles Anthropic skill creator as a preinstalled skill", () => {
 	const skill = fs.readFileSync(skillCreatorPath, "utf8");
@@ -32,5 +37,48 @@ test("bundles MCP guide as a preinstalled skill", () => {
 
 	assert.match(skill, /^---\s*\nname: mcp-guide/m);
 	assert.match(skill, /description: Use when the user wants to configure or manage MCP servers in UGK/);
+	assert.match(skill, /pastes.*mcpServers JSON/i);
 	assert.match(skill, /\/mcp status/);
+	assert.equal(fs.existsSync(mcpConfigureScriptPath), true);
+});
+
+test("MCP guide configure script merges pasted mcpServers JSON into local config", () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-guide-"));
+	const input = path.join(cwd, "input.json");
+	fs.writeFileSync(
+		input,
+		JSON.stringify({
+			mcpServers: {
+				"funasr-transcriber": {
+					command: "python",
+					args: ["E:/AII/MCP-LOCAL/funasr-transcriber/server.py"],
+				},
+			},
+		}),
+	);
+
+	const output = execFileSync(
+		"python",
+		[
+			fileURLToPath(mcpConfigureScriptPath),
+			"--scope",
+			"local",
+			"--cwd",
+			cwd,
+			"--input",
+			input,
+		],
+		{ encoding: "utf8" },
+	);
+	const summary = JSON.parse(output);
+	const configPath = path.join(cwd, ".mcp.local.json");
+	const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+
+	assert.equal(summary.scope, "local");
+	assert.equal(summary.server_count, 1);
+	assert.equal(summary.config_path, configPath);
+	assert.deepEqual(config.mcpServers["funasr-transcriber"], {
+		command: "python",
+		args: ["E:/AII/MCP-LOCAL/funasr-transcriber/server.py"],
+	});
 });

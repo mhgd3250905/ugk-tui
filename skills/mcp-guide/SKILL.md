@@ -1,11 +1,11 @@
 ---
 name: mcp-guide
-description: Use when the user wants to configure or manage MCP servers in UGK, troubleshoot /mcp status, or understand MCP tool permissions and naming.
+description: Use when the user wants to configure or manage MCP servers in UGK, pastes mcpServers JSON, asks to add/remove/verify an MCP server, troubleshoot /mcp status, or understand MCP tool permissions and naming.
 ---
 
 # MCP Guide
 
-Use this skill when the user asks about UGK MCP configuration, `/mcp` commands, MCP tool names, MCP permissions, or stale MCP tools after reload.
+Use this skill when the user asks about UGK MCP configuration, pastes an MCP config JSON block, `/mcp` commands, MCP tool names, MCP permissions, or stale MCP tools after reload.
 
 ## Scope
 
@@ -36,6 +36,43 @@ Config shape:
 ```
 
 Environment variables can be interpolated with `${VAR}`. Missing variables fail that server clearly; UGK does not replace them with empty strings.
+
+## Configure From Pasted JSON
+
+When the user provides a JSON block such as `{ "mcpServers": { ... } }`, configure it for them instead of only explaining.
+
+Default target scope:
+
+- Use `local` (`<workspace>/.mcp.local.json`) for local paths, project-specific servers, private tokens, or when the user does not specify a scope.
+- Use `project` (`<workspace>/.mcp.json`) only when the user explicitly wants the config committed/shared.
+- Use `user` (`~/.config/ugk/mcp.json`, Windows `%APPDATA%\ugk\mcp.json`) only when the user explicitly wants the server available in all projects.
+
+Workflow:
+
+1. Save the pasted JSON to a temporary file.
+2. Run the bundled merge script:
+
+   ```bash
+   python skills/mcp-guide/scripts/configure_mcp.py --scope local --cwd . --input /path/to/input.json
+   ```
+
+3. Report the written config path and server names.
+4. Validate with `/mcp reload` or by running a non-interactive connection smoke if appropriate.
+5. If validation spawns a project/local server, explain the command and get confirmation in interactive contexts.
+
+The script accepts either full config shape:
+
+```json
+{ "mcpServers": { "server-name": { "command": "python", "args": ["server.py"] } } }
+```
+
+or a raw server map:
+
+```json
+{ "server-name": { "command": "python", "args": ["server.py"] } }
+```
+
+Do not print secret env values back to the user. Mention only variable names such as `${GITHUB_TOKEN}`.
 
 ## Permissions
 

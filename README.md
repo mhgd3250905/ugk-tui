@@ -2,7 +2,7 @@
 
 **ugk** — 一个开箱即用的终端编码 agent。一条命令安装,打 `ugk` 即用。
 
-> 基于 [pi](https://github.com/earendil-works/pi) 构建,但用户无需关心 pi——`npm i -g ugk-agent` 装完就拥有全部能力(投屏、子代理、定时任务、plan 模式等)。
+> 基于 [pi](https://github.com/earendil-works/pi) 构建,但用户无需关心 pi——`npm i -g ugk-agent` 装完就拥有全部能力(投屏、子代理、定时任务、plan 模式、judge 委托验收等)。
 
 ---
 
@@ -89,6 +89,7 @@ cp agents/*.md ~/.pi/agent/agents/
 | `跟我打个招呼,我叫 Sam` | 调 `greet` 工具回复 |
 | `@scout 列出项目目录` | 调 `subagent` 委派 scout(需先装预设 agent) |
 | `/plan` | 切换只读探索模式 |
+| `/judge` | 查看 judge 委托验收菜单 |
 | `rm -rf /tmp/test` | 触发权限门(弹确认) |
 
 ---
@@ -111,6 +112,7 @@ ugk --model deepseek-reasoner
 - `@scout 找一下认证代码` — 委派给 scout 子代理
 - `/implement 加个 Redis 缓存` — scout→planner→worker 全链路
 - `/plan` — 先只读规划再执行
+- `/judge` — 打开 judge 委托验收菜单
 
 ---
 
@@ -142,7 +144,7 @@ Release notes: https://github.com/mhgd3250905/ugk-tui/commits/main
 
 ---
 
-## 包含的能力(v1.0.0)
+## 包含的能力(v1.1.0)
 
 ### 自定义工具
 
@@ -194,6 +196,7 @@ UGK_CLEAR_STARTUP=0 ugk
 | `/ugk-ui` | 开关 ugk 品牌 UI |
 | `/plan` | 切换 plan-mode 只读探索模式(或 Ctrl+Alt+P) |
 | `/todos` | 查看 plan-mode 计划进度 |
+| `/judge` | 管理 judge 委托验收、live.log 过程终端和 driver 运行状态 |
 | `/implement` | scout→planner→worker 全链路实现 |
 | `/scout-and-plan` | scout→planner(只到方案) |
 | `/implement-and-review` | worker→reviewer→worker |
@@ -217,6 +220,19 @@ UGK_CLEAR_STARTUP=0 ugk
 ```
 
 默认模式是 `ask`。非 status 操作需要提供原因并说明普通访问是否已经尝试或不适用。详见 `skills/chrome-cdp-guide/SKILL.md` 和 `extensions/chrome-cdp/README.md`。
+
+### Judge 委托验收
+
+`/judge` 用于把任务交给 driver 执行,由 judge 按验收标准判定 PASS/FAIL。judge 不是替代 `/plan` 的只读规划模式,而是面向明确验收标准的委托执行模式。运行过程写入 `.judge/judge-*/live.log`,Windows 上可通过 `/judge check-bash-window` 检查外部 bash 日志窗口是否能持续显示更新。
+
+```text
+/judge
+/judge toggle
+/judge check-bash-window
+/judge ack
+```
+
+详见 `docs/judge.md`。
 
 ### cron 定时服务(独立常驻进程)
 
@@ -271,6 +287,7 @@ ugk-core/
 │   ├── cron.ts + cron-contract.ts  # cron 工具 + 共享类型
 │   ├── subagent.ts + subagent-runtime/rendering/agents.ts  # 子代理委派
 │   ├── plan-mode.ts + plan-mode-utils/state.ts  # plan 模式
+│   ├── judge/               # Judge 委托验收模式
 │   ├── chrome-cdp/          # 本地登录态 Chrome CDP 控制
 │   └── ui-*.ts               # UI 美化(品牌层/footer/状态条/标题栏spinner)
 ├── cron/

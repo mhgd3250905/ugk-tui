@@ -11,24 +11,32 @@ import {
 const todoItems = [{ step: 1, text: "Read files", completed: false }];
 
 test("togglePlanMode flips planning on and resets execution state", () => {
-	const initial = { planModeEnabled: false, executionMode: true, todoItems };
+	const initial = { planModeEnabled: false, executionMode: true, todoItems, savedTools: undefined };
 	assert.deepEqual(togglePlanMode(initial), {
 		planModeEnabled: true,
 		executionMode: false,
 		todoItems: [],
+		savedTools: undefined,
 	});
 });
 
 test("startExecution exits planning and keeps extracted todos", () => {
-	assert.deepEqual(startExecution({ planModeEnabled: true, executionMode: false, todoItems }), {
-		planModeEnabled: false,
-		executionMode: true,
-		todoItems,
-	});
+	assert.deepEqual(
+		startExecution({ planModeEnabled: true, executionMode: false, todoItems, savedTools: undefined }),
+		{
+			planModeEnabled: false,
+			executionMode: true,
+			todoItems,
+			savedTools: undefined,
+		},
+	);
 });
 
 test("completeExecution clears plan-mode progress", () => {
-	assert.deepEqual(completeExecution({ planModeEnabled: false, executionMode: true, todoItems }), createPlanModeState());
+	assert.deepEqual(
+		completeExecution({ planModeEnabled: false, executionMode: true, todoItems, savedTools: undefined }),
+		createPlanModeState(),
+	);
 });
 
 test("restorePlanModeState applies persisted state over defaults", () => {
@@ -38,6 +46,28 @@ test("restorePlanModeState applies persisted state over defaults", () => {
 			executing: true,
 			todos: todoItems,
 		}),
-		{ planModeEnabled: true, executionMode: true, todoItems },
+		{ planModeEnabled: true, executionMode: true, todoItems, savedTools: undefined },
 	);
+});
+
+// S1 fix: savedTools snapshot must survive state transitions so dynamic tools (MCP) are restored.
+test("togglePlanMode preserves savedTools across toggle", () => {
+	const savedTools = ["read", "bash", "edit", "write", "mcp__github__search"];
+	const initial = { planModeEnabled: false, executionMode: false, todoItems: [], savedTools };
+	assert.deepEqual(togglePlanMode(initial), {
+		planModeEnabled: true,
+		executionMode: false,
+		todoItems: [],
+		savedTools,
+	});
+});
+
+test("startExecution preserves savedTools so it can be restored after execution", () => {
+	const savedTools = ["read", "bash", "mcp__fs__read_file"];
+	const result = startExecution({ planModeEnabled: true, executionMode: false, todoItems, savedTools });
+	assert.equal(result.savedTools, savedTools);
+});
+
+test("createPlanModeState initializes savedTools as undefined", () => {
+	assert.equal(createPlanModeState().savedTools, undefined);
 });

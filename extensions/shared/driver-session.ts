@@ -24,8 +24,6 @@ export interface DriverSessionOptions {
 	agentDefinitionPath?: string;
 }
 
-export type FlowDriverSessionOptions = DriverSessionOptions;
-
 type DriverSessionEvent = {
 	type?: string;
 	assistantMessageEvent?: {
@@ -53,7 +51,7 @@ export interface DriverSessionLike {
 
 export type DriverSessionFactory = (options: DriverSessionOptions) => Promise<{ session: DriverSessionLike }>;
 
-export function createFlowDriverResourceLoaderOptions(options: { cwd: string; agentDir: string; agentDefinitionPath?: string }): {
+export function createDriverResourceLoaderOptions(options: { cwd: string; agentDir: string; agentDefinitionPath?: string }): {
 	cwd: string;
 	agentDir: string;
 	additionalExtensionPaths: string[];
@@ -89,7 +87,7 @@ export function assertExpectedDriverTools(session: DriverSessionLike, expectedTo
 	const missing = expectedToolNames.filter((name) => !availableToolNames.has(name));
 	if (missing.length > 0) {
 		throw new Error(
-			`Flow driver environment initialization failed. Missing required capabilities: ${missing.join(", ")}. Please update or restart UGK, then retry.`,
+			`Driver session environment initialization failed. Missing required capabilities: ${missing.join(", ")}. Please update or restart UGK, then retry.`,
 		);
 	}
 }
@@ -126,72 +124,11 @@ function getAssistantMessageText(event: DriverSessionEvent): string {
 		.join("\n");
 }
 
-const SUPPRESSED_DRIVER_UI_METHODS = new Set<PropertyKey>([
-	"setStatus",
-	"setWorkingMessage",
-	"setWorkingVisible",
-	"setWorkingIndicator",
-	"setHiddenThinkingLabel",
-	"setWidget",
-	"setFooter",
-	"setHeader",
-	"setTitle",
-	"pasteToEditor",
-	"setEditorText",
-	"addAutocompleteProvider",
-	"setEditorComponent",
-	"setTheme",
-	"setToolsExpanded",
-]);
-
-export function createFlowDriverUiContext(parentUi: ExtensionUIContext, driverLabel: string): ExtensionUIContext {
-	return new Proxy({} as ExtensionUIContext, {
-		get(_target, property) {
-			if (SUPPRESSED_DRIVER_UI_METHODS.has(property)) {
-				return () => {};
-			}
-			if (property === "notify") {
-				return (message: string, type?: "info" | "warning" | "error") =>
-					parentUi.notify(`[Flow driver ${driverLabel}] ${message}`, type);
-			}
-
-			const parentValue = (parentUi as any)[property];
-			if (typeof parentValue === "function") {
-				return parentValue.bind(parentUi);
-			}
-			if (parentValue !== undefined) {
-				return parentValue;
-			}
-
-			if (property === "select" || property === "input" || property === "editor" || property === "custom") {
-				return async () => undefined;
-			}
-			if (property === "confirm") {
-				return async () => false;
-			}
-			if (property === "getEditorText") {
-				return () => "";
-			}
-			if (property === "getAllThemes") {
-				return () => [];
-			}
-			if (property === "getTheme") {
-				return () => undefined;
-			}
-			if (property === "getToolsExpanded") {
-				return () => false;
-			}
-
-			return undefined;
-		},
-	});
-}
-
 export async function defaultDriverSessionFactory(
 	options: DriverSessionOptions,
 ): Promise<{ session: DriverSessionLike }> {
 	const agentDir = getAgentDir();
-	const resourceLoader = new DefaultResourceLoader(createFlowDriverResourceLoaderOptions({
+	const resourceLoader = new DefaultResourceLoader(createDriverResourceLoaderOptions({
 		cwd: options.cwd,
 		agentDir,
 		agentDefinitionPath: options.agentDefinitionPath,
@@ -219,7 +156,7 @@ export async function defaultDriverSessionFactory(
 		},
 		onError: (error) => {
 			options.uiContext?.notify(
-				`[Flow driver ${options.taskId}/${options.runId}] Extension error (${error.extensionPath}): ${error.error}`,
+				`[Driver ${options.taskId}/${options.runId}] Extension error (${error.extensionPath}): ${error.error}`,
 				"warning",
 			);
 		},
@@ -241,8 +178,6 @@ export interface DriverSession {
 	getWidgetLines(): string[];
 	dispose(): void;
 }
-
-export type FlowDriverSession = DriverSession;
 
 export async function createDriverSession(
 	options: DriverSessionOptions,
@@ -318,7 +253,7 @@ export async function createDriverSession(
 			return transcript.toText();
 		},
 		getWidgetLines() {
-			return transcript.toWidgetLines(options.label ?? `Flow driver ${options.taskId}/${options.runId}`);
+			return transcript.toWidgetLines(options.label ?? `Driver ${options.taskId}/${options.runId}`);
 		},
 		dispose() {
 			unsubscribe();
@@ -326,5 +261,3 @@ export async function createDriverSession(
 		},
 	};
 }
-
-export const createFlowDriverSession = createDriverSession;

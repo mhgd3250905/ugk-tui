@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadMcpConfig, type McpConfig, type McpConfigEntry } from "./config.ts";
-import { registerMcpCommand, type McpCommandState } from "./commands.ts";
+import { getActiveTools, registerMcpCommand, type McpCommandState } from "./commands.ts";
 import {
 	checkMcpSpawnPolicy,
 	checkMcpToolPolicy,
@@ -342,10 +342,6 @@ function connectionErrorMessage(error: unknown): string {
 		return error.connection.message ?? error.message;
 	}
 	return error instanceof Error ? error.message : String(error);
-}
-
-function getActiveTools(pi: ExtensionAPI): string[] {
-	return typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
 }
 
 let processCleanupRegistered = false;

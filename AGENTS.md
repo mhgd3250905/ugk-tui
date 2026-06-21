@@ -10,10 +10,9 @@
 - 优先复用 pi 已有能力,而非新建
 - 危险操作前确认(权限门已对 `rm -rf` / `sudo` / `chmod 777` 启用)
 
-## 已实现能力(v1.0.0)
+## 已实现能力(v2.0.0)
 
 ### 自定义工具(extensions/)
-- `greet` — 演示用打招呼
 - `scrcpy` — 安卓投屏控制(start/stop/status/version,内置 ADB 路径复用避免断连)
 - `subagent` — 子代理委派(single/parallel/chain 三模式,隔离 context 只回摘要)
 - `cron` — 定时任务管理(status/list/add/remove/history,代理常驻 cron 服务)

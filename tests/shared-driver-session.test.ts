@@ -4,10 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import {
 	createDriverSession,
-	createFlowDriverSession,
+	createDriverResourceLoaderOptions,
 	type DriverSessionFactory,
 	type DriverSessionOptions,
-	createFlowDriverResourceLoaderOptions,
 } from "../extensions/shared/driver-session.ts";
 
 function createOptions(): DriverSessionOptions {
@@ -21,7 +20,7 @@ function createOptions(): DriverSessionOptions {
 	};
 }
 
-test("shared driver session exposes the base creator and Flow compatibility alias", async () => {
+test("shared driver session exposes the base creator", async () => {
 	const prompts: string[] = [];
 	const sessionHandle = {
 		sessionFile: "driver-session.jsonl",
@@ -41,8 +40,6 @@ test("shared driver session exposes the base creator and Flow compatibility alia
 		dispose() {},
 	};
 	const factory: DriverSessionFactory = async () => ({ session: sessionHandle });
-
-	assert.equal(createFlowDriverSession, createDriverSession);
 
 	const driver = await createDriverSession(createOptions(), factory);
 	await driver.start();
@@ -92,7 +89,7 @@ test("driver session can collect assistant text for a single prompt without tran
 
 test("driver resource loader can inject an explicit agent definition", () => {
 	const agentDefinitionPath = path.resolve("agents/driver.md");
-	const options = createFlowDriverResourceLoaderOptions({
+	const options = createDriverResourceLoaderOptions({
 		cwd: "E:/workspace",
 		agentDir: "C:/Users/demo/.pi/agent",
 		agentDefinitionPath,
@@ -123,7 +120,7 @@ test("driver resource loader can inject isolated Driver and Judge definitions", 
 	];
 
 	for (const entry of cases) {
-		const options = createFlowDriverResourceLoaderOptions({
+		const options = createDriverResourceLoaderOptions({
 			cwd: path.resolve("."),
 			agentDir: path.join(os.tmpdir(), "ugk-agent-test"),
 			agentDefinitionPath: entry.agentDefinitionPath,

@@ -45,7 +45,7 @@ test("/ugk renders a structured status panel", async () => {
 		const text = notifications.join("\n");
 		assert.match(text, /^🟢 UGK active/);
 		assert.match(text, /┌─+┬─+┐/);
-		assert.match(text, /│\s*🧰 Tools\s*│\s*✅ greet/);
+		assert.doesNotMatch(text, /│\s*🧰 Tools\s*│.*✅ greet/);
 		assert.match(text, /│\s*🧰 Tools\s*│.*✅ mcp/);
 		assert.match(text, /│\s*🤖 Agents\s*│\s*✅ @agent mention/);
 		assert.match(text, /│\s*⌨️ Commands\s*│\s*\/ugk/);

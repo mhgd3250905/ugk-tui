@@ -10,8 +10,7 @@
  *     /login 菜单可选 deepseek,模型 deepseek-chat / deepseek-reasoner。
  */
 
-import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,28 +33,11 @@ import { registerUgkUpdate } from "./update-check.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { renderTerminalTable } from "./terminal-table.ts";
 
-// ---- 自定义工具(照搬 hello.ts 模式)----
-const greetTool = defineTool({
-	name: "greet",
-	label: "Greet",
-	description: "A demo greeting tool. Use when the user says hi or asks to be greeted.",
-	parameters: Type.Object({
-		name: Type.String({ description: "Name to greet" }),
-	}),
-
-	async execute(_toolCallId, params) {
-		return {
-			content: [{ type: "text", text: `Hello, ${params.name}! (from ugk-pi-agent)` }],
-			details: { greeted: params.name },
-		};
-	},
-});
-
 function formatUgkStatusTable(deepseekStatus: string): string {
 	const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
 	const apiSummary = deepseekStatus.replace(/^deepseek:\s*/, "DeepSeek ");
 	const rows = [
-		["🧰 Tools", "✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ judge  ✅ mcp"],
+		["🧰 Tools", "✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ judge  ✅ mcp"],
 		["🤖 Agents", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries"],
 		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /judge  /cdp  /mcp  /ugk-ui"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
@@ -73,7 +55,6 @@ export default function (pi: ExtensionAPI) {
 	const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 	// 1) 自定义工具
-	pi.registerTool(greetTool);
 	pi.registerTool(scrcpyTool);
 
 	// 1.1) subagent 工具(从官方 subagent 示例搬运 + Windows spawn 适配)

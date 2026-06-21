@@ -27,15 +27,15 @@ export type McpCommandState = {
 	registry: Pick<McpRegistry, "connections" | "disconnectAll">;
 	permissionState: McpPermissionState;
 	serverTools: Map<string, string[]>;
-	failedServers?: Map<string, string> | Record<string, string>;
+	failedServers?: Map<string, string>;
 	warnings?: string[];
 	staleServerTools?: Map<string, string[]>;
 };
 
 export type McpReloadResult = {
 	connections?: McpConnection[];
-	registered?: Map<string, string[]> | Record<string, string[]>;
-	failed?: Map<string, string> | Record<string, string>;
+	registered?: Map<string, string[]>;
+	failed?: Map<string, string>;
 	warnings?: string[];
 };
 
@@ -295,10 +295,7 @@ function serverToolsFromConnections(connections: McpConnection[]): Map<string, s
 }
 
 function normalizeServerTools(registered: NonNullable<McpReloadResult["registered"]>): Map<string, string[]> {
-	if (registered instanceof Map) {
-		return new Map(registered);
-	}
-	return new Map(Object.entries(registered));
+	return new Map(registered);
 }
 
 function removeActiveTools(pi: ExtensionAPI, tools: string[]): void {
@@ -310,7 +307,7 @@ function removeActiveTools(pi: ExtensionAPI, tools: string[]): void {
 	pi.setActiveTools(getActiveTools(pi).filter((tool) => !disabled.has(tool)));
 }
 
-function getActiveTools(pi: ExtensionAPI): string[] {
+export function getActiveTools(pi: ExtensionAPI): string[] {
 	return typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
 }
 
@@ -330,10 +327,7 @@ function countFailed(failedServers: McpCommandState["failedServers"]): number {
 	if (!failedServers) {
 		return 0;
 	}
-	if (failedServers instanceof Map) {
-		return failedServers.size;
-	}
-	return Object.keys(failedServers).length;
+	return failedServers.size;
 }
 
 function notify(context: CommandContext, message: string): void {

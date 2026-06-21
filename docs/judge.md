@@ -47,7 +47,7 @@ Judge 开启后 footer 显示:
 
 - `extensions/judge/judge.ts`:注册 `/judge`、`questionnaire`、`judge_complete`;管理三阶段状态、footer、widget、delivery report、live-log 终端。
 - `extensions/judge/judge-driver.ts`:包装 Driver session 事件;维护 `DriverSummary`;在工具开始/结束、错误、`judge_complete`、`agent_end` 时唤醒 Judge;写 `<cwd>/.judge/<runId>/live.log`。
-- `extensions/shared/driver-session.ts`:Flow/Judge 共用 Driver session 底座;提供 `ask(text)` 收集当前 Judge 决策响应,避免再靠 transcript diff。
+- `extensions/shared/driver-session.ts`:Judge Driver session 底座;提供 `ask(text)` 收集当前 Judge 决策响应,避免再靠 transcript diff。
 - `extensions/judge/judge-prompts.ts`:`ALIGN_PROMPT`、`DECIDE_PROMPT`、`FINALIZE_PROMPT`。
 - `extensions/judge/judge-state.ts`:Judge 状态机和 `DriverSummary` 类型。
 - `extensions/judge/judge-utils.ts`:Spec/verdict 解析、tail 提取、工具摘要、artifact 提取。
@@ -117,13 +117,13 @@ PASS/FAIL 报告结构:
 
 ## 与 Flow 的关系
 
-Judge 复用 Flow 抽出的 shared driver session 底座,但不删除 Flow 上层。
+Flow 已移除。Judge 不依赖 `extensions/flow/`,只使用 `extensions/shared/driver-session.ts` 作为独立 Driver session 底座。
 
 当前状态:
 
-- Flow 仍保留 prove/validation/review/accept/signing 工作流。
-- Judge 是并行的新模式,不是 Flow 的直接替换。
-- 删除 Flow 上层不是本版本目标。
+- `/judge` 是保留的实时监督入口。
+- `extensions/shared/driver-session.ts` 和 `extensions/shared/driver-view.ts` 继续保留给 Judge 使用。
+- Flow 历史文档只作为背景材料,不得作为当前运行时事实。
 
 ## 已知边界
 

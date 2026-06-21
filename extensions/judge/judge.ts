@@ -818,7 +818,6 @@ export function registerJudge(pi: ExtensionAPI): void {
 			const runDir = path.join(cwd, ".judge", runId);
 
 			// ---- driver 过程可视化 widget ----
-			// 搬 Flow 的 setWidget + onTranscriptUpdate 机制,实时显示 driver 过程 + Judge 判定。
 			// 常量 JUDGE_DRIVER_WIDGET_KEY、formatJudgeVerdictLine、clearJudgeDriverWidget 在模块顶层。
 			let lastWidgetSnapshot = "";
 			let lastJudgeVerdictLine = "";

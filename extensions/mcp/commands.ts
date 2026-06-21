@@ -12,6 +12,17 @@ import {
 } from "./tools.ts";
 import { formatMcpStatus } from "./formatter.ts";
 
+const MCP_MENU_OPTIONS = [
+	"📊 查看状态",
+	"🔄 重载所有 server",
+	"⚙️ 切换权限模式",
+	"✅ 启用 server",
+	"⛔ 禁用 server",
+	"退出",
+];
+
+const MCP_MODE_OPTIONS = ["ask", "on", "off", "返回"];
+
 export type McpCommandState = {
 	registry: Pick<McpRegistry, "connections" | "disconnectAll">;
 	permissionState: McpPermissionState;
@@ -51,7 +62,12 @@ export function registerMcpCommand(pi: ExtensionAPI, state: McpCommandState, dep
 	pi.registerCommand("mcp", {
 		description: "Manage MCP servers and tools",
 		async handler(input: string = "", context: CommandContext = {}) {
-			const [command = "status", serverName] = input.trim().split(/\s+/).filter(Boolean);
+			const resolvedInput = await resolveMcpArgs(input, context, state, getActiveTools(pi));
+			if (!resolvedInput) {
+				return;
+			}
+
+			const [command = "status", serverName] = resolvedInput.trim().split(/\s+/).filter(Boolean);
 			const action = command.toLowerCase();
 
 			if (action === "status") {
@@ -83,6 +99,97 @@ export function registerMcpCommand(pi: ExtensionAPI, state: McpCommandState, dep
 			notify(context, `Unknown /mcp command "${command}". Usage: /mcp status|on|off|ask|reload|enable <server>|disable <server>`);
 		},
 	});
+}
+
+async function resolveMcpArgs(
+	args: string,
+	ctx: CommandContext,
+	state: McpCommandState,
+	activeTools: string[],
+): Promise<string | undefined> {
+	if (args.trim()) {
+		return args;
+	}
+	if (!ctx.ui?.select) {
+		return "status";
+	}
+
+	const selection = await ctx.ui.select(formatMcpMenuTitle(state), MCP_MENU_OPTIONS);
+	if (!selection || selection === "退出") {
+		return undefined;
+	}
+	if (selection === "📊 查看状态") {
+		return "status";
+	}
+	if (selection === "🔄 重载所有 server") {
+		return "reload";
+	}
+	if (selection === "⚙️ 切换权限模式") {
+		return selectMcpMode(ctx);
+	}
+	if (selection === "✅ 启用 server") {
+		return selectMcpServerToEnable(ctx, state, activeTools);
+	}
+	if (selection === "⛔ 禁用 server") {
+		return selectMcpServerToDisable(ctx, state, activeTools);
+	}
+	return undefined;
+}
+
+async function selectMcpMode(ctx: CommandContext): Promise<string | undefined> {
+	const selection = await ctx.ui!.select!("切换 MCP 权限模式", MCP_MODE_OPTIONS);
+	return selection && selection !== "返回" ? selection : undefined;
+}
+
+async function selectMcpServerToEnable(
+	ctx: CommandContext,
+	state: McpCommandState,
+	activeTools: string[],
+): Promise<string | undefined> {
+	const active = new Set(activeTools);
+	const options = Array.from(state.serverTools)
+		.filter(([, tools]) => !tools.some((tool) => active.has(tool)))
+		.map(([serverName]) => serverName);
+
+	for (const [serverName, tools] of state.staleServerTools ?? []) {
+		if (!tools.some((tool) => active.has(tool)) && !options.includes(serverName)) {
+			options.push(`${serverName} (stale)`);
+		}
+	}
+
+	if (options.length === 0) {
+		notify(ctx, "没有可启用的 server");
+		return undefined;
+	}
+
+	const selection = await ctx.ui!.select!("启用 MCP server", [...options, "返回"]);
+	if (!selection || selection === "返回") {
+		return undefined;
+	}
+	return `enable ${selection.replace(/ \(stale\)$/, "")}`;
+}
+
+async function selectMcpServerToDisable(
+	ctx: CommandContext,
+	state: McpCommandState,
+	activeTools: string[],
+): Promise<string | undefined> {
+	const active = new Set(activeTools);
+	const options = Array.from(state.serverTools)
+		.filter(([, tools]) => tools.some((tool) => active.has(tool)))
+		.map(([serverName]) => serverName);
+
+	if (options.length === 0) {
+		notify(ctx, "没有可禁用的 server");
+		return undefined;
+	}
+
+	const selection = await ctx.ui!.select!("禁用 MCP server", [...options, "返回"]);
+	return selection && selection !== "返回" ? `disable ${selection}` : undefined;
+}
+
+function formatMcpMenuTitle(state: McpCommandState): string {
+	return `MCP(${countConnectedServers(state)} servers connected, mode: ${state.permissionState.mode})`;
 }
 
 function disableServer(pi: ExtensionAPI, state: McpCommandState, serverName?: string): string {
@@ -213,6 +320,10 @@ function isPermissionMode(value: string): value is McpPermissionMode {
 
 function countTools(serverTools: Map<string, string[]>): number {
 	return Array.from(serverTools.values()).reduce((sum, tools) => sum + tools.length, 0);
+}
+
+function countConnectedServers(state: McpCommandState): number {
+	return Array.from(state.registry.connections.values()).filter((connection) => connection.status === "connected").length;
 }
 
 function countFailed(failedServers: McpCommandState["failedServers"]): number {

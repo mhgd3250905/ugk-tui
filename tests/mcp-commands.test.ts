@@ -51,12 +51,16 @@ function makeState(overrides: Partial<McpCommandState> = {}): McpCommandState {
 async function runMcp(
 	pi: ReturnType<typeof makePi>,
 	args: string,
+	context: any = {},
 ): Promise<{ notifications: string[] }> {
 	const notifications: string[] = [];
 	await pi.commands.get("mcp")!.handler(args, {
+		...context,
 		ui: {
+			...context.ui,
 			notify(message: string) {
 				notifications.push(message);
+				context.ui?.notify?.(message);
 			},
 		},
 	});
@@ -106,6 +110,139 @@ test("/mcp on off ask switches permission mode", async () => {
 
 	await runMcp(pi, "ask");
 	assert.equal(state.permissionState.mode, "ask");
+});
+
+test("/mcp with no args opens the main menu and reuses existing dispatch", async () => {
+	const state = makeState({
+		registry: {
+			connections: new Map([
+				["alpha", { name: "alpha", status: "connected", tools: [] }],
+				["beta", { name: "beta", status: "connected", tools: [] }],
+				["down", { name: "down", status: "disconnected", tools: [] }],
+			]) as any,
+			async disconnectAll() {},
+		},
+	});
+	const pi = makePi();
+	registerMcpCommand(pi as any, state);
+	const selectCalls: Array<{ title: string; options: string[] }> = [];
+
+	await runMcp(pi, "", {
+		ui: {
+			async select(title: string, options: string[]) {
+				selectCalls.push({ title, options });
+				return selectCalls.length === 1 ? "⚙️ 切换权限模式" : "on";
+			},
+		},
+	});
+
+	assert.equal(selectCalls[0].title, "MCP(2 servers connected, mode: ask)");
+	assert.deepEqual(selectCalls[0].options, [
+		"📊 查看状态",
+		"🔄 重载所有 server",
+		"⚙️ 切换权限模式",
+		"✅ 启用 server",
+		"⛔ 禁用 server",
+		"退出",
+	]);
+	assert.equal(selectCalls[1].title, "切换 MCP 权限模式");
+	assert.equal(state.permissionState.mode, "on");
+});
+
+test("/mcp with no args falls back to status when select UI is unavailable", async () => {
+	const state = makeState({
+		registry: {
+			connections: new Map([
+				["alpha", { name: "alpha", status: "connected", tools: [{ name: "echo" }] }],
+			]) as any,
+			async disconnectAll() {},
+		},
+		serverTools: new Map([["alpha", ["alpha__echo"]]]),
+	});
+	const pi = makePi();
+	registerMcpCommand(pi as any, state);
+
+	const { notifications } = await runMcp(pi, "");
+
+	assert.equal(notifications.length, 1);
+	assert.match(notifications[0], /alpha/);
+});
+
+test("/mcp enable menu lists inactive and stale servers", async () => {
+	const state = makeState({
+		serverTools: new Map([
+			["alpha", ["alpha__echo"]],
+			["beta", ["beta__read"]],
+		]),
+		staleServerTools: new Map([["gone", ["gone__old"]]]),
+	});
+	const pi = makePi(["alpha__echo"]);
+	registerMcpCommand(pi as any, state);
+	const selectCalls: Array<{ title: string; options: string[] }> = [];
+
+	const { notifications } = await runMcp(pi, "", {
+		ui: {
+			async select(title: string, options: string[]) {
+				selectCalls.push({ title, options });
+				return selectCalls.length === 1 ? "✅ 启用 server" : "gone (stale)";
+			},
+		},
+	});
+
+	assert.deepEqual(selectCalls[1].options, ["beta", "gone (stale)", "返回"]);
+	assert.match(notifications.join("\n"), /stale/i);
+});
+
+test("/mcp disable menu lists active MCP servers only", async () => {
+	const state = makeState({
+		serverTools: new Map([
+			["alpha", ["alpha__echo"]],
+			["beta", ["beta__read"]],
+		]),
+	});
+	const pi = makePi(["greet", "alpha__echo"]);
+	registerMcpCommand(pi as any, state);
+	const selectCalls: Array<{ title: string; options: string[] }> = [];
+
+	await runMcp(pi, "", {
+		ui: {
+			async select(title: string, options: string[]) {
+				selectCalls.push({ title, options });
+				return selectCalls.length === 1 ? "⛔ 禁用 server" : "alpha";
+			},
+		},
+	});
+
+	assert.deepEqual(selectCalls[1].options, ["alpha", "返回"]);
+	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["greet"]);
+});
+
+test("/mcp enable and disable menus notify when no server is available", async () => {
+	const state = makeState({
+		serverTools: new Map([["alpha", ["alpha__echo"]]]),
+	});
+	const pi = makePi(["alpha__echo"]);
+	registerMcpCommand(pi as any, state);
+
+	const enable = await runMcp(pi, "", {
+		ui: {
+			async select() {
+				return "✅ 启用 server";
+			},
+		},
+	});
+	const piWithoutActiveServers = makePi();
+	registerMcpCommand(piWithoutActiveServers as any, state);
+	const disable = await runMcp(piWithoutActiveServers, "", {
+		ui: {
+			async select() {
+				return "⛔ 禁用 server";
+			},
+		},
+	});
+
+	assert.match(enable.notifications.join("\n"), /没有可启用的 server/);
+	assert.match(disable.notifications.join("\n"), /没有可禁用的 server/);
 });
 
 test("/mcp disable removes only that server's tools and preserves non-MCP tools", async () => {

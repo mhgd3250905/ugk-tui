@@ -6,6 +6,7 @@ import {
 	createJudgeState,
 	enterAligning,
 	setRequirementsSpec,
+	setTaskbookForRun,
 	startDriving,
 } from "../extensions/judge/judge-state.ts";
 
@@ -50,6 +51,14 @@ test("startDriving requires a spec and moves to driving", () => {
 	assert.equal(driving.phase, "driving");
 	assert.deepEqual(driving.spec, spec);
 	assert.equal(driving.keepWatching, true);
+});
+
+test("setTaskbookForRun preserves state and records the taskbook name", () => {
+	const state = setTaskbookForRun(startDriving(setRequirementsSpec(enterAligning(createJudgeState()), spec)), "judge");
+
+	assert.equal(state.phase, "driving");
+	assert.equal(state.taskbookName, "judge");
+	assert.deepEqual(state.spec, spec);
 });
 
 test("abortJudge and completeJudge produce terminal phases", () => {

@@ -21,6 +21,7 @@ import {
 	recordJudgeEscalation,
 	recordJudgeSteer,
 	setRequirementsSpec,
+	setTaskbookForRun,
 	startDriving,
 	type DriverSummary,
 	type JudgeState,
@@ -59,6 +60,18 @@ import {
 	openPreparedLiveLogTerminal,
 	setOpenLiveLogTerminalForTests,
 } from "./terminal-launcher.ts";
+import {
+	appendRunToTaskbook,
+	draftExperienceMd,
+	isValidTaskbookName,
+	listTaskbooks,
+	loadTaskbook,
+	readExperienceMd,
+	saveTaskbook,
+	updateTaskbookSpec,
+	writeExperienceMd,
+	type RunSummary,
+} from "./taskbook.ts";
 
 // Re-export so existing test imports from "./judge.ts" keep working unchanged.
 export {
@@ -70,7 +83,16 @@ export {
 const JUDGE_ALIGNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const JUDGE_NORMAL_TOOLS = ["read", "bash", "edit", "write"];
 const JUDGE_MENU_OPTIONS = ["委派 driver 执行", "继续澄清", "改需求"];
-const JUDGE_COMMAND_MENU_OPTIONS = ["Toggle Judge", "检查 bash 新窗口打开", "Exit"];
+const JUDGE_COMMAND_MENU_OPTIONS = [
+	"新建对齐(从零)",
+	"运行任务书",
+	"保存任务书",
+	"编辑任务书",
+	"列出任务书",
+	"Toggle Judge",
+	"检查 bash 新窗口打开",
+	"Exit",
+];
 const JUDGE_PHASES = new Set(["aligning", "driving", "delivering", "aborted", "done"]);
 const JUDGE_DRIVER_WIDGET_KEY = "judge-driver-view";
 
@@ -282,6 +304,7 @@ function persistState(pi: ExtensionAPI, state: JudgeState): void {
 		maxSteer: state.maxSteer,
 		keepWatching: state.keepWatching,
 		pendingAckStatus: state.pendingAckStatus,
+		taskbookName: state.taskbookName,
 		aligningQuestionnaireUsed: state.aligningQuestionnaireUsed,
 	});
 }
@@ -328,6 +351,7 @@ function restoreJudgeState(data: unknown): JudgeState | undefined {
 		maxSteer: record.maxSteer,
 		keepWatching: record.keepWatching,
 		pendingAckStatus: record.pendingAckStatus as JudgeState["pendingAckStatus"],
+		taskbookName: typeof record.taskbookName === "string" ? record.taskbookName : undefined,
 		aligningQuestionnaireUsed: record.aligningQuestionnaireUsed === true,
 	};
 }
@@ -378,7 +402,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 		restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
 			? pi.getActiveTools()
 			: JUDGE_NORMAL_TOOLS;
-		state = enterAligning(state);
+		state = enterAligning({ ...state, taskbookName: undefined });
 		pi.setActiveTools(JUDGE_ALIGNING_TOOLS);
 		ctx.ui.notify(`Judge aligning mode enabled. Tools: ${JUDGE_ALIGNING_TOOLS.join(", ")}`, "info");
 		setJudgeStatus(ctx, "⚖ judge");
@@ -434,6 +458,436 @@ export function registerJudge(pi: ExtensionAPI): void {
 		ctx.ui.notify(`已打开 bash 新窗口检查日志:${liveLogPath}`, "info");
 	}
 
+	async function recordTaskbookRun(ctx: ExtensionContext, options: {
+		name: string;
+		spec: RequirementsSpec;
+		summary: DriverSummary;
+		finalVerdict: JudgeFinalVerdict;
+		updateExperience: boolean;
+	}): Promise<void> {
+		const cwd = getCwd(ctx);
+		try {
+			const run: RunSummary = options.finalVerdict.status === "pass"
+				? {
+					timestamp: new Date().toISOString(),
+					status: "pass",
+					steerCount: options.summary.steerCount,
+					evidence: options.finalVerdict.evidence,
+				}
+				: {
+					timestamp: new Date().toISOString(),
+					status: "fail",
+					steerCount: options.summary.steerCount,
+					failReason: options.finalVerdict.reason || options.summary.abortReason || "unknown",
+				};
+			const taskbook = await appendRunToTaskbook(cwd, options.name, run);
+			if (options.updateExperience) {
+				await writeExperienceMd(cwd, options.name, draftExperienceMd(options.name, options.spec, options.summary.steerHistory ?? [], taskbook));
+			}
+			ctx.ui.notify(
+				options.finalVerdict.status === "pass"
+					? `任务书 "${options.name}" 已沉淀 PASS 经验`
+					: `任务书 "${options.name}" 已记录失败经验`,
+				"info",
+			);
+		} catch (error) {
+			ctx.ui.notify(`任务书 "${options.name}" 沉淀失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		}
+	}
+
+	async function startActiveJudgeDriver(ctx: ExtensionContext, spec: RequirementsSpec): Promise<void> {
+		setJudgeStatus(ctx, "⚖ driving");
+		activeDriver?.dispose();
+		clearJudgeDriverWidget(ctx.ui); // 清理上一轮 driver 的 widget,新一轮会重建
+		const runId = `judge-${Date.now()}`;
+		const specText = formatRequirementsSpec(spec);
+		const cwd = getCwd(ctx);
+		let initialPrompt = [
+			"[JUDGE DRIVER TASK]",
+			"Execute the following RequirementsSpec. When complete, call the judge_complete tool.",
+			"",
+			specText,
+		].join("\n");
+		if (state.taskbookName) {
+			try {
+				const experience = await readExperienceMd(cwd, state.taskbookName);
+				if (experience.trim()) {
+					initialPrompt = [
+						initialPrompt,
+						"",
+						"## 历史经验(补充参考,非验收标准)",
+						experience,
+					].join("\n");
+				}
+			} catch (error) {
+				ctx.ui.notify(`读取任务书 "${state.taskbookName}" 经验失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+			}
+		}
+		const createDriver = judgeDriverFactoryForTests ?? createJudgeDriver;
+		const runDir = path.join(cwd, ".judge", runId);
+
+		// ---- driver 过程可视化 widget ----
+		// 常量 JUDGE_DRIVER_WIDGET_KEY、formatJudgeVerdictLine、clearJudgeDriverWidget 在模块顶层。
+		let lastWidgetSnapshot = "";
+		let lastJudgeVerdictLine = "";
+		let transcriptRefreshQueued = false;
+		let widgetActive = true;
+
+		function clearDriverWidget() {
+			widgetActive = false;
+			lastWidgetSnapshot = "";
+			lastJudgeVerdictLine = "";
+			clearJudgeDriverWidget(ctx.ui);
+		}
+
+		function refreshDriverWidget() {
+			transcriptRefreshQueued = false;
+			if (!widgetActive) return;
+			if (!activeDriver) return;
+			let lines: string[];
+			try {
+				const summary = activeDriver.getSummary();
+				const transcriptLines = activeDriver.getWidgetLines();
+				const titleLine = `─── Judge driver (turn ${summary.turnCount}, steer ${summary.steerCount}/${state.maxSteer}) ───`;
+				const verdictBlock = lastJudgeVerdictLine ? ["─── Judge ───", lastJudgeVerdictLine] : [];
+				lines = [titleLine, ...transcriptLines, ...verdictBlock];
+			} catch {
+				return;
+			}
+			const snapshot = lines.join("\n");
+			if (snapshot === lastWidgetSnapshot) return; // 去重,避免 TUI 重建导致滚动跳动
+			lastWidgetSnapshot = snapshot;
+			try {
+				(ctx.ui as { setWidget?: (key: string, content: unknown, options?: { placement: string }) => void })
+					.setWidget?.(JUDGE_DRIVER_WIDGET_KEY, lines, { placement: "aboveEditor" });
+			} catch {
+				// setWidget 在非 TUI 模式可能不可用,忽略
+			}
+		}
+
+		function scheduleDriverWidgetRefresh() {
+			if (transcriptRefreshQueued) return;
+			transcriptRefreshQueued = true;
+			queueMicrotask(refreshDriverWidget);
+		}
+
+		activeJudgeVerdictProvider?.dispose();
+		const defaultJudgeVerdictProvider = createJudgeVerdictProviderHandle({
+			cwd,
+			runId,
+			runDir,
+			specText,
+			uiContext: ctx.ui,
+			extensionMode: ctx.mode,
+		});
+		activeJudgeVerdictProvider = judgeVerdictProviderForTests
+			? {
+				decide: judgeVerdictProviderForTests,
+				finalize: defaultJudgeVerdictProvider.finalize,
+				dispose: defaultJudgeVerdictProvider.dispose,
+			}
+			: defaultJudgeVerdictProvider;
+		activeDriver = await createDriver({
+			cwd,
+			runDir,
+			runId,
+			spec: specText,
+			initialPrompt,
+			onWakeup: createJudgeWakeupHandler(specText, activeJudgeVerdictProvider.decide, {
+				onSteer() {
+					state = recordJudgeSteer(state);
+					persistState(pi, state);
+				},
+				onAbort(reason) {
+					state = abortJudge(state);
+					persistState(pi, state);
+					ctx.ui.notify(`Judge aborted driver: ${reason}`, "error");
+					clearDriverWidget();
+					setJudgeStatus(ctx, undefined);
+					restoreActiveTools();
+				},
+				async onFinalize(context) {
+					const canContinueAfterFail = state.keepWatching && context.summary.steerCount < state.maxSteer;
+					state = enterDelivering(state);
+					persistState(pi, state);
+					setJudgeStatus(ctx, "⚖ delivering");
+					const finalizePrompt = buildFinalizePrompt(specText, context.summary, context.tail);
+					const finalVerdict = await activeJudgeVerdictProvider!.finalize({
+						...context,
+						spec: specText,
+						finalizePrompt,
+					});
+					const status = finalVerdict.status === "pass" ? "PASS" : "FAIL";
+					const deliveryReport = formatDeliveryReport({
+						status,
+						finalVerdict,
+						summary: context.summary,
+						tail: context.tail,
+					});
+					state = { ...state, summary: deliveryReport };
+					persistState(pi, state);
+					pi.sendMessage(
+						{
+							customType: "judge-delivery",
+							content: deliveryReport,
+							display: true,
+						},
+						{ triggerTurn: false },
+					);
+
+					if (finalVerdict.status === "pass") {
+						// pi's confirm signature is (title, message, opts?) -> Promise<boolean>.
+						// Previously this called confirm with a single arg, leaving message undefined.
+						const acknowledged = ctx.ui?.confirm
+							? await ctx.ui.confirm("Judge PASS", "Accept this delivery?")
+							: false;
+						if (acknowledged) {
+							if (state.taskbookName && state.spec) {
+								await recordTaskbookRun(ctx, {
+									name: state.taskbookName,
+									spec: state.spec,
+									summary: context.summary,
+									finalVerdict,
+									updateExperience: true,
+								});
+							}
+							state = completeJudge({ ...state, summary: deliveryReport });
+							persistState(pi, state);
+							ctx.ui.notify("Judge delivery accepted.", "info");
+							clearDriverWidget();
+							setJudgeStatus(ctx, undefined);
+							restoreActiveTools();
+							return { action: "pass", keepWatching: false };
+						}
+						state = markPendingAck(enterDelivering({ ...state, summary: deliveryReport }), "pass");
+						persistState(pi, state);
+						setJudgeStatus(ctx, "⚖ delivering");
+						clearDriverWidget();
+						ctx.ui.notify("Judge delivery is waiting for user acknowledgement. Run /judge ack to accept it later.", "warning");
+						return { action: "pass", keepWatching: false };
+					}
+
+					if (!canContinueAfterFail) {
+						if (state.taskbookName && state.spec) {
+							await recordTaskbookRun(ctx, {
+								name: state.taskbookName,
+								spec: state.spec,
+								summary: context.summary,
+								finalVerdict,
+								updateExperience: false,
+							});
+						}
+						state = enterDelivering({ ...state, summary: deliveryReport });
+						persistState(pi, state);
+						clearDriverWidget();
+						restoreActiveTools();
+						ctx.ui.notify(`Judge final delivery failed and cannot continue automatically: ${finalVerdict.reason}`, "warning");
+						return { action: "pass", keepWatching: false };
+					}
+
+					state = startDriving({ ...state, summary: deliveryReport });
+					persistState(pi, state);
+					setJudgeStatus(ctx, "⚖ driving");
+					return {
+						action: "steer",
+						direction: [
+							"Final delivery review failed.",
+							`Reason: ${finalVerdict.reason}`,
+							"Evidence:",
+							...finalVerdict.evidence.map((item) => `- ${item}`),
+							"Revise the work to satisfy the RequirementsSpec acceptance items, then call judge_complete again.",
+						].join("\n"),
+						keepWatching: true,
+					};
+				},
+			}),
+			maxSteer: state.maxSteer,
+			onEscalate: async (context) => {
+				const escalationSummary = formatJudgeEscalation(context);
+				state = recordJudgeEscalation(state, escalationSummary);
+				persistState(pi, state);
+				setJudgeStatus(ctx, undefined);
+				clearDriverWidget();
+				restoreActiveTools();
+				pi.sendMessage(
+					{
+						customType: "judge-escalation",
+						content: escalationSummary,
+						display: true,
+					},
+					{ triggerTurn: false },
+				);
+				ctx.ui.notify(`Judge needs user intervention: ${context.reason}`, "warning");
+			},
+			uiContext: ctx.ui,
+			extensionMode: ctx.mode,
+			onTranscriptUpdate: scheduleDriverWidgetRefresh,
+			onJudgeVerdict: (verdict) => {
+				lastJudgeVerdictLine = formatJudgeVerdictLine(verdict);
+				refreshDriverWidget();
+			},
+		});
+		// 委派后自动打开新终端实时看 driver + Judge 过程(零污染主 agent context)。
+		if (ctx.hasUI) {
+			const liveLogPath = activeDriver.getLiveLogPath?.() ?? path.join(runDir, "live.log");
+			const result = openPreparedLiveLogTerminal(liveLogPath);
+			if (result.ok) {
+				ctx.ui.notify(`已打开过程终端,实时显示:${liveLogPath}`, "info");
+			} else {
+				ctx.ui.notify(`打开过程终端失败(${result.error})。可手动 tail -f ${liveLogPath}`, "warning");
+			}
+		}
+		await activeDriver.start();
+		refreshDriverWidget(); // driver 起来后立即显示一次 widget
+		ctx.ui.notify("Judge driver started.", "info");
+	}
+
+	function emptyDriverSummary(): DriverSummary {
+		return {
+			pathsTried: [],
+			artifacts: [],
+			runningTools: [],
+			turnCount: 0,
+			steerCount: 0,
+			steerHistory: [],
+			completed: true,
+		};
+	}
+
+	async function chooseTaskbookName(ctx: ExtensionContext): Promise<string | undefined> {
+		const taskbooks = await listTaskbooks(getCwd(ctx));
+		if (taskbooks.length === 0) {
+			ctx.ui.notify("无任务书", "warning");
+			return undefined;
+		}
+		const selection = await ctx.ui.select("选择任务书", taskbooks.map((taskbook) => taskbook.name));
+		return selection || undefined;
+	}
+
+	async function handleTaskbookSave(ctx: ExtensionContext, rawName?: string): Promise<void> {
+		if (!state.spec) {
+			ctx.ui.notify("当前没有可保存的 Judge RequirementsSpec。", "warning");
+			return;
+		}
+		let name = rawName;
+		let description = state.spec.goal;
+		if (!name) {
+			const edited = await ctx.ui.editor("保存任务书", "taskbook-name\n任务书描述");
+			const lines = (edited ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+			name = lines[0];
+			description = lines.slice(1).join(" ") || description;
+		}
+		if (!name || !isValidTaskbookName(name)) {
+			ctx.ui.notify("任务书名无效,只能使用字母、数字、-、_。", "warning");
+			return;
+		}
+		try {
+			const existing = await loadTaskbook(getCwd(ctx), name);
+			if (existing && ctx.ui.confirm && !(await ctx.ui.confirm("覆盖任务书", `任务书 "${name}" 已存在,覆盖?`))) {
+				return;
+			}
+			await saveTaskbook(getCwd(ctx), name, {
+				description,
+				spec: state.spec,
+				summary: activeDriver?.getSummary() ?? emptyDriverSummary(),
+			});
+			ctx.ui.notify(`任务书 "${name}" 已保存。可用 /judge run ${name} 重跑。`, "info");
+		} catch (error) {
+			ctx.ui.notify(`保存任务书失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		}
+	}
+
+	async function handleTaskbookRun(ctx: ExtensionContext, rawName?: string): Promise<void> {
+		const name = rawName || await chooseTaskbookName(ctx);
+		if (!name) return;
+		if (!isValidTaskbookName(name)) {
+			ctx.ui.notify("任务书名无效,只能使用字母、数字、-、_。", "warning");
+			return;
+		}
+		try {
+			const loaded = await loadTaskbook(getCwd(ctx), name);
+			if (!loaded) {
+				ctx.ui.notify(`任务书 "${name}" 不存在。`, "warning");
+				return;
+			}
+			restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
+				? pi.getActiveTools()
+				: JUDGE_NORMAL_TOOLS;
+			pi.setActiveTools(JUDGE_NORMAL_TOOLS);
+			state = startDriving(setTaskbookForRun(setRequirementsSpec(createJudgeState(), loaded.spec), name));
+			persistState(pi, state);
+			await startActiveJudgeDriver(ctx, loaded.spec);
+		} catch (error) {
+			ctx.ui.notify(`运行任务书失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		}
+	}
+
+	async function handleTaskbookEdit(ctx: ExtensionContext, rawName?: string): Promise<void> {
+		const name = rawName || await chooseTaskbookName(ctx);
+		if (!name) return;
+		try {
+			const loaded = await loadTaskbook(getCwd(ctx), name);
+			if (!loaded) {
+				ctx.ui.notify(`任务书 "${name}" 不存在。`, "warning");
+				return;
+			}
+			const summarize = (value: string | string[]) => {
+				const text = (Array.isArray(value) ? value.join("；") : value).trim();
+				return text || "(空)";
+			};
+			const lines = (value: string) => value.split("\n").map((line) => line.trim()).filter(Boolean);
+			const ask = async (field: string, current: string | string[]) => {
+				const choice = await ctx.ui.select(`编辑任务书 ${field}`, [`保持当前:${summarize(current)}`, "修改"]);
+				if (!choice) return { cancelled: true, value: current };
+				if (choice !== "修改") return { cancelled: false, value: current };
+				const written = await ctx.ui.editor(`编辑任务书 ${field}`, Array.isArray(current) ? current.join("\n") : current);
+				return { cancelled: false, value: written === undefined ? current : written };
+			};
+
+			const goal = await ask("goal", loaded.spec.goal);
+			if (goal.cancelled) return ctx.ui.notify("编辑已取消", "info");
+			const hardConstraints = await ask("hardConstraints", loaded.spec.hardConstraints);
+			if (hardConstraints.cancelled) return ctx.ui.notify("编辑已取消", "info");
+			const acceptance = await ask("acceptance", loaded.spec.acceptance);
+			if (acceptance.cancelled) return ctx.ui.notify("编辑已取消", "info");
+			const forbidden = await ask("forbidden", loaded.spec.forbidden);
+			if (forbidden.cancelled) return ctx.ui.notify("编辑已取消", "info");
+			const context = await ask("context", loaded.spec.context);
+			if (context.cancelled) return ctx.ui.notify("编辑已取消", "info");
+			const extras = await ask("你还有什么要补充的吗?", "");
+			if (extras.cancelled) return ctx.ui.notify("编辑已取消", "info");
+
+			const extraText = String(extras.value).trim();
+			const baseContext = String(context.value);
+			await updateTaskbookSpec(getCwd(ctx), name, {
+				goal: String(goal.value),
+				hardConstraints: Array.isArray(hardConstraints.value) ? hardConstraints.value : lines(hardConstraints.value),
+				acceptance: Array.isArray(acceptance.value) ? acceptance.value : lines(acceptance.value),
+				forbidden: Array.isArray(forbidden.value) ? forbidden.value : lines(forbidden.value),
+				context: extraText ? `${baseContext}\n\n补充: ${extraText}` : baseContext,
+			});
+			ctx.ui.notify(`任务书 "${name}" 已更新。`, "info");
+		} catch (error) {
+			ctx.ui.notify(`编辑任务书失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		}
+	}
+
+	async function handleTaskbookList(ctx: ExtensionContext): Promise<void> {
+		try {
+			const taskbooks = await listTaskbooks(getCwd(ctx));
+			if (taskbooks.length === 0) {
+				ctx.ui.notify("无任务书", "info");
+				return;
+			}
+			ctx.ui.notify(taskbooks.map((taskbook) => {
+				const last = taskbook.lastRun ? ` last=${taskbook.lastRun.status}` : " no-runs";
+				return `${taskbook.name}: ${taskbook.description}${last}`;
+			}).join("\n"), "info");
+		} catch (error) {
+			ctx.ui.notify(`列出任务书失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		}
+	}
+
 	async function resolveJudgeCommandArgs(args: unknown, ctx: ExtensionContext): Promise<string | undefined> {
 		const raw = String(args ?? "").trim();
 		if (raw) return raw;
@@ -441,6 +895,11 @@ export function registerJudge(pi: ExtensionAPI): void {
 
 		const selection = await ctx.ui.select("Judge", JUDGE_COMMAND_MENU_OPTIONS);
 		if (!selection || selection === "Exit") return undefined;
+		if (selection === "新建对齐(从零)") return "align";
+		if (selection === "运行任务书") return "run";
+		if (selection === "保存任务书") return "save";
+		if (selection === "编辑任务书") return "edit";
+		if (selection === "列出任务书") return "list";
 		if (selection === "Toggle Judge") return "toggle";
 		if (selection === "检查 bash 新窗口打开") return "check-bash-window";
 		return undefined;
@@ -454,7 +913,9 @@ export function registerJudge(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			const resolvedArgs = await resolveJudgeCommandArgs(args, ctx);
 			if (resolvedArgs === undefined) return;
-			const action = resolvedArgs.trim().toLowerCase();
+			const tokens = resolvedArgs.trim().split(/\s+/).filter(Boolean);
+			const action = (tokens[0] ?? "").toLowerCase();
+			const name = tokens[1];
 			if (action === "ack") {
 				if (state.phase === "delivering" && state.pendingAckStatus === "pass") {
 					state = completeJudge(state);
@@ -478,6 +939,22 @@ export function registerJudge(pi: ExtensionAPI): void {
 			}
 			if (action === "check-bash-window" || action === "check-bash" || action === "bash-window") {
 				checkBashLiveLogWindow(ctx);
+				return;
+			}
+			if (action === "save") {
+				await handleTaskbookSave(ctx, name);
+				return;
+			}
+			if (action === "run") {
+				await handleTaskbookRun(ctx, name);
+				return;
+			}
+			if (action === "edit") {
+				await handleTaskbookEdit(ctx, name);
+				return;
+			}
+			if (action === "list") {
+				await handleTaskbookList(ctx);
 				return;
 			}
 			enableJudge(ctx);
@@ -553,7 +1030,12 @@ export function registerJudge(pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
-		if (state.phase !== "aligning" || !ctx.hasUI) return;
+		if (!ctx.hasUI) return;
+		if (state.phase === "driving" && state.spec && !activeDriver) {
+			await startActiveJudgeDriver(ctx, state.spec);
+			return;
+		}
+		if (state.phase !== "aligning") return;
 
 		const lastAssistant = [...event.messages].reverse().find(isAssistantMessage);
 		if (!lastAssistant) return;
@@ -574,222 +1056,12 @@ export function registerJudge(pi: ExtensionAPI): void {
 			// 注意:闸只在"委派"时触发;继续澄清/改需求本来就是要回去问,不需要 questionnaire。
 			if (!state.aligningQuestionnaireUsed) {
 				ctx.ui.notify("Judge 产出 Spec 前未用 questionnaire 确认假设,拒绝委派。已让 Judge 回到对齐阶段确认各维度假设。", "warning");
-				pi.sendUserMessage("你刚才在没有调用 questionnaire 确认假设的情况下直接产出了 RequirementsSpec。这违反 ALIGN_PROMPT 的强制要求。请立即调用 questionnaire 工具,把 goal/scope/source/timeliness/format 等维度的假设摆给用户确认或修改,然后再产出 Spec。不要再说\"需求清晰无需澄清\"。");
+				pi.sendUserMessage("你刚才在没有调用 questionnaire 确认假设的情况下直接产出了 RequirementsSpec。这违反 ALIGN_PROMPT 的强制要求。请立即调用 questionnaire 工具,把 goal/scope/source/timeliness/format 等维度的假设摆给用户确认或修改,然后再产出 Spec。不要再说\"需求清晰无需澄清\"。", { deliverAs: "followUp" });
 				return;
 			}
 			state = startDriving(state);
 			persistState(pi, state);
-			setJudgeStatus(ctx, "⚖ driving");
-			activeDriver?.dispose();
-			clearJudgeDriverWidget(ctx.ui); // 清理上一轮 driver 的 widget,新一轮会重建
-			const runId = `judge-${Date.now()}`;
-			const specText = formatRequirementsSpec(spec);
-			const initialPrompt = [
-				"[JUDGE DRIVER TASK]",
-				"Execute the following RequirementsSpec. When complete, call the judge_complete tool.",
-				"",
-				specText,
-			].join("\n");
-			const createDriver = judgeDriverFactoryForTests ?? createJudgeDriver;
-			const cwd = getCwd(ctx);
-			const runDir = path.join(cwd, ".judge", runId);
-
-			// ---- driver 过程可视化 widget ----
-			// 常量 JUDGE_DRIVER_WIDGET_KEY、formatJudgeVerdictLine、clearJudgeDriverWidget 在模块顶层。
-			let lastWidgetSnapshot = "";
-			let lastJudgeVerdictLine = "";
-			let transcriptRefreshQueued = false;
-			let widgetActive = true;
-
-			function clearDriverWidget() {
-				widgetActive = false;
-				lastWidgetSnapshot = "";
-				lastJudgeVerdictLine = "";
-				clearJudgeDriverWidget(ctx.ui);
-			}
-
-			function refreshDriverWidget() {
-				transcriptRefreshQueued = false;
-				if (!widgetActive) return;
-				if (!activeDriver) return;
-				let lines: string[];
-				try {
-					const summary = activeDriver.getSummary();
-					const transcriptLines = activeDriver.getWidgetLines();
-					const titleLine = `─── Judge driver (turn ${summary.turnCount}, steer ${summary.steerCount}/${state.maxSteer}) ───`;
-					const verdictBlock = lastJudgeVerdictLine ? ["─── Judge ───", lastJudgeVerdictLine] : [];
-					lines = [titleLine, ...transcriptLines, ...verdictBlock];
-				} catch {
-					return;
-				}
-				const snapshot = lines.join("\n");
-				if (snapshot === lastWidgetSnapshot) return; // 去重,避免 TUI 重建导致滚动跳动
-				lastWidgetSnapshot = snapshot;
-				try {
-					(ctx.ui as { setWidget?: (key: string, content: unknown, options?: { placement: string }) => void })
-						.setWidget?.(JUDGE_DRIVER_WIDGET_KEY, lines, { placement: "aboveEditor" });
-				} catch {
-					// setWidget 在非 TUI 模式可能不可用,忽略
-				}
-			}
-
-			function scheduleDriverWidgetRefresh() {
-				if (transcriptRefreshQueued) return;
-				transcriptRefreshQueued = true;
-				queueMicrotask(refreshDriverWidget);
-			}
-
-			activeJudgeVerdictProvider?.dispose();
-			const defaultJudgeVerdictProvider = createJudgeVerdictProviderHandle({
-				cwd,
-				runId,
-				runDir,
-				specText,
-				uiContext: ctx.ui,
-				extensionMode: ctx.mode,
-			});
-			activeJudgeVerdictProvider = judgeVerdictProviderForTests
-				? {
-					decide: judgeVerdictProviderForTests,
-					finalize: defaultJudgeVerdictProvider.finalize,
-					dispose: defaultJudgeVerdictProvider.dispose,
-				}
-				: defaultJudgeVerdictProvider;
-			activeDriver = await createDriver({
-				cwd,
-				runDir,
-				runId,
-				spec: specText,
-				initialPrompt,
-				onWakeup: createJudgeWakeupHandler(specText, activeJudgeVerdictProvider.decide, {
-					onSteer() {
-						state = recordJudgeSteer(state);
-						persistState(pi, state);
-					},
-					onAbort(reason) {
-						state = abortJudge(state);
-						persistState(pi, state);
-						ctx.ui.notify(`Judge aborted driver: ${reason}`, "error");
-						clearDriverWidget();
-						setJudgeStatus(ctx, undefined);
-						restoreActiveTools();
-					},
-					async onFinalize(context) {
-						const canContinueAfterFail = state.keepWatching && context.summary.steerCount < state.maxSteer;
-						state = enterDelivering(state);
-						persistState(pi, state);
-						setJudgeStatus(ctx, "⚖ delivering");
-						const finalizePrompt = buildFinalizePrompt(specText, context.summary, context.tail);
-						const finalVerdict = await activeJudgeVerdictProvider!.finalize({
-							...context,
-							spec: specText,
-							finalizePrompt,
-						});
-						const status = finalVerdict.status === "pass" ? "PASS" : "FAIL";
-						const deliveryReport = formatDeliveryReport({
-							status,
-							finalVerdict,
-							summary: context.summary,
-							tail: context.tail,
-						});
-						state = { ...state, summary: deliveryReport };
-						persistState(pi, state);
-						pi.sendMessage(
-							{
-								customType: "judge-delivery",
-								content: deliveryReport,
-								display: true,
-							},
-							{ triggerTurn: false },
-						);
-
-						if (finalVerdict.status === "pass") {
-							// pi's confirm signature is (title, message, opts?) -> Promise<boolean>.
-							// Previously this called confirm with a single arg, leaving message undefined.
-							const acknowledged = ctx.ui?.confirm
-								? await ctx.ui.confirm("Judge PASS", "Accept this delivery?")
-								: false;
-							if (acknowledged) {
-								state = completeJudge({ ...state, summary: deliveryReport });
-								persistState(pi, state);
-								ctx.ui.notify("Judge delivery accepted.", "info");
-								clearDriverWidget();
-								setJudgeStatus(ctx, undefined);
-								restoreActiveTools();
-								return { action: "pass", keepWatching: false };
-							}
-							state = markPendingAck(enterDelivering({ ...state, summary: deliveryReport }), "pass");
-							persistState(pi, state);
-							setJudgeStatus(ctx, "⚖ delivering");
-							clearDriverWidget();
-							ctx.ui.notify("Judge delivery is waiting for user acknowledgement. Run /judge ack to accept it later.", "warning");
-							return { action: "pass", keepWatching: false };
-						}
-
-						if (!canContinueAfterFail) {
-							state = enterDelivering({ ...state, summary: deliveryReport });
-							persistState(pi, state);
-							clearDriverWidget();
-							restoreActiveTools();
-							ctx.ui.notify(`Judge final delivery failed and cannot continue automatically: ${finalVerdict.reason}`, "warning");
-							return { action: "pass", keepWatching: false };
-						}
-
-						state = startDriving({ ...state, summary: deliveryReport });
-						persistState(pi, state);
-						setJudgeStatus(ctx, "⚖ driving");
-						return {
-							action: "steer",
-							direction: [
-								"Final delivery review failed.",
-								`Reason: ${finalVerdict.reason}`,
-								"Evidence:",
-								...finalVerdict.evidence.map((item) => `- ${item}`),
-								"Revise the work to satisfy the RequirementsSpec acceptance items, then call judge_complete again.",
-							].join("\n"),
-							keepWatching: true,
-						};
-					},
-				}),
-				maxSteer: state.maxSteer,
-				onEscalate: async (context) => {
-					const escalationSummary = formatJudgeEscalation(context);
-					state = recordJudgeEscalation(state, escalationSummary);
-					persistState(pi, state);
-					setJudgeStatus(ctx, undefined);
-					clearDriverWidget();
-					restoreActiveTools();
-					pi.sendMessage(
-						{
-							customType: "judge-escalation",
-							content: escalationSummary,
-							display: true,
-						},
-						{ triggerTurn: false },
-					);
-					ctx.ui.notify(`Judge needs user intervention: ${context.reason}`, "warning");
-				},
-				uiContext: ctx.ui,
-				extensionMode: ctx.mode,
-				onTranscriptUpdate: scheduleDriverWidgetRefresh,
-				onJudgeVerdict: (verdict) => {
-					lastJudgeVerdictLine = formatJudgeVerdictLine(verdict);
-					refreshDriverWidget();
-				},
-			});
-			// 委派后自动打开新终端实时看 driver + Judge 过程(零污染主 agent context)。
-			if (ctx.hasUI) {
-				const liveLogPath = activeDriver.getLiveLogPath?.() ?? path.join(runDir, "live.log");
-				const result = openPreparedLiveLogTerminal(liveLogPath);
-				if (result.ok) {
-					ctx.ui.notify(`已打开过程终端,实时显示:${liveLogPath}`, "info");
-				} else {
-					ctx.ui.notify(`打开过程终端失败(${result.error})。可手动 tail -f ${liveLogPath}`, "warning");
-				}
-			}
-			await activeDriver.start();
-			refreshDriverWidget(); // driver 起来后立即显示一次 widget
-			ctx.ui.notify("Judge driver started.", "info");
+			await startActiveJudgeDriver(ctx, spec);
 			return;
 		}
 
@@ -797,7 +1069,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 			state = enterAligning(state);
 			persistState(pi, state);
 			setJudgeStatus(ctx, "⚖ judge");
-			pi.sendUserMessage("继续澄清 Judge RequirementsSpec。请优先使用 questionnaire，并重新输出可解析 JSON。");
+			pi.sendUserMessage("继续澄清 Judge RequirementsSpec。请优先使用 questionnaire，并重新输出可解析 JSON。", { deliverAs: "followUp" });
 			return;
 		}
 
@@ -807,7 +1079,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 			persistState(pi, state);
 			setJudgeStatus(ctx, "⚖ judge");
 			if (edited?.trim()) {
-				pi.sendUserMessage(`按以下修改后的需求继续 Judge aligning：\n\n${edited.trim()}`);
+				pi.sendUserMessage(`按以下修改后的需求继续 Judge aligning：\n\n${edited.trim()}`, { deliverAs: "followUp" });
 			}
 		}
 	});

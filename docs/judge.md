@@ -16,6 +16,10 @@ Judge 是 UGK 的实时监督模式:先把用户需求对齐成 `RequirementsSpe
 - `/judge toggle`:开关 Judge 模式。
 - `/judge check-bash-window`:检查能否打开一个 bash 新窗口并实时 tail `live.log`。
 - `/judge ack`:接受一个等待用户确认的 PASS 交付。
+- `/judge save <name>`:把当前 Judge Spec 保存为任务书。
+- `/judge run <name>`:加载任务书,跳过 ALIGN,直接启动 Driver。
+- `/judge edit <name>`:通过交互式问卷编辑任务书的 `spec.json`。
+- `/judge list`:列出项目内任务书。
 
 Judge 开启后 footer 显示:
 
@@ -24,6 +28,34 @@ Judge 开启后 footer 显示:
 - `⚖ delivering`:最终交付确认阶段。
 
 关闭 Judge 会清理 footer/widget,并恢复普通工具集 `read,bash,edit,write`。
+
+## 任务书(Taskbook)
+
+任务书是一次 Judge+Driver 经验的项目级沉淀:保存 Spec、历史 steer、PASS/FAIL run 摘要和可编辑经验。核心信念不变:执行 agent 永远不靠谱,Judge 永远不能撤。
+
+存储位置固定为:
+
+```text
+.judge/taskbooks/<name>/
+  taskbook.json
+  spec.json
+  experience.md
+```
+
+常用命令:
+
+- `/judge save <name>`:保存当前 Judge Spec 为任务书。
+- `/judge run <name>`:加载任务书并跳过 ALIGN,但 DECIDE 和 FINALIZE 监督完整保留。
+- `/judge edit <name>`:逐字段编辑 `spec.json`,最后可追加自由补充到 `context`。
+- `/judge list`:显示 `name + description + lastRun`。
+
+经验沉淀规则:
+
+- PASS 且用户接受交付后,追加 `runs[]`,记录 evidence,并覆盖渲染 `experience.md`。
+- FAIL 终态会追加 `runs[]` 的失败原因,但不覆盖 `experience.md`。
+- FAIL 后仍有 steer 预算、Driver 继续修时,不沉淀,因为 run 尚未结束。
+
+旧 `docs/handoff/` 和早期设计文档只作历史材料;任务书行为以本节和代码/测试为准。
 
 ## 三阶段流程
 

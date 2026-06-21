@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
 	registerJudge,
 	setJudgeDecisionSessionFactoryForTests,
@@ -8,6 +11,7 @@ import {
 } from "../extensions/judge/judge.ts";
 import { buildFinalizePrompt } from "../extensions/judge/judge-prompts.ts";
 import { parseJudgeFinalVerdict } from "../extensions/judge/judge-utils.ts";
+import { loadTaskbook, readExperienceMd, saveTaskbook, writeExperienceMd } from "../extensions/judge/taskbook.ts";
 
 const noopLiveLogOpener = () => ({ ok: true });
 
@@ -97,6 +101,16 @@ function assistantWithSpec() {
 	};
 }
 
+function assistantSpec() {
+	return {
+		goal: "生成交付文件",
+		hardConstraints: ["必须透明展示过程"],
+		acceptance: ["写出 E:/AII/ugk-core/out/result.md", "展示最终证据"],
+		forbidden: ["跳过用户 ack"],
+		context: "阶段 6",
+	};
+}
+
 function completedWakeupContext(overrides: any = {}) {
 	return {
 		reason: "judge_complete",
@@ -158,6 +172,48 @@ function installDecisionSession(finalOutputs: string[], prompts: string[]) {
 			},
 		};
 	});
+}
+
+function restoreAligningTaskbookState(ctx: any, taskbookName: string) {
+	ctx.sessionManager.getEntries = () => [
+		{
+			type: "custom",
+			customType: "judge-state",
+			data: {
+				phase: "aligning",
+				spec: null,
+				summary: "",
+				steerCount: 0,
+				maxSteer: 5,
+				keepWatching: true,
+				taskbookName,
+				aligningQuestionnaireUsed: true,
+			},
+		},
+	];
+}
+
+async function saveDeliveryTaskbook(cwd: string, options: {
+	spec?: ReturnType<typeof assistantSpec>;
+	steerHistory?: Array<{ direction: string; reason: string; turnIndex: number }>;
+	experience?: string;
+} = {}) {
+	await saveTaskbook(cwd, "judge", {
+		description: "desc",
+		spec: options.spec ?? assistantSpec(),
+		summary: {
+			pathsTried: [],
+			artifacts: [],
+			runningTools: [],
+			turnCount: options.steerHistory?.length ?? 0,
+			steerCount: options.steerHistory?.length ?? 0,
+			steerHistory: options.steerHistory ?? [],
+			completed: true,
+		},
+	});
+	if (options.experience !== undefined) {
+		await writeExperienceMd(cwd, "judge", options.experience);
+	}
 }
 
 test("parseJudgeFinalVerdict parses fenced and bare JSON and rejects malformed input", () => {
@@ -238,6 +294,83 @@ test("final PASS displays delivery report and user ack marks Judge done", async 
 	assert.match(report, /🛣️ 走过的路径\(1 步,steer 0\/5\)/);
 	assert.match(report, /pathsTried 显示 write 成功/);
 	assert.deepEqual(widgetCalls.at(-1), { key: "judge-driver-view", content: undefined });
+});
+
+test("taskbook run injects experience into the driver initial prompt", async () => {
+	const { pi, handlers } = makePi();
+	const { ctx } = makeCtx(true);
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-taskbook-c-"));
+	(ctx as any).cwd = tmp;
+	restoreAligningTaskbookState(ctx, "judge");
+	await saveDeliveryTaskbook(tmp, {
+		spec: {
+			goal: "历史目标",
+			hardConstraints: ["历史约束"],
+			acceptance: ["历史验收"],
+			forbidden: [],
+			context: "",
+		},
+		steerHistory: [{ direction: "先补测试", reason: "缺回归", turnIndex: 1 }],
+	});
+	let initialPrompt = "";
+	setJudgeDriverFactoryForTests(async (options: any) => {
+		initialPrompt = options.initialPrompt;
+		return { async start() {}, dispose() {}, getSummary: () => completedWakeupContext().summary };
+	});
+	registerJudge(pi as any);
+
+	try {
+		await handlers.get("session_start")![0]({ reason: "resume" }, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		rmSync(tmp, { recursive: true, force: true });
+	}
+
+	assert.match(initialPrompt, /历史经验\(补充参考,非验收标准\)/);
+	assert.match(initialPrompt, /先补测试/);
+});
+
+test("taskbook PASS appends run history and refreshes experience", async () => {
+	const { pi, handlers } = makePi();
+	const { ctx } = makeCtx(true);
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-taskbook-pass-"));
+	(ctx as any).cwd = tmp;
+	restoreAligningTaskbookState(ctx, "judge");
+	await saveDeliveryTaskbook(tmp);
+	const prompts: string[] = [];
+	installDecisionSession([
+		JSON.stringify({ status: "pass", reason: "满足", evidence: ["证据 A"] }),
+	], prompts);
+	setJudgeDriverFactoryForTests(async (options: any) => ({
+		async start() {
+			await options.onWakeup(completedWakeupContext({
+				summary: {
+					steerCount: 1,
+					steerHistory: [{ direction: "补齐证据", reason: "证据不足", turnIndex: 2 }],
+				},
+			}));
+		},
+		dispose() {},
+		getSummary() {
+			return completedWakeupContext().summary;
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await handlers.get("session_start")![0]({ reason: "resume" }, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		setJudgeDecisionSessionFactoryForTests(undefined);
+	}
+
+	const loaded = await loadTaskbook(tmp, "judge");
+	assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
+	assert.deepEqual(loaded?.taskbook.runs.at(-1)?.evidence, ["证据 A"]);
+	assert.match(await readExperienceMd(tmp, "judge"), /补齐证据/);
+	rmSync(tmp, { recursive: true, force: true });
 });
 
 test("final PASS delivery report prioritizes decision evidence and hides raw logs", async () => {
@@ -502,4 +635,76 @@ test("final FAIL at max steer reports status without steering again", async () =
 
 	assert.equal(entries.at(-1)?.data.phase, "delivering");
 	assert.match(notifications.map((entry) => entry.message).join("\n"), /PASS/);
+});
+
+test("taskbook terminal FAIL appends a fail run without rewriting experience", async () => {
+	const { pi, handlers } = makePi();
+	const { ctx } = makeCtx(true);
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-taskbook-fail-"));
+	(ctx as any).cwd = tmp;
+	restoreAligningTaskbookState(ctx, "judge");
+	await saveDeliveryTaskbook(tmp, { experience: "original experience" });
+	const prompts: string[] = [];
+	installDecisionSession([
+		JSON.stringify({ status: "fail", reason: "缺少证据", evidence: ["没有文件"] }),
+	], prompts);
+	setJudgeDriverFactoryForTests(async (options: any) => ({
+		async start() {
+			await options.onWakeup(completedWakeupContext({ summary: { steerCount: 5 } }));
+		},
+		dispose() {},
+		getSummary() {
+			return completedWakeupContext().summary;
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await handlers.get("session_start")![0]({ reason: "resume" }, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		setJudgeDecisionSessionFactoryForTests(undefined);
+	}
+
+	const loaded = await loadTaskbook(tmp, "judge");
+	assert.equal(loaded?.taskbook.runs.at(-1)?.status, "fail");
+	assert.equal(loaded?.taskbook.runs.at(-1)?.failReason, "缺少证据");
+	assert.equal(await readExperienceMd(tmp, "judge"), "original experience");
+	rmSync(tmp, { recursive: true, force: true });
+});
+
+test("taskbook FAIL with remaining steer budget does not append a run", async () => {
+	const { pi, handlers } = makePi();
+	const { ctx } = makeCtx(true);
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-taskbook-resume-"));
+	(ctx as any).cwd = tmp;
+	restoreAligningTaskbookState(ctx, "judge");
+	await saveDeliveryTaskbook(tmp);
+	const prompts: string[] = [];
+	installDecisionSession([
+		JSON.stringify({ status: "fail", reason: "还能修", evidence: ["缺一项"] }),
+	], prompts);
+	setJudgeDriverFactoryForTests(async (options: any) => ({
+		async start() {
+			await options.onWakeup(completedWakeupContext({ summary: { steerCount: 0 } }));
+		},
+		dispose() {},
+		getSummary() {
+			return completedWakeupContext().summary;
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await handlers.get("session_start")![0]({ reason: "resume" }, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		setJudgeDecisionSessionFactoryForTests(undefined);
+	}
+
+	const loaded = await loadTaskbook(tmp, "judge");
+	assert.deepEqual(loaded?.taskbook.runs, []);
+	rmSync(tmp, { recursive: true, force: true });
 });

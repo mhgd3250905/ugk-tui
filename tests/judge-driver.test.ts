@@ -219,14 +219,52 @@ test("steer verdict sends direction back to the driver", async () => {
 	const harness = makeDriverHarness();
 	const driver = await createJudgeDriver(createOptions({
 		sessionFactory: harness.sessionFactory,
-		onWakeup: async () => ({ action: "steer", direction: "先停止写文件，改为只读确认路径。", keepWatching: true }),
+		onWakeup: async () => ({
+			action: "steer",
+			direction: "先停止写文件，改为只读确认路径。",
+			reason: "写入前缺少路径确认",
+			keepWatching: true,
+		}),
 	}));
 
+	harness.emit({ type: "agent_start" });
 	harness.emit({ type: "tool_execution_start", toolName: "write" });
 	await harness.flush();
 
 	assert.deepEqual(harness.userInputs, ["先停止写文件，改为只读确认路径。"]);
 	assert.equal(driver.getSummary().completed, false);
+	assert.deepEqual(driver.getSummary().steerHistory, [{
+		direction: "先停止写文件，改为只读确认路径。",
+		reason: "写入前缺少路径确认",
+		turnIndex: 1,
+	}]);
+});
+
+test("driver summary clones steerHistory", async () => {
+	const harness = makeDriverHarness();
+	const driver = await createJudgeDriver(createOptions({
+		sessionFactory: harness.sessionFactory,
+		onWakeup: async () => ({
+			action: "steer",
+			direction: "补齐验收证据。",
+			reason: "证据不足",
+			keepWatching: true,
+		}),
+	}));
+
+	harness.emit({ type: "agent_start" });
+	harness.emit({ type: "tool_execution_start", toolName: "write" });
+	await harness.flush();
+
+	const snapshot = driver.getSummary();
+	snapshot.steerHistory[0].direction = "mutated";
+	snapshot.steerHistory.push({ direction: "extra", reason: "extra", turnIndex: 99 });
+
+	assert.deepEqual(driver.getSummary().steerHistory, [{
+		direction: "补齐验收证据。",
+		reason: "证据不足",
+		turnIndex: 1,
+	}]);
 });
 
 test("abort verdict disposes the driver and records the abort reason", async () => {

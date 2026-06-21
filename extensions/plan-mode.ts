@@ -312,7 +312,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		} else if (choice === "Refine the plan") {
 			const refinement = await ctx.ui.editor("Refine the plan:", "");
 			if (refinement?.trim()) {
-				pi.sendUserMessage(refinement.trim());
+				pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
 			}
 		}
 	});

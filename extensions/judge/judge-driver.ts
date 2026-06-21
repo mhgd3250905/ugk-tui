@@ -91,6 +91,7 @@ function cloneSummary(summary: DriverSummary): DriverSummary {
 		lastError: summary.lastError,
 		turnCount: summary.turnCount,
 		steerCount: summary.steerCount,
+		steerHistory: (summary.steerHistory ?? []).map((steer) => ({ ...steer })),
 		completed: summary.completed,
 		aborted: summary.aborted,
 		abortReason: summary.abortReason,
@@ -227,6 +228,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 		runningTools: [],
 		turnCount: 0,
 		steerCount: 0,
+		steerHistory: [],
 		completed: false,
 	};
 	const maxSteer = opts.maxSteer ?? DEFAULT_MAX_STEER;
@@ -292,6 +294,11 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 					if (verdict.action === "steer") {
 						consecutiveParseFailures = 0;
 						summary.steerCount += 1;
+						summary.steerHistory.push({
+							direction: verdict.direction,
+							reason: verdict.reason ?? "",
+							turnIndex: summary.turnCount,
+						});
 						if (summary.steerCount >= maxSteer) {
 							watching = false;
 							const escalationSummary = cloneSummary(summary);

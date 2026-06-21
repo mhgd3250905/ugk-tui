@@ -167,5 +167,5 @@ test("buildDecidePrompt includes spec, structured summary, and transcript tail",
 	assert.match(prompt, /runningTools/);
 	assert.match(prompt, /python transcribe\.py/);
 	assert.match(prompt, /tophub\.today/);
-	assert.match(prompt, /对照 RequirementsSpec/);
+	assert.match(prompt, /对照 acceptance/);
 });

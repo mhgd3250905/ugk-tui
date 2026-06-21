@@ -13,6 +13,7 @@ import {
 	setJudgeVerdictProviderForTests,
 } from "../extensions/judge/judge.ts";
 import { ALIGN_PROMPT } from "../extensions/judge/judge-prompts.ts";
+import { loadTaskbook, saveTaskbook } from "../extensions/judge/taskbook.ts";
 
 const noopLiveLogOpener = () => ({ ok: true });
 
@@ -23,7 +24,7 @@ function makePi() {
 	const activeTools: string[][] = [];
 	let currentActiveTools = ["read", "bash", "edit", "write", "chrome_cdp"];
 	const sentMessages: Array<{ message: any; options?: any }> = [];
-	const userMessages: string[] = [];
+	const userMessages: Array<{ text: string; options?: any }> = [];
 	const entries: Array<{ customType: string; data: unknown }> = [];
 
 	return {
@@ -54,8 +55,8 @@ function makePi() {
 			sendMessage(message: any, options?: any) {
 				sentMessages.push({ message, options });
 			},
-			sendUserMessage(text: string) {
-				userMessages.push(text);
+			sendUserMessage(text: string, options?: any) {
+				userMessages.push({ text, options });
 			},
 			appendEntry(customType: string, data: unknown) {
 				entries.push({ customType, data });
@@ -123,6 +124,41 @@ function assistantWithSpec() {
 			},
 		],
 	};
+}
+
+function fixtureTaskbookSpec(goal = "从任务书运行") {
+	return {
+		goal,
+		hardConstraints: ["保留监督"],
+		acceptance: ["启动 driver"],
+		forbidden: [],
+		context: "",
+	};
+}
+
+function emptySummary(overrides: Record<string, unknown> = {}) {
+	return {
+		pathsTried: [],
+		artifacts: [],
+		runningTools: [],
+		turnCount: 0,
+		steerCount: 0,
+		steerHistory: [],
+		completed: true,
+		...overrides,
+	};
+}
+
+async function saveFixtureTaskbook(cwd: string, name = "foo", goal = "从任务书运行") {
+	await saveTaskbook(cwd, name, {
+		description: "desc",
+		spec: fixtureTaskbookSpec(goal),
+		summary: emptySummary({
+			turnCount: 1,
+			steerCount: 1,
+			steerHistory: [{ direction: "补证据", reason: "缺证据", turnIndex: 1 }],
+		}),
+	});
 }
 
 /**
@@ -210,7 +246,16 @@ test("/judge with no args opens an action menu whose toggle enables Judge", asyn
 	await commands.get("judge").handler("", ctx);
 	const injected = await handlers.get("before_agent_start")![0]({}, ctx);
 
-	assert.deepEqual(selections.at(-1)?.options, ["Toggle Judge", "检查 bash 新窗口打开", "Exit"]);
+	assert.deepEqual(selections.at(-1)?.options, [
+		"新建对齐(从零)",
+		"运行任务书",
+		"保存任务书",
+		"编辑任务书",
+		"列出任务书",
+		"Toggle Judge",
+		"检查 bash 新窗口打开",
+		"Exit",
+	]);
 	assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
 	assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: "⚖ judge" });
 	assert.equal(injected.message.content, ALIGN_PROMPT);
@@ -396,6 +441,175 @@ test("delegate driver uses ctx.cwd for cwd and runDir", async () => {
 
 	assert.equal(received.at(-1)?.cwd, "E:/workspace/judge-project");
 	assert.match(received.at(-1)?.runDir ?? "", /^E:[/\\]workspace[/\\]judge-project[/\\]\.judge[/\\]judge-\d+$/);
+});
+
+test("/judge save foo writes a taskbook from the current Judge spec", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-save-"));
+	(ctx as any).cwd = tmp;
+	setJudgeDriverFactoryForTests(async () => ({
+		async start() {},
+		dispose() {},
+		getSummary() {
+			return emptySummary({ turnCount: 1, completed: false });
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+		await commands.get("judge").handler("save foo", ctx);
+
+		const loaded = await loadTaskbook(tmp, "foo");
+		assert.equal(loaded?.taskbook.name, "foo");
+		assert.equal(loaded?.spec.goal, "完成 Judge 阶段 2");
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test("/judge run foo loads a taskbook and starts driving without aligning", async () => {
+	const { pi, commands, activeTools, entries } = makePi();
+	const { ctx } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-run-"));
+	(ctx as any).cwd = tmp;
+	await saveFixtureTaskbook(tmp);
+	const starts: string[] = [];
+	let initialPrompt = "";
+	setJudgeDriverFactoryForTests(async (options: any) => {
+		initialPrompt = options.initialPrompt;
+		return {
+			async start() { starts.push("start"); },
+			dispose() {},
+			getSummary() {
+				return emptySummary({ completed: false });
+			},
+			getWidgetLines() { return []; },
+			getTranscriptText() { return ""; },
+			getLiveLogPath() { return path.join(tmp, ".judge", "run", "live.log"); },
+		};
+	});
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("run foo", ctx);
+
+		assert.deepEqual(starts, ["start"]);
+		assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write"]);
+		assert.equal(entries.at(-1)?.data.phase, "driving");
+		assert.equal(entries.at(-1)?.data.taskbookName, "foo");
+		assert.match(initialPrompt, /从任务书运行/);
+		assert.match(initialPrompt, /历史经验\(补充参考,非验收标准\)/);
+		assert.match(initialPrompt, /补证据/);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test("/judge edit foo asks six questions and updates spec", async () => {
+	const { pi, commands } = makePi();
+	const { ctx, selections, notifications } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-edit-"));
+	(ctx as any).cwd = tmp;
+	await saveFixtureTaskbook(tmp, "foo", "旧目标");
+	const editorValues = [
+		"新目标",
+		"新约束\n第二约束\n",
+		"新验收\n第二验收",
+		"禁止联网",
+		"ctx",
+		"extra",
+	];
+	(ctx.ui as any).select = (_title: string, options: string[]) => {
+		selections.push({ title: _title, options });
+		return "修改";
+	};
+	(ctx.ui as any).editor = () => editorValues.shift();
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("edit foo", ctx);
+
+		const loaded = await loadTaskbook(tmp, "foo");
+		assert.equal(loaded?.spec.goal, "新目标");
+		assert.deepEqual(loaded?.spec.hardConstraints, ["新约束", "第二约束"]);
+		assert.deepEqual(loaded?.spec.acceptance, ["新验收", "第二验收"]);
+		assert.deepEqual(loaded?.spec.forbidden, ["禁止联网"]);
+		assert.equal(loaded?.spec.context, "ctx\n\n补充: extra");
+		assert.equal(selections.length, 6);
+		assert.deepEqual(selections.map((selection) => selection.options), [
+			["保持当前:旧目标", "修改"],
+			["保持当前:保留监督", "修改"],
+			["保持当前:启动 driver", "修改"],
+			["保持当前:(空)", "修改"],
+			["保持当前:(空)", "修改"],
+			["保持当前:(空)", "修改"],
+		]);
+		assert.match(notifications.at(-1)?.message ?? "", /任务书 "foo" 已更新/);
+	} finally {
+		rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test("/judge edit foo cancels without saving when a question is cancelled", async () => {
+	const { pi, commands } = makePi();
+	const { ctx, notifications } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-edit-cancel-"));
+	(ctx as any).cwd = tmp;
+	await saveFixtureTaskbook(tmp, "foo", "旧目标");
+	let selectCount = 0;
+	(ctx.ui as any).select = () => (++selectCount === 3 ? undefined : "保持当前:旧目标");
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("edit foo", ctx);
+
+		const loaded = await loadTaskbook(tmp, "foo");
+		assert.equal(loaded?.spec.goal, "旧目标");
+		assert.deepEqual(loaded?.spec.acceptance, ["启动 driver"]);
+		assert.match(notifications.at(-1)?.message ?? "", /编辑已取消/);
+	} finally {
+		rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test("ALIGN_PROMPT requires an extras closing questionnaire item", () => {
+	assert.match(ALIGN_PROMPT, /extras/);
+	assert.match(ALIGN_PROMPT, /你还有什么要补充的吗/);
+	assert.match(ALIGN_PROMPT, /context/);
+	assert.match(ALIGN_PROMPT, /allowOther/);
+});
+
+test("/judge list shows taskbooks", async () => {
+	const { pi, commands } = makePi();
+	const { ctx, notifications } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-list-"));
+	(ctx as any).cwd = tmp;
+	await saveFixtureTaskbook(tmp, "foo", "目标");
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("list", ctx);
+
+		assert.match(notifications.at(-1)?.message ?? "", /foo: desc/);
+	} finally {
+		rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test("/judge run rejects invalid taskbook names", async () => {
+	const { pi, commands } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerJudge(pi as any);
+
+	await commands.get("judge").handler("run ../x", ctx);
+
+	assert.match(notifications.at(-1)?.message ?? "", /任务书名无效/);
 });
 
 test("session_shutdown disposes the active Judge driver", async () => {
@@ -683,7 +897,8 @@ test("agent_end continue clarification keeps aligning and asks the agent to clar
 	await commands.get("judge").handler("", ctx);
 	await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 
-	assert.match(userMessages.at(-1) ?? "", /继续澄清/);
+	assert.match(userMessages.at(-1)?.text ?? "", /继续澄清/);
+	assert.deepEqual(userMessages.at(-1)?.options, { deliverAs: "followUp" });
 	const injected = await handlers.get("before_agent_start")![0]({}, ctx);
 	assert.equal(injected.message.content, ALIGN_PROMPT);
 });
@@ -697,7 +912,8 @@ test("agent_end edit requirements returns to aligning with editor text", async (
 	await commands.get("judge").handler("", ctx);
 	await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 
-	assert.match(userMessages.at(-1) ?? "", /请补充验收标准/);
+	assert.match(userMessages.at(-1)?.text ?? "", /请补充验收标准/);
+	assert.deepEqual(userMessages.at(-1)?.options, { deliverAs: "followUp" });
 });
 
 test("tool_call blocks unsafe bash commands only while Judge is aligning", async () => {
@@ -802,8 +1018,9 @@ test("delegate is rejected when aligning phase never called questionnaire (C-2 g
 		assert.ok(notifications.some((n) => /未用 questionnaire 确认假设|拒绝委派/.test(n.message)),
 			"should notify that delegation was rejected for missing questionnaire");
 		// 闸:应该 sendUserMessage 让 Judge 回去问
-		assert.ok(userMessages.some((msg) => /questionnaire/.test(msg) && /假设/.test(msg)),
+		assert.ok(userMessages.some((msg) => /questionnaire/.test(msg.text) && /假设/.test(msg.text)),
 			"should send user message instructing Judge to call questionnaire and confirm assumptions");
+		assert.deepEqual(userMessages.at(-1)?.options, { deliverAs: "followUp" });
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);
 	}

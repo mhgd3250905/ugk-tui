@@ -27,6 +27,12 @@ export interface DriverRunningTool {
 	elapsedMs: number;
 }
 
+export interface SteerRecord {
+	direction: string;
+	reason: string;
+	turnIndex: number;
+}
+
 export interface DriverSummary {
 	pathsTried: DriverPathTried[];
 	artifacts: DriverArtifact[];
@@ -34,6 +40,7 @@ export interface DriverSummary {
 	lastError?: string;
 	turnCount: number;
 	steerCount: number;
+	steerHistory: SteerRecord[];
 	completed: boolean;
 	aborted?: boolean;
 	abortReason?: string;
@@ -49,6 +56,7 @@ export interface JudgeState {
 	maxSteer: number;
 	keepWatching: boolean;
 	pendingAckStatus?: "pass" | "fail";
+	taskbookName?: string;
 	/**
 	 * C-2 机制闸:aligning 阶段是否调过 questionnaire。
 	 * 若为 false,Judge 产出 Spec 时禁止委派(防止 Judge 偷懒跳过假设确认)。
@@ -90,6 +98,13 @@ export function setRequirementsSpec(state: JudgeState, spec: RequirementsSpec): 
 	return {
 		...state,
 		spec,
+	};
+}
+
+export function setTaskbookForRun(state: JudgeState, name: string): JudgeState {
+	return {
+		...state,
+		taskbookName: name,
 	};
 }
 

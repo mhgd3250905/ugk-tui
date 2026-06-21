@@ -94,5 +94,6 @@
 - **bash 工具走 Git Bash**(`D:\Git\bin\bash.exe`),命令用 Linux 语法,Windows 路径用正斜杠
 - **subagent 的 agent 定义** 在仓库 `agents/*.md`(版本管理),需复制到 `~/.pi/agent/agents/` 才生效(见 subagent-guide skill)
 - **模型**:全局默认 `deepseek-v4-pro`;`agents/*.md` 的 frontmatter 记录角色意图,但当前 pi 运行时不靠修改这些 frontmatter 来切换 Judge/Driver 的实际模型。需要更换模型时必须改 session 创建/模型选择代码并补测试。
+- **任务书**:存 `.judge/taskbooks/<name>/`,project scope。Judge+Driver 跑通一次可存为任务书,`/judge run <name>` 跳过 ALIGN 直接开跑但保留完整 Judge 监督。改 Judge/Driver 的 agent 定义或 taskbook schema 必须同步更新 `docs/judge.md` 任务书章节。
 - **运行时发行策略**:pi 是 UGK 的内部 runtime,每个 UGK 版本必须固定一个明确的 pi 版本。不要让用户看到或执行 `pi update`;pi 升级只能通过 UGK 项目主动升级依赖、完成兼容验证并发布新的 UGK 版本。
 - **UGK 更新策略**:启动入口在进入 TUI 前检查 GitHub `main` 最新 commit,显示 Codex CLI 风格的 `Update now / Skip / Skip until next version` 菜单。开发仓库内更新走 `git pull --rebase origin main && npm install`,正式 npm 安装场景走 `npm install -g ugk-agent`;成功后提示重启并退出,不继续加载旧 TUI。`/update` 是会话内手动入口。

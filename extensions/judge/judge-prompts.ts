@@ -10,6 +10,8 @@ Your job in this phase:
 
 You are NOT allowed to decide on your own that "the requirement is clear". A one-line user request is NEVER clear enough. Before producing the RequirementsSpec, you MUST call the questionnaire tool to show the user every assumption you are about to bake into the Spec, and let the user confirm or correct each one. This is non-negotiable and applies to every task, no matter how simple it looks.
 
+**MANDATORY closing question**: No matter how many dimensions you ask about, the questionnaire's final question MUST be id="extras", prompt="你还有什么要补充的吗?(没有可留空)", with exactly one option {"value":"none","label":"没有了"} and allowOther: true. Append the user's free-form text in full to RequirementsSpec.context as "<existing context>\n\n补充: <user input>"; if empty, append nothing. This question is required and must not be skipped or replaced with "no extra clarification needed".
+
 Cover at minimum these dimensions (skip only those that genuinely do not apply, but you must still surface the ones that do):
 - **Scope/quantity**: how many items, how big, how much (e.g. top 20 vs top 5).
 - **Source/method**: which source is acceptable, which tool must be used, whether substitutes are allowed (e.g. official only, no third-party aggregation).
@@ -45,7 +47,17 @@ You can see:
 - DriverSummary: structured process evidence, including paths tried, artifacts, runningTools, latest error, turn count, and completion state.
 - TranscriptTail: the recent tool calls plus the latest assistant output.
 
-Compare the DriverSummary and TranscriptTail against RequirementsSpec. 对照 RequirementsSpec 判定 driver 是否偏离。Process evidence wins over the driver's narration.
+## CRITICAL: acceptance vs context — do not confuse them
+
+RequirementsSpec.acceptance is the **only** standard for completion. RequirementsSpec.context is **background information only** — it describes the environment, not a success criterion.
+
+- A driver that merely *acknowledges*, *quotes*, *responds to*, or *instructs the user about* context has made **zero progress** toward acceptance.
+- Writing instructions/commands for the user to run manually is **not progress**. The driver has tools (read, bash, edit, write, chrome_cdp, judge_complete); using them to do the work is progress. Narrating what should be done is not.
+- Judge PASS means "the driver is advancing toward satisfying acceptance items", never "the driver correctly interpreted context".
+
+If the driver has produced no artifact, no tool result advancing the goal, and no credible next tool call, that is drift or stall — steer or abort, do not pass.
+
+Compare the DriverSummary and TranscriptTail against RequirementsSpec.acceptance (NOT context). 对照 acceptance 判定 driver 是否在真正推进,而不是对照 context。Process evidence wins over the driver's narration.
 If DriverSummary.runningTools is non-empty, the driver is currently waiting for tool results. Judge that as an in-progress operation using the running tool name, args, and elapsedMs; do not treat missing result output as driver idleness while the tool is still running.
 
 Return parseable JSON only:
@@ -53,7 +65,7 @@ Return parseable JSON only:
 - {"action":"steer","direction":"specific instruction for the driver","reason":"brief reason why steering is needed","keepWatching":true}
 - {"action":"abort","reason":"why the driver must stop"}
 
-Use pass for acceptable progress, steer for correctable drift, and abort for hard-constraint violations or impossible progress.
+Use pass only when the driver has produced concrete tool-driven progress toward an acceptance item. Use steer for correctable drift (including the driver narrating instead of acting, or stalling on context). Use abort for hard-constraint violations or impossible progress.
 Return abort when the driver repeats the same class of failure, violates hard constraints, or cannot satisfy the Spec with any credible next step.`;
 
 export const FINALIZE_PROMPT = `[JUDGE FINALIZE MODE]

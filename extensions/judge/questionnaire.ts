@@ -75,12 +75,11 @@ export default function registerQuestionnaire(pi: ExtensionAPI): void {
 					displaySelections.set(display, { kind: "option", option, index: i + 1 });
 					return display;
 				});
-				const allowOther = question.allowOther !== false;
-				if (allowOther) {
-					const display = `${question.options.length + 1}. Type another answer.`;
-					displaySelections.set(display, { kind: "other" });
-					options.push(display);
-				}
+				// 强制每题都有「Type another answer」—— LLM 不可控,工具层兜底。
+				// 即使 question.allowOther === false 也照加(用户原则:必须有这个其他回答)。
+				const display = `${question.options.length + 1}. Type another answer.`;
+				displaySelections.set(display, { kind: "other" });
+				options.push(display);
 
 				const choice = await ctx.ui.select(question.prompt, options);
 				if (!choice) {

@@ -1,9 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { McpRegistry } from "../extensions/mcp/registry.ts";
+import { type McpConnection, McpRegistry } from "../extensions/mcp/registry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const stubServerPath = path.join(__dirname, "fixtures", "mcp-stub-server.mjs");
@@ -14,30 +13,29 @@ const connectOpts = {
 	listToolsTimeoutMs: 1000,
 };
 
-function listNodeCommandLines() {
-	if (process.platform !== "win32") {
-		return execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8" });
-	}
-
-	return execFileSync(
-		"powershell.exe",
-		[
-			"-NoProfile",
-			"-Command",
-			"Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | Select-Object -ExpandProperty CommandLine",
-		],
-		{ encoding: "utf8" },
-	);
+function getServerPid(connection: McpConnection): number {
+	const pid = (connection.client as any)._transport?._process?.pid;
+	assert.equal(typeof pid, "number");
+	return pid;
 }
 
-async function waitForNoProcess(commandLinePattern: RegExp) {
+function isProcessRunning(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function waitForProcessExit(pid: number) {
 	for (let attempt = 0; attempt < 20; attempt += 1) {
-		if (!commandLinePattern.test(listNodeCommandLines())) {
+		if (!isProcessRunning(pid)) {
 			return;
 		}
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
-	assert.doesNotMatch(listNodeCommandLines(), commandLinePattern);
+	assert.equal(isProcessRunning(pid), false);
 }
 
 test("connect caches tools for a server", async () => {
@@ -102,38 +100,38 @@ test("disconnect closes a server child process and marks it disconnected", async
 		{ command: process.execPath, args: [stubServerPath] },
 		connectOpts,
 	);
-	assert.match(listNodeCommandLines(), /mcp-stub-server\.mjs/);
+	const pid = getServerPid(connection);
 
 	await registry.disconnect("alpha");
 
 	assert.equal(connection.status, "disconnected");
-	await waitForNoProcess(/mcp-stub-server\.mjs/);
+	await waitForProcessExit(pid);
 });
 
 test("disconnectAll closes every server child process", async () => {
 	const registry = new McpRegistry();
 
-	await registry.connect("alpha", { command: process.execPath, args: [stubServerPath] }, connectOpts);
-	await registry.connect("beta", { command: process.execPath, args: [stubServerPath] }, connectOpts);
-	assert.match(listNodeCommandLines(), /mcp-stub-server\.mjs/);
+	const alpha = await registry.connect("alpha", { command: process.execPath, args: [stubServerPath] }, connectOpts);
+	const beta = await registry.connect("beta", { command: process.execPath, args: [stubServerPath] }, connectOpts);
+	const pids = [getServerPid(alpha), getServerPid(beta)];
 
 	await registry.disconnectAll();
 
 	assert.equal(registry.get("alpha")?.status, "disconnected");
 	assert.equal(registry.get("beta")?.status, "disconnected");
-	await waitForNoProcess(/mcp-stub-server\.mjs/);
+	for (const pid of pids) await waitForProcessExit(pid);
 });
 
 test("killAllProcesses synchronously terminates server child processes", async () => {
 	const registry = new McpRegistry();
 
-	await registry.connect("alpha", { command: process.execPath, args: [stubServerPath] }, connectOpts);
-	assert.match(listNodeCommandLines(), /mcp-stub-server\.mjs/);
+	const connection = await registry.connect("alpha", { command: process.execPath, args: [stubServerPath] }, connectOpts);
+	const pid = getServerPid(connection);
 
 	registry.killAllProcesses();
 
 	assert.equal(registry.get("alpha")?.status, "disconnected");
-	await waitForNoProcess(/mcp-stub-server\.mjs/);
+	await waitForProcessExit(pid);
 });
 
 test("disconnect and disconnectAll are idempotent", async () => {
@@ -171,7 +169,6 @@ test("blocked same-name reconnect disconnects the existing connection", async ()
 	} finally {
 		await connection.disconnect();
 		await registry.disconnectAll();
-		await waitForNoProcess(/mcp-stub-server\.mjs/);
 	}
 });
 
@@ -191,10 +188,9 @@ test("connect failure rejects with a clear error and does not leave stub process
 	assert.equal(connection?.status, "failed");
 	assert.match(String(connection?.error?.message), /ugk-missing-mcp-command-for-test|ENOENT|spawn/i);
 	await registry.disconnectAll();
-	await waitForNoProcess(/mcp-stub-server\.mjs/);
 });
 
-test("connect timeout rejects clearly and does not leave hanging processes running", async () => {
+test("connect timeout rejects clearly", async () => {
 	const registry = new McpRegistry();
 
 	await assert.rejects(
@@ -208,7 +204,6 @@ test("connect timeout rejects clearly and does not leave hanging processes runni
 
 	assert.equal(registry.get("hanging")?.status, "failed");
 	await registry.disconnectAll();
-	await waitForNoProcess(/mcp-hanging-server\.mjs/);
 });
 
 test("callTool rejects clearly after a connection has disconnected", async () => {

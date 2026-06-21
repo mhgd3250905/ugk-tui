@@ -34,7 +34,7 @@ export type McpCommandState = {
 
 export type McpReloadResult = {
 	connections?: McpConnection[];
-	registered?: Map<string, string[]> | Record<string, string[]>;
+	registered?: Map<string, string[]>;
 	failed?: Map<string, string>;
 	warnings?: string[];
 };
@@ -295,10 +295,7 @@ function serverToolsFromConnections(connections: McpConnection[]): Map<string, s
 }
 
 function normalizeServerTools(registered: NonNullable<McpReloadResult["registered"]>): Map<string, string[]> {
-	if (registered instanceof Map) {
-		return new Map(registered);
-	}
-	return new Map(Object.entries(registered));
+	return new Map(registered);
 }
 
 function removeActiveTools(pi: ExtensionAPI, tools: string[]): void {

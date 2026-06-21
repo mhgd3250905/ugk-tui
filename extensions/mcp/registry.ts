@@ -8,7 +8,7 @@ import {
 	killClientProcess,
 	listTools,
 } from "./client.ts";
-import type { McpServerConfig } from "./config.ts";
+import { toError, type McpServerConfig } from "./config.ts";
 
 export type McpConnectionStatus = "connected" | "failed" | "disconnected";
 
@@ -182,11 +182,4 @@ export class McpRegistry {
 			connection.killProcess();
 		}
 	}
-}
-
-function toError(error: unknown): Error {
-	if (error instanceof Error) {
-		return error;
-	}
-	return new Error(String(error));
 }

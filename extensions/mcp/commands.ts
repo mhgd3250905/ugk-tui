@@ -310,7 +310,7 @@ function removeActiveTools(pi: ExtensionAPI, tools: string[]): void {
 	pi.setActiveTools(getActiveTools(pi).filter((tool) => !disabled.has(tool)));
 }
 
-function getActiveTools(pi: ExtensionAPI): string[] {
+export function getActiveTools(pi: ExtensionAPI): string[] {
 	return typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
 }
 

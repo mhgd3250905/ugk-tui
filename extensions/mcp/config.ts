@@ -229,7 +229,7 @@ function findMissingVar(value: string, sourceEnv: Record<string, string | undefi
 	return undefined;
 }
 
-function toError(error: unknown): Error {
+export function toError(error: unknown): Error {
 	if (error instanceof Error) {
 		return error;
 	}

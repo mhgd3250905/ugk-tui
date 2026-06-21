@@ -48,6 +48,19 @@ export interface DriverSummary {
 
 export type JudgePhase = "aligning" | "driving" | "delivering" | "aborted" | "done";
 
+/**
+ * 待接受的 taskbook 沉淀数据。当 PASS 走 pendingAck 路径(无 confirm UI 或
+ * 拒绝+无预算)时,把 finalVerdict 和 DriverSummary 暂存,等 /judge ack
+ * 接受后由 ack handler 调 recordTaskbookRun 完成沉淀。
+ * 对齐 docs/judge.md 的「PASS 且用户接受交付后追加 runs[] 并覆盖 experience.md」。
+ */
+export interface PendingTaskbookRun {
+	name: string;
+	spec: RequirementsSpec;
+	summary: DriverSummary;
+	finalVerdict: unknown; // JudgeFinalVerdict,但 judge-state 不依赖 judge-utils 的类型
+}
+
 export interface JudgeState {
 	phase: JudgePhase;
 	spec: RequirementsSpec | null;
@@ -56,6 +69,7 @@ export interface JudgeState {
 	maxSteer: number;
 	keepWatching: boolean;
 	pendingAckStatus?: "pass" | "fail";
+	pendingTaskbookRun?: PendingTaskbookRun;  // pendingAck=pass 时用于 ack handler 沉淀
 	taskbookName?: string;
 	aligningMode?: "new" | "edit";
 	/**
@@ -140,6 +154,23 @@ export function markPendingAck(state: JudgeState, status: "pass" | "fail"): Judg
 	};
 }
 
+/**
+ * 暂存 pending ack 时的 taskbook 沉淀数据。/judge ack 接受时消费。
+ * 只在 status="pass" 时有意义(fail 不沉淀到 experience.md)。
+ */
+export function setPendingTaskbookRun(state: JudgeState, run: PendingTaskbookRun): JudgeState {
+	return {
+		...state,
+		pendingTaskbookRun: run,
+	};
+}
+
+export function clearPendingTaskbookRun(state: JudgeState): JudgeState {
+	if (state.pendingTaskbookRun === undefined) return state;
+	const { pendingTaskbookRun: _omit, ...rest } = state;
+	return rest;
+}
+
 export function recordJudgeSteer(state: JudgeState): JudgeState {
 	return {
 		...state,
@@ -161,6 +192,7 @@ export function abortJudge(state: JudgeState): JudgeState {
 		phase: "aborted",
 		keepWatching: false,
 		pendingAckStatus: undefined,
+		pendingTaskbookRun: undefined,
 	};
 }
 
@@ -170,5 +202,6 @@ export function completeJudge(state: JudgeState): JudgeState {
 		phase: "done",
 		keepWatching: false,
 		pendingAckStatus: undefined,
+		pendingTaskbookRun: undefined,
 	};
 }

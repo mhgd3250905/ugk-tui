@@ -597,6 +597,64 @@ test("/judge ack accepts restored pending PASS delivery without parsing report t
 	assert.match(notifications.map((entry) => entry.message).join("\n"), /accepted/i);
 });
 
+test("/judge ack on pending PASS sediment runs the taskbook run record (reviewer Blocker fix)", async () => {
+	const { pi, commands, handlers, entries } = makePi();
+	const { ctx, notifications } = makeCtx(false);
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-taskbook-ack-sediment-"));
+	(ctx as any).cwd = tmp;
+	// 预置 taskbook + session 重启回来时已处于 pendingAck=pass + 带 pendingTaskbookRun
+	await saveDeliveryTaskbook(tmp);
+	ctx.sessionManager.getEntries = () => [
+		{
+			type: "custom",
+			customType: "judge-state",
+			data: {
+				phase: "delivering",
+				spec: assistantSpec(),
+				summary: "交付报告",
+				steerCount: 0,
+				maxSteer: 5,
+				keepWatching: false,
+				pendingAckStatus: "pass",
+				pendingTaskbookRun: {
+					name: "judge",
+					spec: assistantSpec(),
+					summary: {
+						pathsTried: [],
+						artifacts: [],
+						runningTools: [],
+						turnCount: 1,
+						steerCount: 0,
+						steerHistory: [],
+						completed: true,
+					},
+					finalVerdict: { status: "pass", reason: "满足", evidence: ["证据 A"] },
+				},
+				taskbookName: "judge",
+				aligningQuestionnaireUsed: true,
+			},
+		},
+	];
+	registerJudge(pi as any);
+
+	try {
+		await handlers.get("session_start")![0]({ reason: "resume" }, ctx);
+		await commands.get("judge").handler("ack", ctx);
+
+		// taskbook 应该记录一次 PASS run(reviewer Blocker 的核心断言)
+		const loaded = await loadTaskbook(tmp, "judge");
+		assert.equal(loaded?.taskbook.runs.length, 1);
+		assert.equal(loaded?.taskbook.runs[0].status, "pass");
+		assert.deepEqual(loaded?.taskbook.runs[0].evidence, ["证据 A"]);
+		// state 被清成 done,pendingTaskbookRun 也清掉
+		assert.equal(entries.at(-1)?.data.phase, "done");
+		assert.equal(entries.at(-1)?.data.pendingTaskbookRun, undefined);
+		assert.match(notifications.map((entry) => entry.message).join("\n"), /accepted/i);
+	} finally {
+		rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
 test("final FAIL returns to driving and steers the driver with evidence", async () => {
 	const { pi, commands, handlers, entries } = makePi();
 	const { ctx } = makeCtx(true);

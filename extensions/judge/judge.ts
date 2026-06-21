@@ -21,11 +21,13 @@ import {
 	recordJudgeEscalation,
 	recordJudgeSteer,
 	setAligningMode,
+	setPendingTaskbookRun,
 	setRequirementsSpec,
 	setTaskbookForRun,
 	startDriving,
 	type DriverSummary,
 	type JudgeState,
+	type PendingTaskbookRun,
 	type RequirementsSpec,
 } from "./judge-state.ts";
 import { ALIGN_PROMPT, buildDecidePrompt, buildEditPrompt, buildFinalizePrompt } from "./judge-prompts.ts";
@@ -305,6 +307,7 @@ function persistState(pi: ExtensionAPI, state: JudgeState): void {
 		maxSteer: state.maxSteer,
 		keepWatching: state.keepWatching,
 		pendingAckStatus: state.pendingAckStatus,
+		pendingTaskbookRun: state.pendingTaskbookRun,
 		taskbookName: state.taskbookName,
 		aligningMode: state.aligningMode,
 		aligningQuestionnaireUsed: state.aligningQuestionnaireUsed,
@@ -353,6 +356,7 @@ function restoreJudgeState(data: unknown): JudgeState | undefined {
 		maxSteer: record.maxSteer,
 		keepWatching: record.keepWatching,
 		pendingAckStatus: record.pendingAckStatus as JudgeState["pendingAckStatus"],
+		pendingTaskbookRun: record.pendingTaskbookRun as PendingTaskbookRun | undefined,
 		taskbookName: typeof record.taskbookName === "string" ? record.taskbookName : undefined,
 		aligningMode: record.aligningMode === "edit" ? "edit" : "new",
 		aligningQuestionnaireUsed: record.aligningQuestionnaireUsed === true,
@@ -678,6 +682,16 @@ export function registerJudge(pi: ExtensionAPI): void {
 							};
 						}
 						state = markPendingAck(enterDelivering({ ...state, summary: deliveryReport }), "pass");
+						// 暂存 taskbook 沉淀数据:若用户后来 /judge ack 接受,ack handler 会消费它
+						// 完成 recordTaskbookRun,避免 pending ack 路径漏沉淀(reviewer Blocker)
+						if (state.taskbookName && state.spec) {
+							state = setPendingTaskbookRun(state, {
+								name: state.taskbookName,
+								spec: state.spec,
+								summary: context.summary,
+								finalVerdict,
+							});
+						}
 						persistState(pi, state);
 						setJudgeStatus(ctx, "⚖ delivering");
 						clearDriverWidget();
@@ -931,6 +945,21 @@ export function registerJudge(pi: ExtensionAPI): void {
 			const name = tokens[1];
 			if (action === "ack") {
 				if (state.phase === "delivering" && state.pendingAckStatus === "pass") {
+					// pending ack 路径补 taskbook PASS 沉淀(reviewer Blocker 修复)
+					if (state.pendingTaskbookRun) {
+						const pending = state.pendingTaskbookRun;
+						try {
+							await recordTaskbookRun(ctx, {
+								name: pending.name,
+								spec: pending.spec,
+								summary: pending.summary,
+								finalVerdict: pending.finalVerdict as JudgeFinalVerdict,
+								updateExperience: true,
+							});
+						} catch (error) {
+							ctx.ui.notify(`任务书 "${pending.name}" 沉淀失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+						}
+					}
 					state = completeJudge(state);
 					persistState(pi, state);
 					ctx.ui.notify("Judge delivery accepted.", "info");

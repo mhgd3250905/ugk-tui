@@ -86,6 +86,27 @@ test("loadTaskbook throws on malformed taskbook or spec", async () => {
 	});
 });
 
+test("loadTaskbook distinguishes missing from corrupt (reviewer Minor 2)", async () => {
+	// 完全不存在 → null
+	await withTmp(async (cwd) => {
+		assert.equal(await loadTaskbook(cwd, "absent"), null);
+	});
+
+	// taskbook.json 在但 spec.json 缺失 → 报 corrupt(不是「不存在」)
+	await withTmp(async (cwd) => {
+		await saveTaskbook(cwd, "half", { description: "desc", spec, summary });
+		await rm(path.join(taskbookDir(cwd, "half"), "spec.json"));
+		await assert.rejects(() => loadTaskbook(cwd, "half"), /corrupt.*spec\.json/);
+	});
+
+	// spec.json 在但 taskbook.json 缺失 → 同样报 corrupt
+	await withTmp(async (cwd) => {
+		await saveTaskbook(cwd, "other-half", { description: "desc", spec, summary });
+		await rm(path.join(taskbookDir(cwd, "other-half"), "taskbook.json"));
+		await assert.rejects(() => loadTaskbook(cwd, "other-half"), /corrupt.*taskbook\.json/);
+	});
+});
+
 test("listTaskbooks returns name, description, and last run", async () => {
 	await withTmp(async (cwd) => {
 		await saveTaskbook(cwd, "b", {

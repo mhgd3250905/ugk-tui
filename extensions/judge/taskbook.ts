@@ -1,4 +1,5 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { DriverSummary, RequirementsSpec, SteerRecord } from "./judge-state.ts";
 
@@ -115,15 +116,27 @@ export async function saveTaskbook(cwd: string, name: string, data: {
 export async function loadTaskbook(cwd: string, name: string): Promise<{ taskbook: Taskbook; spec: RequirementsSpec } | null> {
 	if (!isValidTaskbookName(name)) throw new Error(`Invalid taskbook name: ${name}`);
 	const dir = taskbookDir(cwd, name);
+	const taskbookPath = path.join(dir, "taskbook.json");
+	const specPath = path.join(dir, "spec.json");
 	let taskbookData: unknown;
 	let specData: unknown;
 	try {
 		[taskbookData, specData] = await Promise.all([
-			readJson(path.join(dir, "taskbook.json")),
-			readJson(path.join(dir, "spec.json")),
+			readJson(taskbookPath),
+			readJson(specPath),
 		]);
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		// 两个文件都缺失才算「任务书不存在」;只缺一个 = 任务书损坏,显式抛错便于排障(reviewer Minor 2)
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") {
+			const taskbookMissing = !existsSync(taskbookPath);
+			const specMissing = !existsSync(specPath);
+			if (taskbookMissing && specMissing) return null;
+			throw new Error(
+				`Taskbook "${name}" is corrupt: missing ${taskbookMissing ? "taskbook.json" : "spec.json"} ` +
+				`(run /judge save ${name} to recreate, or delete .judge/taskbooks/${name}/)`,
+			);
+		}
 		throw error;
 	}
 	const taskbook = normalizeTaskbook(taskbookData);

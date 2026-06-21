@@ -557,7 +557,7 @@ const JUDGE_COMMAND_MENU_OPTIONS = [
 - **不做** 任务书自动触发(D6,用户显式命令)
 - **不破坏** 现有 `/judge` 从零对齐流程(D8)
 - **不复活** flow(§2.6)
-- **不改** driver.md / judge.md agent 定义(D9,经验进 initialPrompt 不进 agent 定义)
+- **任务书机制本身不改** driver.md / judge.md agent 定义(D9,经验进 initialPrompt 不进 agent 定义)。**注意**:同一批次另含一个 driver.md 硬约束修复(「不推活给用户」),那是知乎场景验证暴露的独立 bug 修复,不属于任务书机制本身的范畴
 
 ---
 

@@ -1,17 +1,16 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
+import { defaultAgentDir } from "./paths.js";
+
+// Re-export so existing importers of "./workspace-trust.js" keep working.
+export { defaultAgentDir } from "./paths.js";
 
 const TRUST_STATE_FILE = "trusted-workspaces.json";
 const PROJECT_MARKERS = [".git", "AGENTS.md", "CLAUDE.md", "package.json"];
 const TRUST_OPTIONS = ["Yes, I trust this folder", "No, exit"];
 
-export function defaultAgentDir() {
-	return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
-}
-
-export function trustStatePath(agentDir = defaultAgentDir()) {
+function trustStatePath(agentDir = defaultAgentDir()) {
 	return path.join(agentDir, TRUST_STATE_FILE);
 }
 

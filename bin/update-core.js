@@ -1,12 +1,14 @@
 import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { defaultAgentDir } from "./paths.js";
 
 const execFileAsync = promisify(execFile);
-const GITHUB_MAIN_COMMIT_URL = "https://api.github.com/repos/mhgd3250905/ugk-tui/commits/main";
+/** GitHub repo slug, used for both API calls and release-notes links. */
+export const GITHUB_REPO_SLUG = "mhgd3250905/ugk-tui";
+const GITHUB_MAIN_COMMIT_URL = `https://api.github.com/repos/${GITHUB_REPO_SLUG}/commits/main`;
 const GITHUB_FETCH_TIMEOUT_MS = 3000;
 const GLOBAL_PACKAGE_NAME = "ugk-agent";
 
@@ -16,10 +18,6 @@ export function shortRef(ref) {
 
 function defaultPackageRoot() {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-}
-
-function defaultAgentDir() {
-	return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 }
 
 function statePath(agentDir = defaultAgentDir()) {

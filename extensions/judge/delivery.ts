@@ -6,6 +6,7 @@
  */
 import type { DriverSummary } from "./judge-state.ts";
 import type { JudgeFinalVerdict, TranscriptTail } from "./judge-utils.ts";
+import { DEFAULT_MAX_STEER } from "./constants.ts";
 
 export function formatDeliveryReport(options: {
 	status: "PASS" | "FAIL";
@@ -102,7 +103,7 @@ export function formatDeliveryReport(options: {
 
 	lines.push(
 		"",
-		`🛣️ 走过的路径(${paths.length} 步,steer ${options.summary.steerCount}/5)`,
+		`🛣️ 走过的路径(${paths.length} 步,steer ${options.summary.steerCount}/${DEFAULT_MAX_STEER})`,
 		...pathLines,
 	);
 

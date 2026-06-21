@@ -8,6 +8,8 @@ import {
 	type DriverSession,
 	type DriverSessionFactory,
 	type DriverSessionLike,
+	type DriverSessionEvent,
+	getAssistantMessageText,
 } from "../shared/driver-session.ts";
 import { buildDecidePrompt } from "./judge-prompts.ts";
 import type { DriverSummary } from "./judge-state.ts";
@@ -19,23 +21,6 @@ import {
 	type JudgeVerdict,
 	type TranscriptTail,
 } from "./judge-utils.ts";
-
-type DriverSessionEvent = {
-	type?: string;
-	message?: {
-		role?: string;
-		content?: unknown;
-	};
-	assistantMessageEvent?: {
-		type?: string;
-		delta?: string;
-	};
-	toolName?: string;
-	isError?: boolean;
-	input?: unknown;
-	result?: unknown;
-	output?: unknown;
-};
 
 export interface JudgeWakeupContext {
 	reason: string;
@@ -168,22 +153,6 @@ function formatWakeupError(error: unknown): string {
 
 function indentContinuation(text: string): string {
 	return text.replace(/\n/g, "\n           ");
-}
-
-function getAssistantMessageText(event: DriverSessionEvent): string {
-	if (event.type !== "message_end") return "";
-	if (event.message?.role !== "assistant") return "";
-	const content = event.message.content;
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.map((block) => {
-			if (!block || typeof block !== "object" || Array.isArray(block)) return "";
-			const record = block as Record<string, unknown>;
-			return record.type === "text" && typeof record.text === "string" ? record.text : "";
-		})
-		.filter(Boolean)
-		.join("\n");
 }
 
 /** 把 driver 事件格式化成 live.log 的一行。message_update(text_delta)太碎不写,返回空串跳过。 */

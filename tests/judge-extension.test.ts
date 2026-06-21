@@ -511,68 +511,101 @@ test("/judge run foo loads a taskbook and starts driving without aligning", asyn
 	}
 });
 
-test("/judge edit foo asks six questions and updates spec", async () => {
-	const { pi, commands } = makePi();
-	const { ctx, selections, notifications } = makeCtx();
+test("/judge edit foo enters edit aligning and injects the existing spec", async () => {
+	const { pi, commands, handlers, activeTools, userMessages, entries } = makePi();
+	const { ctx, notifications, statusCalls } = makeCtx();
 	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-edit-"));
 	(ctx as any).cwd = tmp;
 	await saveFixtureTaskbook(tmp, "foo", "旧目标");
-	const editorValues = [
-		"新目标",
-		"新约束\n第二约束\n",
-		"新验收\n第二验收",
-		"禁止联网",
-		"ctx",
-		"extra",
-	];
-	(ctx.ui as any).select = (_title: string, options: string[]) => {
-		selections.push({ title: _title, options });
-		return "修改";
-	};
-	(ctx.ui as any).editor = () => editorValues.shift();
 	registerJudge(pi as any);
 
 	try {
 		await commands.get("judge").handler("edit foo", ctx);
+		const injected = await handlers.get("before_agent_start")![0]({}, ctx);
 
-		const loaded = await loadTaskbook(tmp, "foo");
-		assert.equal(loaded?.spec.goal, "新目标");
-		assert.deepEqual(loaded?.spec.hardConstraints, ["新约束", "第二约束"]);
-		assert.deepEqual(loaded?.spec.acceptance, ["新验收", "第二验收"]);
-		assert.deepEqual(loaded?.spec.forbidden, ["禁止联网"]);
-		assert.equal(loaded?.spec.context, "ctx\n\n补充: extra");
-		assert.equal(selections.length, 6);
-		assert.deepEqual(selections.map((selection) => selection.options), [
-			["保持当前:旧目标", "修改"],
-			["保持当前:保留监督", "修改"],
-			["保持当前:启动 driver", "修改"],
-			["保持当前:(空)", "修改"],
-			["保持当前:(空)", "修改"],
-			["保持当前:(空)", "修改"],
-		]);
-		assert.match(notifications.at(-1)?.message ?? "", /任务书 "foo" 已更新/);
+		assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
+		assert.equal(entries.at(-1)?.data.phase, "aligning");
+		assert.equal(entries.at(-1)?.data.aligningMode, "edit");
+		assert.equal(entries.at(-1)?.data.taskbookName, "foo");
+		assert.equal(entries.at(-1)?.data.spec.goal, "旧目标");
+		assert.match(userMessages.at(-1)?.text ?? "", /开始编辑任务书 "foo"/);
+		assert.deepEqual(userMessages.at(-1)?.options, { deliverAs: "followUp" });
+		assert.match(injected.message.content, /\[JUDGE EDIT MODE\]/);
+		assert.match(injected.message.content, /旧目标/);
+		assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: "⚖ edit" });
+		assert.match(notifications.at(-1)?.message ?? "", /进入任务书 "foo" 编辑模式/);
 	} finally {
 		rmSync(tmp, { recursive: true, force: true });
 	}
 });
 
-test("/judge edit foo cancels without saving when a question is cancelled", async () => {
-	const { pi, commands } = makePi();
-	const { ctx, notifications } = makeCtx();
-	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-edit-cancel-"));
+test("edit mode agent_end offers save continue abandon actions", async () => {
+	const { pi, commands, handlers, userMessages, entries } = makePi();
+	const { ctx, selections, notifications, statusCalls } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-edit-menu-"));
 	(ctx as any).cwd = tmp;
 	await saveFixtureTaskbook(tmp, "foo", "旧目标");
-	let selectCount = 0;
-	(ctx.ui as any).select = () => (++selectCount === 3 ? undefined : "保持当前:旧目标");
 	registerJudge(pi as any);
 
 	try {
 		await commands.get("judge").handler("edit foo", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		(ctx.ui as any).select = (title: string, options: string[]) => {
+			selections.push({ title, options });
+			return "存回任务书";
+		};
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+
+		const loaded = await loadTaskbook(tmp, "foo");
+		assert.equal(loaded?.spec.goal, "完成 Judge 阶段 2");
+		assert.deepEqual(selections.at(-1), {
+			title: "Judge next step",
+			options: ["存回任务书", "继续调整", "放弃"],
+		});
+		assert.equal(entries.at(-1)?.data.phase, "done");
+		assert.equal(entries.at(-1)?.data.aligningMode, undefined);
+		assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: undefined });
+		assert.match(notifications.at(-1)?.message ?? "", /任务书 "foo" 已更新/);
+
+		await commands.get("judge").handler("edit foo", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		(ctx.ui as any).select = () => "继续调整";
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+		assert.equal(entries.at(-1)?.data.phase, "aligning");
+		assert.equal(entries.at(-1)?.data.aligningMode, "edit");
+		assert.match(userMessages.at(-1)?.text ?? "", /继续调整 Spec/);
+		assert.deepEqual(userMessages.at(-1)?.options, { deliverAs: "followUp" });
+
+		await commands.get("judge").handler("edit foo", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		(ctx.ui as any).select = () => "放弃";
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+		assert.equal(entries.at(-1)?.data.phase, "aborted");
+		assert.equal(entries.at(-1)?.data.aligningMode, undefined);
+		assert.match(notifications.at(-1)?.message ?? "", /已放弃对任务书 "foo" 的修改/);
+	} finally {
+		rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test("edit mode refuses to save a spec before questionnaire confirmation", async () => {
+	const { pi, commands, handlers, userMessages } = makePi();
+	const { ctx, notifications } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-edit-c2-"));
+	(ctx as any).cwd = tmp;
+	await saveFixtureTaskbook(tmp, "foo", "旧目标");
+	(ctx.ui as any).select = () => "存回任务书";
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("edit foo", ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
 
 		const loaded = await loadTaskbook(tmp, "foo");
 		assert.equal(loaded?.spec.goal, "旧目标");
-		assert.deepEqual(loaded?.spec.acceptance, ["启动 driver"]);
-		assert.match(notifications.at(-1)?.message ?? "", /编辑已取消/);
+		assert.ok(notifications.some((n) => /未用 questionnaire 确认假设|拒绝保存/.test(n.message)));
+		assert.ok(userMessages.some((msg) => /questionnaire/.test(msg.text) && /编辑任务书/.test(msg.text)));
+		assert.deepEqual(userMessages.at(-1)?.options, { deliverAs: "followUp" });
 	} finally {
 		rmSync(tmp, { recursive: true, force: true });
 	}
@@ -966,6 +999,42 @@ test("session_start restores persisted aligning Judge state and readonly tools",
 
 	assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
 	assert.equal(injected.message.content, ALIGN_PROMPT);
+});
+
+test("session_start restores persisted edit aligning mode", async () => {
+	const { pi, handlers, activeTools } = makePi();
+	const { ctx, statusCalls } = makeCtx();
+	ctx.sessionManager.getEntries = () => [
+		{
+			type: "custom",
+			customType: "judge-state",
+			data: {
+				phase: "aligning",
+				spec: {
+					goal: "恢复任务书编辑",
+					hardConstraints: ["只读"],
+					acceptance: ["注入 edit prompt"],
+					forbidden: [],
+					context: "resume",
+				},
+				summary: "restored",
+				steerCount: 2,
+				maxSteer: 5,
+				keepWatching: true,
+				taskbookName: "foo",
+				aligningMode: "edit",
+			},
+		},
+	];
+	registerJudge(pi as any);
+
+	await handlers.get("session_start")![0]({ reason: "resume" }, ctx);
+	const injected = await handlers.get("before_agent_start")![0]({}, ctx);
+
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
+	assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: "⚖ edit" });
+	assert.match(injected.message.content, /\[JUDGE EDIT MODE\]/);
+	assert.match(injected.message.content, /恢复任务书编辑/);
 });
 
 test("session_start ignores malformed persisted Judge state without enabling aligning", async () => {

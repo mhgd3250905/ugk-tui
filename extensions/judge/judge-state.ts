@@ -57,6 +57,7 @@ export interface JudgeState {
 	keepWatching: boolean;
 	pendingAckStatus?: "pass" | "fail";
 	taskbookName?: string;
+	aligningMode?: "new" | "edit";
 	/**
 	 * C-2 机制闸:aligning 阶段是否调过 questionnaire。
 	 * 若为 false,Judge 产出 Spec 时禁止委派(防止 Judge 偷懒跳过假设确认)。
@@ -74,6 +75,7 @@ export function createJudgeState(): JudgeState {
 		maxSteer: DEFAULT_MAX_STEER,
 		keepWatching: false,
 		pendingAckStatus: undefined,
+		aligningMode: "new",
 		aligningQuestionnaireUsed: false,
 	};
 }
@@ -85,8 +87,13 @@ export function enterAligning(state: JudgeState): JudgeState {
 		steerCount: 0,
 		keepWatching: true,
 		pendingAckStatus: undefined,
+		aligningMode: "new",
 		aligningQuestionnaireUsed: false,
 	};
+}
+
+export function setAligningMode(state: JudgeState, mode: "new" | "edit"): JudgeState {
+	return { ...state, aligningMode: mode };
 }
 
 export function markAligningQuestionnaireUsed(state: JudgeState): JudgeState {

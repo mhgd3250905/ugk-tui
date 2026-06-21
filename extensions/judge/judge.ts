@@ -20,6 +20,7 @@ import {
 	markPendingAck,
 	recordJudgeEscalation,
 	recordJudgeSteer,
+	setAligningMode,
 	setRequirementsSpec,
 	setTaskbookForRun,
 	startDriving,
@@ -27,7 +28,7 @@ import {
 	type JudgeState,
 	type RequirementsSpec,
 } from "./judge-state.ts";
-import { ALIGN_PROMPT, buildDecidePrompt, buildFinalizePrompt } from "./judge-prompts.ts";
+import { ALIGN_PROMPT, buildDecidePrompt, buildEditPrompt, buildFinalizePrompt } from "./judge-prompts.ts";
 import {
 	extractRequirementsSpec,
 	formatRequirementsSpec,
@@ -305,6 +306,7 @@ function persistState(pi: ExtensionAPI, state: JudgeState): void {
 		keepWatching: state.keepWatching,
 		pendingAckStatus: state.pendingAckStatus,
 		taskbookName: state.taskbookName,
+		aligningMode: state.aligningMode,
 		aligningQuestionnaireUsed: state.aligningQuestionnaireUsed,
 	});
 }
@@ -352,6 +354,7 @@ function restoreJudgeState(data: unknown): JudgeState | undefined {
 		keepWatching: record.keepWatching,
 		pendingAckStatus: record.pendingAckStatus as JudgeState["pendingAckStatus"],
 		taskbookName: typeof record.taskbookName === "string" ? record.taskbookName : undefined,
+		aligningMode: record.aligningMode === "edit" ? "edit" : "new",
 		aligningQuestionnaireUsed: record.aligningQuestionnaireUsed === true,
 	};
 }
@@ -825,50 +828,27 @@ export function registerJudge(pi: ExtensionAPI): void {
 	async function handleTaskbookEdit(ctx: ExtensionContext, rawName?: string): Promise<void> {
 		const name = rawName || await chooseTaskbookName(ctx);
 		if (!name) return;
+		if (!isValidTaskbookName(name)) {
+			ctx.ui.notify("任务书名无效,只能使用字母、数字、-、_。", "warning");
+			return;
+		}
 		try {
 			const loaded = await loadTaskbook(getCwd(ctx), name);
 			if (!loaded) {
 				ctx.ui.notify(`任务书 "${name}" 不存在。`, "warning");
 				return;
 			}
-			const summarize = (value: string | string[]) => {
-				const text = (Array.isArray(value) ? value.join("；") : value).trim();
-				return text || "(空)";
-			};
-			const lines = (value: string) => value.split("\n").map((line) => line.trim()).filter(Boolean);
-			const ask = async (field: string, current: string | string[]) => {
-				const choice = await ctx.ui.select(`编辑任务书 ${field}`, [`保持当前:${summarize(current)}`, "修改"]);
-				if (!choice) return { cancelled: true, value: current };
-				if (choice !== "修改") return { cancelled: false, value: current };
-				const written = await ctx.ui.editor(`编辑任务书 ${field}`, Array.isArray(current) ? current.join("\n") : current);
-				return { cancelled: false, value: written === undefined ? current : written };
-			};
-
-			const goal = await ask("goal", loaded.spec.goal);
-			if (goal.cancelled) return ctx.ui.notify("编辑已取消", "info");
-			const hardConstraints = await ask("hardConstraints", loaded.spec.hardConstraints);
-			if (hardConstraints.cancelled) return ctx.ui.notify("编辑已取消", "info");
-			const acceptance = await ask("acceptance", loaded.spec.acceptance);
-			if (acceptance.cancelled) return ctx.ui.notify("编辑已取消", "info");
-			const forbidden = await ask("forbidden", loaded.spec.forbidden);
-			if (forbidden.cancelled) return ctx.ui.notify("编辑已取消", "info");
-			const context = await ask("context", loaded.spec.context);
-			if (context.cancelled) return ctx.ui.notify("编辑已取消", "info");
-			const extras = await ask("你还有什么要补充的吗?", "");
-			if (extras.cancelled) return ctx.ui.notify("编辑已取消", "info");
-
-			const extraText = String(extras.value).trim();
-			const baseContext = String(context.value);
-			await updateTaskbookSpec(getCwd(ctx), name, {
-				goal: String(goal.value),
-				hardConstraints: Array.isArray(hardConstraints.value) ? hardConstraints.value : lines(hardConstraints.value),
-				acceptance: Array.isArray(acceptance.value) ? acceptance.value : lines(acceptance.value),
-				forbidden: Array.isArray(forbidden.value) ? forbidden.value : lines(forbidden.value),
-				context: extraText ? `${baseContext}\n\n补充: ${extraText}` : baseContext,
-			});
-			ctx.ui.notify(`任务书 "${name}" 已更新。`, "info");
+			restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
+				? pi.getActiveTools()
+				: JUDGE_NORMAL_TOOLS;
+			state = setTaskbookForRun(setAligningMode(setRequirementsSpec(enterAligning(state), loaded.spec), "edit"), name);
+			pi.setActiveTools(JUDGE_ALIGNING_TOOLS);
+			persistState(pi, state);
+			setJudgeStatus(ctx, "⚖ edit");
+			pi.sendUserMessage(`开始编辑任务书 "${name}"。请对照现有 Spec 用 questionnaire 确认需要修改的地方,然后产出修订后的 Spec。`, { deliverAs: "followUp" });
+			ctx.ui.notify(`进入任务书 "${name}" 编辑模式。Judge 会逐条确认现有 Spec。`, "info");
 		} catch (error) {
-			ctx.ui.notify(`编辑任务书失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+			ctx.ui.notify(`进入编辑模式失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
 		}
 	}
 
@@ -963,10 +943,13 @@ export function registerJudge(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", async () => {
 		if (state.phase !== "aligning") return undefined;
+		const content = state.aligningMode === "edit" && state.spec
+			? buildEditPrompt(state.spec)
+			: ALIGN_PROMPT;
 		return {
 			message: {
 				customType: "judge-align-context",
-				content: ALIGN_PROMPT,
+				content,
 				display: false,
 			},
 		};
@@ -1003,7 +986,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 				? pi.getActiveTools()
 				: JUDGE_NORMAL_TOOLS;
 			pi.setActiveTools(JUDGE_ALIGNING_TOOLS);
-			setJudgeStatus(ctx, "⚖ judge");
+			setJudgeStatus(ctx, state.aligningMode === "edit" ? "⚖ edit" : "⚖ judge");
 		} else if (state.phase === "driving") {
 			restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
 				? pi.getActiveTools()
@@ -1048,6 +1031,39 @@ export function registerJudge(pi: ExtensionAPI): void {
 
 		state = setRequirementsSpec(state, spec);
 		persistState(pi, state);
+
+		if (state.aligningMode === "edit") {
+			if (!state.aligningQuestionnaireUsed) {
+				ctx.ui.notify("Judge 产出 Spec 前未用 questionnaire 确认假设,拒绝保存。已让 Judge 回到编辑对齐阶段确认各维度假设。", "warning");
+				pi.sendUserMessage("你刚才在编辑任务书时没有调用 questionnaire 确认假设就直接产出了 RequirementsSpec。请立即调用 questionnaire 工具,对照现有 Spec 确认需要保留或修改的点,然后再产出修订后的 Spec。", { deliverAs: "followUp" });
+				return;
+			}
+			const choice = await ctx.ui.select("Judge next step", ["存回任务书", "继续调整", "放弃"]);
+			if (choice === "存回任务书") {
+				await updateTaskbookSpec(getCwd(ctx), state.taskbookName!, state.spec!);
+				ctx.ui.notify(`任务书 "${state.taskbookName}" 已更新。`, "info");
+				state = completeJudge({ ...state, aligningMode: undefined });
+				persistState(pi, state);
+				restoreActiveTools();
+				setJudgeStatus(ctx, undefined);
+				return;
+			}
+			if (choice === "继续调整") {
+				state = setAligningMode(enterAligning(state), "edit");
+				persistState(pi, state);
+				setJudgeStatus(ctx, "⚖ edit");
+				pi.sendUserMessage("用户想继续调整 Spec。请针对用户不满意的地方继续用 questionnaire 确认,然后重新产出 Spec。", { deliverAs: "followUp" });
+				return;
+			}
+			if (choice === "放弃") {
+				ctx.ui.notify(`已放弃对任务书 "${state.taskbookName}" 的修改。`, "info");
+				state = abortJudge({ ...state, aligningMode: undefined });
+				persistState(pi, state);
+				restoreActiveTools();
+				setJudgeStatus(ctx, undefined);
+			}
+			return;
+		}
 
 		const choice = await ctx.ui.select("Judge next step", JUDGE_MENU_OPTIONS);
 		if (choice === "委派 driver 执行") {

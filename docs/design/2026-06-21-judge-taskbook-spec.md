@@ -663,3 +663,16 @@ if (state.phase === "driving" && state.spec && !activeDriver) {
 - `npm test`: 346 pass / 0 fail(v2.0.0 的 327 + 任务书新增 19)
 - 分支 `codex/judge-taskbook`,改动覆盖 taskbook.ts / judge-state.ts / judge-driver.ts / judge.ts + 测试 + 文档
 - 未提交,等 ugk-dev commit
+
+---
+
+## 附录 D: `/judge edit` 改造决策(2026-06-21)
+
+首版 `/judge edit` 是固定 6 题表单:每个字段先 `select` 选择保持/修改,再用 editor 写入。该方案被否,因为体验不像 Judge 对齐阶段,用户仍要自己理解和改 JSON 字段。
+
+新决策:
+
+- edit 复用 ALIGN 流程:进入 `aligning`,预填现有 `RequirementsSpec`,设置 `aligningMode="edit"` 和 `taskbookName`。
+- prompt 换成 `EDIT_PROMPT`:Judge 对照现有 Spec,只追问模糊、过期、缺失或需确认的点,但仍必须调用 `questionnaire`,末尾保留 `extras` 补充题。
+- 修订 Spec 产出后不弹普通 `委派 driver 执行` 菜单,而是弹 `存回任务书` / `继续调整` / `放弃`。
+- `存回任务书` 只调用 `updateTaskbookSpec` 更新 `spec.json`,不重渲 `experience.md`;经验文档保持独立语义。

@@ -18,12 +18,13 @@ Judge 是 UGK 的实时监督模式:先把用户需求对齐成 `RequirementsSpe
 - `/judge ack`:接受一个等待用户确认的 PASS 交付。
 - `/judge save <name>`:把当前 Judge Spec 保存为任务书。
 - `/judge run <name>`:加载任务书,跳过 ALIGN,直接启动 Driver。
-- `/judge edit <name>`:通过交互式问卷编辑任务书的 `spec.json`。
+- `/judge edit <name>`:进入任务书编辑对齐模式,Judge 会拿着现有 Spec 用 `questionnaire` 逐条确认;产出修订 Spec 后可选择存回、继续调整或放弃。
 - `/judge list`:列出项目内任务书。
 
 Judge 开启后 footer 显示:
 
 - `⚖ judge`:需求对齐阶段。
+- `⚖ edit`:任务书 Spec 编辑对齐阶段。
 - `⚖ driving`:Driver 执行和 Judge 监督阶段。
 - `⚖ delivering`:最终交付确认阶段。
 
@@ -46,7 +47,7 @@ Judge 开启后 footer 显示:
 
 - `/judge save <name>`:保存当前 Judge Spec 为任务书。
 - `/judge run <name>`:加载任务书并跳过 ALIGN,但 DECIDE 和 FINALIZE 监督完整保留。
-- `/judge edit <name>`:逐字段编辑 `spec.json`,最后可追加自由补充到 `context`。
+- `/judge edit <name>`:进入 Judge 对齐编辑模式。Judge 读取现有 `spec.json`,只追问模糊、过期、缺失或需要确认的点;完成后菜单为 `存回任务书` / `继续调整` / `放弃`。存回只更新 `spec.json`,不重渲 `experience.md`。
 - `/judge list`:显示 `name + description + lastRun`。
 
 经验沉淀规则:

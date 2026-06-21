@@ -5,6 +5,7 @@ import {
 	completeJudge,
 	createJudgeState,
 	enterAligning,
+	setAligningMode,
 	setRequirementsSpec,
 	setTaskbookForRun,
 	startDriving,
@@ -30,11 +31,18 @@ test("createJudgeState starts inactive with conservative defaults", () => {
 });
 
 test("enterAligning switches to aligning and enables watching", () => {
-	const state = enterAligning(createJudgeState());
+	const state = enterAligning(setAligningMode(createJudgeState(), "edit"));
 
 	assert.equal(state.phase, "aligning");
 	assert.equal(state.keepWatching, true);
 	assert.equal(state.steerCount, 0);
+	assert.equal(state.aligningMode, "new");
+});
+
+test("setAligningMode records whether aligning is new or taskbook edit", () => {
+	const state = setAligningMode(createJudgeState(), "edit");
+
+	assert.equal(state.aligningMode, "edit");
 });
 
 test("setRequirementsSpec stores spec while preserving phase", () => {

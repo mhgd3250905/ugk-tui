@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DECIDE_PROMPT } from "../extensions/judge/judge-prompts.ts";
+import { buildEditPrompt, DECIDE_PROMPT } from "../extensions/judge/judge-prompts.ts";
 import { extractRequirementsSpec, isSafeCommand, parseJudgeVerdict } from "../extensions/judge/judge-utils.ts";
 
 test("extractRequirementsSpec parses fenced JSON specs", () => {
@@ -87,4 +87,20 @@ test("DECIDE_PROMPT requires pass and steer verdicts to include a reason", () =>
 	assert.match(DECIDE_PROMPT, /"action":"steer","direction".*"reason"/);
 	assert.match(DECIDE_PROMPT, /runningTools/);
 	assert.match(DECIDE_PROMPT, /waiting for tool results/);
+});
+
+test("buildEditPrompt includes edit instructions, extras question, and existing spec", () => {
+	const prompt = buildEditPrompt({
+		goal: "旧目标",
+		hardConstraints: ["旧约束"],
+		acceptance: ["旧验收"],
+		forbidden: [],
+		context: "旧背景",
+	});
+
+	assert.match(prompt, /\[JUDGE EDIT MODE\]/);
+	assert.match(prompt, /questionnaire/);
+	assert.match(prompt, /extras/);
+	assert.match(prompt, /旧目标/);
+	assert.match(prompt, /"acceptance": \[\n\t\t"旧验收"\n\t\]/);
 });

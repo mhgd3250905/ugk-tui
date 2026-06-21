@@ -27,7 +27,19 @@ import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } fr
 
 // Tools
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
+// Fallback when no snapshot is available (e.g. getActiveTools unavailable).
+// Prefer restoring the captured snapshot so dynamically registered tools survive.
 const NORMAL_MODE_TOOLS = ["read", "bash", "edit", "write"];
+
+function getActiveToolsSafely(pi: ExtensionAPI): string[] | undefined {
+	return typeof pi.getActiveTools === "function" ? pi.getActiveTools() : undefined;
+}
+
+/** Restore the saved snapshot, or fall back to NORMAL_MODE_TOOLS if none captured. */
+function restoreActiveTools(pi: ExtensionAPI, state: { savedTools: string[] | undefined }): void {
+	pi.setActiveTools(state.savedTools ?? NORMAL_MODE_TOOLS);
+	state.savedTools = undefined;
+}
 
 // Type guard for assistant messages
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
@@ -79,13 +91,19 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	}
 
 	function togglePlanMode(ctx: ExtensionContext): void {
+		const wasEnabled = state.planModeEnabled;
 		state = togglePlanModeState(state);
 
 		if (state.planModeEnabled) {
+			// Capture current active tools so we can restore them (incl. MCP/dynamic) on exit.
+			state.savedTools = getActiveToolsSafely(pi);
 			pi.setActiveTools(PLAN_MODE_TOOLS);
 			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
 		} else {
-			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			// Only restore if we were previously enabled (avoid clobbering on double-toggle edge cases).
+			if (wasEnabled) {
+				restoreActiveTools(pi, state);
+			}
 			ctx.ui.notify("Plan mode disabled. Full access restored.");
 		}
 		updateStatus(ctx);
@@ -230,7 +248,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 					{ triggerTurn: false },
 				);
 				state = completeExecution(state);
-				pi.setActiveTools(NORMAL_MODE_TOOLS);
+				restoreActiveTools(pi, state);
 				updateStatus(ctx);
 				persistState(); // Save cleared state so resume doesn't restore old execution mode
 			}
@@ -269,7 +287,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 		if (choice?.startsWith("Execute")) {
 			state = startExecution(state);
-			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			restoreActiveTools(pi, state);
 			updateStatus(ctx);
 
 			const execMessage =

@@ -50,7 +50,7 @@ test("/ugk renders a structured status panel", async () => {
 		assert.match(text, /│\s*🤖 Agents\s*│\s*✅ @agent mention/);
 		assert.match(text, /│\s*⌨️ Commands\s*│\s*\/ugk/);
 		assert.match(text, /│\s*⌨️ Commands\s*│.*\/mcp/);
-		assert.match(text, /│\s*⌨️ Commands\s*│.*\/flow/);
+		assert.doesNotMatch(text, /│\s*⌨️ Commands\s*│.*\/flow/);
 		assert.match(text, /│\s*📡 API\s*│\s*❌ DeepSeek 未配置/);
 		assert.match(text, /│\s*🛡️ Guard\s*│\s*dangerous bash gate enabled/);
 		assert.doesNotMatch(text, /🧰 Tools:/);

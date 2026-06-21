@@ -25,7 +25,6 @@ import registerUiTitlebar from "./ui-titlebar.ts";
 import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
-import registerFlow from "./flow/index.ts";
 import registerJudge from "./judge/judge.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
@@ -58,7 +57,7 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const rows = [
 		["🧰 Tools", "✅ greet  ✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ judge  ✅ mcp"],
 		["🤖 Agents", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries"],
-		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /flow  /judge  /cdp  /mcp  /ugk-ui"],
+		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /judge  /cdp  /mcp  /ugk-ui"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		["🛡️ Guard", "dangerous bash gate enabled"],
 	] as const;
@@ -94,9 +93,6 @@ export default function (pi: ExtensionAPI) {
 
 	// 1.3b) plan-mode:只读探索模式(/plan 切换,bash 白名单,计划提取+进度跟踪)
 	registerPlanMode(pi);
-
-	// 1.3b.1) flow:Task workflow command(/flow 队列 + hidden context 注入)
-	registerFlow(pi);
 
 	// 1.3b.2) judge:需求对齐骨架(/judge 只读澄清 + driver stub)
 	registerJudge(pi);

@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -16,30 +15,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const stubServerPath = path.join(__dirname, "fixtures", "mcp-stub-server.mjs");
 const hangingServerPath = path.join(__dirname, "fixtures", "mcp-hanging-server.mjs");
 
-function listNodeCommandLines() {
-	if (process.platform !== "win32") {
-		return execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8" });
-	}
-
-	return execFileSync(
-		"powershell.exe",
-		[
-			"-NoProfile",
-			"-Command",
-			"Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | Select-Object -ExpandProperty CommandLine",
-		],
-		{ encoding: "utf8" },
-	);
+function getClientProcessPid(client: ReturnType<typeof createMcpClient>): number | undefined {
+	return (client as any)._transport?._process?.pid;
 }
 
-async function waitForNoProcess(commandLinePattern: RegExp) {
-	for (let attempt = 0; attempt < 20; attempt += 1) {
-		if (!commandLinePattern.test(listNodeCommandLines())) {
+function isProcessRunning(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function waitForProcessExit(pid: number) {
+	for (let attempt = 0; attempt < 100; attempt += 1) {
+		if (!isProcessRunning(pid)) {
 			return;
 		}
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
-	assert.doesNotMatch(listNodeCommandLines(), commandLinePattern);
+	assert.equal(isProcessRunning(pid), false);
 }
 
 test("connects to a stdio stub server and lists tools", async () => {
@@ -70,11 +66,12 @@ test("closeClient terminates the stdio child process", async () => {
 	const client = createMcpClient({ name: "ugk-test-client", version: "1.0.0" });
 
 	await connectStdio(client, { command: process.execPath, args: [stubServerPath] }, { timeoutMs: 1000 });
-	assert.match(listNodeCommandLines(), /mcp-stub-server\.mjs/);
+	const pid = getClientProcessPid(client);
+	assert.equal(typeof pid, "number");
 
 	await closeClient(client);
 
-	await waitForNoProcess(/mcp-stub-server\.mjs/);
+	await waitForProcessExit(pid);
 });
 
 test("closeClient is idempotent", async () => {
@@ -105,13 +102,16 @@ test("killStdioTransportProcess warns when SDK child process field is unavailabl
 
 test("connectStdio fails with timeout when a server never responds", async () => {
 	const client = createMcpClient({ name: "ugk-test-client", version: "1.0.0" });
+	const promise = connectStdio(client, { command: process.execPath, args: [hangingServerPath] }, { timeoutMs: 100 });
+	await new Promise((resolve) => setTimeout(resolve, 25));
+	const pid = getClientProcessPid(client);
 
 	await assert.rejects(
-		connectStdio(client, { command: process.execPath, args: [hangingServerPath] }, { timeoutMs: 100 }),
+		promise,
 		/timeout|timed out|Request timed out/i,
 	);
 	await closeClient(client);
-	await waitForNoProcess(/mcp-hanging-server\.mjs/);
+	if (pid) await waitForProcessExit(pid);
 });
 
 test("connectStdio abort signal interrupts a pending connection", async () => {
@@ -122,10 +122,12 @@ test("connectStdio abort signal interrupts a pending connection", async () => {
 		{ command: process.execPath, args: [hangingServerPath] },
 		{ timeoutMs: 5000, signal: controller.signal },
 	);
+	await new Promise((resolve) => setTimeout(resolve, 25));
+	const pid = getClientProcessPid(client);
 
 	controller.abort();
 
 	await assert.rejects(promise, /abort|aborted/i);
 	await closeClient(client);
-	await waitForNoProcess(/mcp-hanging-server\.mjs/);
+	if (pid) await waitForProcessExit(pid);
 });

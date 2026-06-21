@@ -122,10 +122,13 @@ function toRequestOptions(opts: OperationOptions, defaultTimeoutMs: number) {
 }
 
 async function closeClientOnce(client: Client): Promise<void> {
-	const transport = transports.get(client);
+	const transport = transports.get(client) as StdioClientTransportWithProcess | undefined;
 	transports.delete(client);
 
-	await Promise.allSettled([client.close(), transport?.close()]);
+	if (transport) {
+		killStdioTransportProcess(transport);
+	}
+	await closeBestEffort([client.close(), transport?.close()]);
 }
 
 async function closeTransport(client: Client, transport: StdioClientTransport): Promise<void> {
@@ -133,5 +136,20 @@ async function closeTransport(client: Client, transport: StdioClientTransport): 
 		transports.delete(client);
 	}
 
-	await Promise.allSettled([client.close(), transport.close()]);
+	killStdioTransportProcess(transport as StdioClientTransportWithProcess);
+	await closeBestEffort([client.close(), transport.close()]);
+}
+
+async function closeBestEffort(promises: Array<Promise<unknown> | undefined>, timeoutMs = 100): Promise<void> {
+	const pending = promises.filter((promise): promise is Promise<unknown> => Boolean(promise));
+	if (pending.length === 0) return;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	await Promise.race([
+		Promise.allSettled(pending),
+		new Promise<void>((resolve) => {
+			timer = setTimeout(resolve, timeoutMs);
+			timer.unref?.();
+		}),
+	]);
+	if (timer) clearTimeout(timer);
 }

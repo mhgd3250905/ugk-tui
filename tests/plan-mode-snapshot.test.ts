@@ -19,7 +19,12 @@ function createMockPi(initialTools: string[]): MockPi {
 	return {
 		commands,
 		activeTools,
-		on() {},
+		on(event: string, handler: any) {
+			// Capture agent_end so tests can drive the execute->complete flow.
+			if (event === "agent_end") {
+				(this as any)._agentEndHandler = handler;
+			}
+		},
 		registerFlag() {},
 		getFlag: () => false,
 		registerShortcut() {},
@@ -104,5 +109,54 @@ test("plan mode toggle without getActiveTools falls back to normal tools", async
 		liveActiveTools.sort(),
 		["read", "bash", "edit", "write"].sort(),
 		"without snapshot, exit should fall back to NORMAL_MODE_TOOLS",
+	);
+});
+
+test("plan execute -> complete restores MCP tools (S1 completeExecution path)", async () => {
+	const initialTools = ["read", "bash", "edit", "write", "mcp__github__search"];
+	const pi = createMockPi(initialTools);
+	planModeExtension(pi);
+
+	const planCommand = (pi as any).commands.get("plan");
+	const noop = () => {};
+	const ctx: any = {
+		hasUI: true,
+		cwd: process.cwd(),
+		ui: {
+			notify: noop,
+			setStatus: noop,
+			setWidget: noop,
+			select: async () => "Execute the plan",
+			theme: { fg: (s: string) => s, strikethrough: (s: string) => s },
+		},
+		sessionManager: { getEntries: () => [] },
+	};
+	(pi as any).sendMessage = noop;
+	(pi as any).appendEntry = noop;
+
+	// 1. Enter plan mode.
+	await planCommand.handler("", ctx);
+	assert.deepEqual(pi.getActiveTools().sort(), ["read", "bash", "grep", "find", "ls", "questionnaire"].sort());
+
+	// 2. Trigger agent_end with a plan-shaped assistant message so todos get extracted,
+	//    then the handler offers "Execute the plan" (ctx.ui.select returns Execute) -> startExecution.
+	const agentEndHandler = (pi as any)._agentEndHandler;
+	assert.ok(agentEndHandler, "agent_end handler should be registered");
+	const planMessage = { role: "assistant", content: [{ type: "text", text: "Plan:\n1. Do thing one\n2. Do thing two" }] };
+	await agentEndHandler({ messages: [planMessage] }, ctx);
+	// After startExecution, tools should be restored (MCP back) but snapshot retained for complete.
+	assert.deepEqual(
+		pi.getActiveTools().sort(),
+		initialTools.sort(),
+		"startExecution should restore MCP tools",
+	);
+
+	// 3. Trigger agent_end again with [DONE:1] [DONE:2] marking all todos complete -> completeExecution.
+	const doneMessage = { role: "assistant", content: [{ type: "text", text: "Done both. [DONE:1] [DONE:2]" }] };
+	await agentEndHandler({ messages: [doneMessage] }, ctx);
+	assert.deepEqual(
+		pi.getActiveTools().sort(),
+		initialTools.sort(),
+		"MCP tools must survive the execute->complete flow (S1 completeExecution path)",
 	);
 });

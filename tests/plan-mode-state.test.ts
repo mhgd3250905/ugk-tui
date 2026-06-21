@@ -39,6 +39,15 @@ test("completeExecution clears plan-mode progress", () => {
 	);
 });
 
+// S1 fix: completeExecution must preserve savedTools so the caller can still restore MCP/dynamic tools.
+test("completeExecution preserves savedTools for later restore", () => {
+	const savedTools = ["read", "bash", "mcp__fs__read_file"];
+	const result = completeExecution({ planModeEnabled: false, executionMode: true, todoItems, savedTools });
+	assert.equal(result.savedTools, savedTools);
+	assert.equal(result.executionMode, false);
+	assert.deepEqual(result.todoItems, []);
+});
+
 test("restorePlanModeState applies persisted state over defaults", () => {
 	assert.deepEqual(
 		restorePlanModeState(createPlanModeState(), {

@@ -3,6 +3,7 @@ import {
 	applyUgkUpdate,
 	detectUgkUpdate,
 	getUgkUpdateCommandLabel,
+	GITHUB_REPO_SLUG,
 	readUgkUpdateState,
 	shouldCheckForUgkUpdate,
 	shouldPromptForUgkUpdate,
@@ -52,7 +53,7 @@ export function formatCliUpdatePrompt(info, commandLabel, selected = 0) {
 	return [
 		`✨ Update available! ${info.currentVersion} (${shortRef(info.currentRef)}) -> ${shortRef(info.latestRef)}`,
 		"",
-		"Release notes: https://github.com/mhgd3250905/ugk-tui/commits/main",
+		`Release notes: https://github.com/${GITHUB_REPO_SLUG}/commits/main`,
 		"",
 		`${selected === 0 ? "›" : " "} 1. Update now (runs \`${commandLabel}\`)`,
 		`${selected === 1 ? "›" : " "} 2. Skip`,

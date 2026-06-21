@@ -161,40 +161,39 @@ export default function (pi: ExtensionAPI) {
 	//    扫描包内的 skills/<name>/SKILL.md 和 prompts/*.md,返回绝对路径。
 	//    模式借自官方 examples/extensions/dynamic-resources。
 	pi.on("resources_discover", () => {
-		const skillPaths: string[] = [];
-		const skillsDir = path.join(packageRoot, "skills");
-		try {
-			for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
-				if (!entry.isDirectory()) continue;
-				const skillFile = path.join(skillsDir, entry.name, "SKILL.md");
-				if (fs.existsSync(skillFile)) skillPaths.push(skillFile);
-			}
-		} catch {
-			// skills 目录不存在则跳过
-		}
-
-		const promptPaths: string[] = [];
-		const promptsDir = path.join(packageRoot, "prompts");
-		try {
-			for (const entry of fs.readdirSync(promptsDir, { withFileTypes: true })) {
-				if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-				promptPaths.push(path.join(promptsDir, entry.name));
-			}
-		} catch {
-			// prompts 目录不存在则跳过
-		}
-
-		const themePaths: string[] = [];
-		const themesDir = path.join(packageRoot, "themes");
-		try {
-			for (const entry of fs.readdirSync(themesDir, { withFileTypes: true })) {
-				if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-				themePaths.push(path.join(themesDir, entry.name));
-			}
-		} catch {
-			// themes 目录不存在则跳过
-		}
-
-		return { skillPaths, promptPaths, themePaths };
+		return {
+			skillPaths: scanSkillPaths(path.join(packageRoot, "skills")),
+			promptPaths: scanFilesByExtension(path.join(packageRoot, "prompts"), ".md"),
+			themePaths: scanFilesByExtension(path.join(packageRoot, "themes"), ".json"),
+		};
 	});
+}
+
+/** Scan <dir>/<name>/SKILL.md for each subdirectory; missing dir returns []. */
+function scanSkillPaths(skillsDir: string): string[] {
+	const paths: string[] = [];
+	try {
+		for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const skillFile = path.join(skillsDir, entry.name, "SKILL.md");
+			if (fs.existsSync(skillFile)) paths.push(skillFile);
+		}
+	} catch {
+		// skills 目录不存在则跳过
+	}
+	return paths;
+}
+
+/** Scan <dir> for files ending in ext; missing dir returns []. */
+function scanFilesByExtension(dir: string, ext: string): string[] {
+	const paths: string[] = [];
+	try {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (!entry.isFile() || !entry.name.endsWith(ext)) continue;
+			paths.push(path.join(dir, entry.name));
+		}
+	} catch {
+		// 目录不存在则跳过
+	}
+	return paths;
 }

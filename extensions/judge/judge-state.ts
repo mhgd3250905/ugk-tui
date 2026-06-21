@@ -1,3 +1,5 @@
+import { DEFAULT_MAX_STEER } from "./constants.ts";
+
 export interface RequirementsSpec {
 	goal: string;
 	hardConstraints: string[];
@@ -61,7 +63,7 @@ export function createJudgeState(): JudgeState {
 		spec: null,
 		summary: "",
 		steerCount: 0,
-		maxSteer: 5,
+		maxSteer: DEFAULT_MAX_STEER,
 		keepWatching: false,
 		pendingAckStatus: undefined,
 		aligningQuestionnaireUsed: false,

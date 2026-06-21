@@ -1,6 +1,7 @@
 import type { ExtensionMode, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { appendFileSync } from "node:fs";
 import path from "node:path";
+import { DEFAULT_MAX_STEER, TRANSCRIPT_RING_BUFFER_LIMIT } from "./constants.ts";
 import { fileURLToPath } from "node:url";
 import {
 	createDriverSession,
@@ -228,7 +229,7 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 		steerCount: 0,
 		completed: false,
 	};
-	const maxSteer = opts.maxSteer ?? 5;
+	const maxSteer = opts.maxSteer ?? DEFAULT_MAX_STEER;
 	let driver: DriverSession | undefined;
 	let disposed = false;
 	let watching = true;
@@ -337,8 +338,8 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 
 	function handleEvent(event: DriverSessionEvent): void {
 		transcriptEvents.push(event);
-		if (transcriptEvents.length > 200) {
-			transcriptEvents.splice(0, transcriptEvents.length - 200);
+		if (transcriptEvents.length > TRANSCRIPT_RING_BUFFER_LIMIT) {
+			transcriptEvents.splice(0, transcriptEvents.length - TRANSCRIPT_RING_BUFFER_LIMIT);
 		}
 
 		// 实时写 live.log(供外部终端 tail -f)。

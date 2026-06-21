@@ -46,8 +46,13 @@ if (!trust.trusted) {
 await runFlowCleanupOnce();
 
 const { InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
-installUgkSessionViewPatch({ InteractiveMode });
-installUgkPackageUpdatePatch({ InteractiveMode });
+// Install pi patches; warn if either fails to apply (e.g. pi upgrade changed internals).
+if (!installUgkSessionViewPatch({ InteractiveMode })) {
+	console.warn("ugk: session-view patch did not apply (pi version drift?). Session switching may be limited.");
+}
+if (!installUgkPackageUpdatePatch({ InteractiveMode })) {
+	console.warn("ugk: package-update patch did not apply (pi version drift?). 'Run pi update' notices may reappear.");
+}
 
 ensureUgkQuietStartupDefault();
 

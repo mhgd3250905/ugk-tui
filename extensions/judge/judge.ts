@@ -704,9 +704,10 @@ export function registerJudge(pi: ExtensionAPI): void {
 						);
 
 						if (finalVerdict.status === "pass") {
-							const confirm = (ctx.ui as { confirm?: (message: string) => Promise<boolean> | boolean }).confirm;
-							const acknowledged = typeof confirm === "function"
-								? await confirm.call(ctx.ui, "Judge PASS. Accept this delivery?")
+							// pi's confirm signature is (title, message, opts?) -> Promise<boolean>.
+							// Previously this called confirm with a single arg, leaving message undefined.
+							const acknowledged = ctx.ui?.confirm
+								? await ctx.ui.confirm("Judge PASS", "Accept this delivery?")
 								: false;
 							if (acknowledged) {
 								state = completeJudge({ ...state, summary: deliveryReport });

@@ -15,6 +15,7 @@ process.env.PI_CODING_AGENT = "true";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { buildUgkCliArgs } from "./ugk-cli-args.js";
+import { installUgkPackageUpdatePatch } from "./ugk-package-update-patch.js";
 import { applyUgkRuntimePolicy } from "./ugk-runtime-policy.js";
 import { installUgkSessionViewPatch } from "./ugk-session-view-patch.js";
 import { ensureUgkQuietStartupDefault } from "./ugk-startup-settings.js";
@@ -43,6 +44,7 @@ if (!trust.trusted) {
 
 const { InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
 installUgkSessionViewPatch({ InteractiveMode });
+installUgkPackageUpdatePatch({ InteractiveMode });
 
 ensureUgkQuietStartupDefault();
 

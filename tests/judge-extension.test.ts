@@ -149,6 +149,27 @@ function emptySummary(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function makeJudgeDriverHandle(overrides: Record<string, unknown> = {}) {
+	return {
+		async start() {},
+		async sendUserInput(_text: string) {},
+		dispose() {},
+		getSummary() {
+			return emptySummary({ completed: false });
+		},
+		getWidgetLines() {
+			return [];
+		},
+		getTranscriptText() {
+			return "";
+		},
+		getLiveLogPath() {
+			return "E:/tmp/live.log";
+		},
+		...overrides,
+	};
+}
+
 async function saveFixtureTaskbook(cwd: string, name = "foo", goal = "从任务书运行") {
 	await saveTaskbook(cwd, name, {
 		description: "desc",
@@ -505,6 +526,45 @@ test("/judge run foo loads a taskbook and starts driving without aligning", asyn
 		assert.match(initialPrompt, /从任务书运行/);
 		assert.match(initialPrompt, /历史经验\(补充参考,非验收标准\)/);
 		assert.match(initialPrompt, /补证据/);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test("/judge run returns while the driver is still running so interjections can be handled", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-judge-run-async-"));
+	(ctx as any).cwd = tmp;
+	await saveFixtureTaskbook(tmp);
+	const forwarded: string[] = [];
+	setJudgeDriverFactoryForTests(async () => ({
+		async start() {
+			await new Promise(() => {});
+		},
+		async sendUserInput(text: string) {
+			forwarded.push(text);
+		},
+		dispose() {},
+		getSummary() {
+			return emptySummary({ completed: false });
+		},
+		getWidgetLines() { return []; },
+		getTranscriptText() { return ""; },
+		getLiveLogPath() { return path.join(tmp, ".judge", "run", "live.log"); },
+	}));
+	registerJudge(pi as any);
+
+	try {
+		const result = await Promise.race([
+			commands.get("judge").handler("run foo", ctx).then(() => "resolved"),
+			new Promise((resolve) => setTimeout(() => resolve("timeout"), 20)),
+		]);
+
+		assert.equal(result, "resolved");
+		assert.deepEqual(await handlers.get("input")![0]({ text: "先把日志加上", source: "interactive" }, ctx), { action: "handled" });
+		assert.match(forwarded[0] ?? "", /先把日志加上/);
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);
 		rmSync(tmp, { recursive: true, force: true });
@@ -967,6 +1027,148 @@ test("tool_call blocks unsafe bash commands only while Judge is aligning", async
 		block: true,
 		reason: "Judge aligning: command blocked (not read-only). Command: npm install",
 	});
+});
+
+test("driving interactive input is handled and forwarded to the active driver", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	const forwarded: string[] = [];
+	setJudgeDriverFactoryForTests(async () => makeJudgeDriverHandle({
+		async sendUserInput(text: string) {
+			forwarded.push(text);
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+		const result = await handlers.get("input")![0]({ text: "把日志也加上", source: "interactive" }, ctx);
+
+		assert.deepEqual(result, { action: "handled" });
+		assert.equal(forwarded.length, 1);
+		assert.match(forwarded[0], /\[USER INTERJECTION during driving\]/);
+		assert.match(forwarded[0], /把日志也加上/);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+	}
+});
+
+test("non-driving input continues without forwarding", async () => {
+	for (const phase of ["aligning", "delivering", "done", "aborted"]) {
+		const { pi, commands, handlers } = makePi();
+		const { ctx } = makeCtx();
+		const forwarded: string[] = [];
+		setJudgeDriverFactoryForTests(async () => makeJudgeDriverHandle({
+			async sendUserInput(text: string) {
+				forwarded.push(text);
+			},
+		}));
+		registerJudge(pi as any);
+
+		try {
+			if (phase === "aligning") {
+				await commands.get("judge").handler("", ctx);
+			} else {
+				ctx.sessionManager.getEntries = () => [{
+					type: "custom",
+					customType: "judge-state",
+					data: {
+						phase,
+						spec: fixtureTaskbookSpec(),
+						summary: "",
+						steerCount: 0,
+						maxSteer: 5,
+						keepWatching: phase === "delivering",
+						aligningQuestionnaireUsed: false,
+					},
+				}];
+				await handlers.get("session_start")![0]({}, ctx);
+			}
+
+			const result = await handlers.get("input")![0]({ text: "别转发", source: "interactive" }, ctx);
+
+			assert.deepEqual(result, { action: "continue" });
+			assert.deepEqual(forwarded, []);
+		} finally {
+			setJudgeDriverFactoryForTests(undefined);
+		}
+	}
+});
+
+test("driving non-interactive input continues without forwarding", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	const forwarded: string[] = [];
+	setJudgeDriverFactoryForTests(async () => makeJudgeDriverHandle({
+		async sendUserInput(text: string) {
+			forwarded.push(text);
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+		const result = await handlers.get("input")![0]({ text: "rpc message", source: "rpc" }, ctx);
+
+		assert.deepEqual(result, { action: "continue" });
+		assert.deepEqual(forwarded, []);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+	}
+});
+
+test("driving input continues with a warning when no active driver exists", async () => {
+	const { pi, handlers } = makePi();
+	const { ctx, notifications } = makeCtx();
+	ctx.sessionManager.getEntries = () => [{
+		type: "custom",
+		customType: "judge-state",
+		data: {
+			phase: "driving",
+			spec: fixtureTaskbookSpec(),
+			summary: "",
+			steerCount: 0,
+			maxSteer: 5,
+			keepWatching: true,
+			aligningQuestionnaireUsed: false,
+		},
+	}];
+	registerJudge(pi as any);
+
+	await handlers.get("session_start")![0]({}, ctx);
+	const result = await handlers.get("input")![0]({ text: "还在吗", source: "interactive" }, ctx);
+
+	assert.deepEqual(result, { action: "continue" });
+	assert.equal(notifications.at(-1)?.type, "warning");
+	assert.match(notifications.at(-1)?.message ?? "", /Driver.*无法转发/);
+});
+
+test("driving input send failure warns and stays handled", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx, notifications } = makeCtx();
+	setJudgeDriverFactoryForTests(async () => makeJudgeDriverHandle({
+		async sendUserInput() {
+			throw new Error("boom");
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+		const result = await handlers.get("input")![0]({ text: "失败也别崩", source: "interactive" }, ctx);
+
+		assert.deepEqual(result, { action: "handled" });
+		assert.equal(notifications.at(-1)?.type, "warning");
+		assert.match(notifications.at(-1)?.message ?? "", /转发用户插话给 Driver 失败: boom/);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+	}
 });
 
 test("session_start restores persisted aligning Judge state and readonly tools", async () => {

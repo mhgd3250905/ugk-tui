@@ -1,6 +1,6 @@
 # Judge 模块现状与接手指南
 
-更新时间: 2026-06-20
+更新时间: 2026-06-21
 
 本文是 Judge 模块的当前权威入口。`docs/handoff/` 和 `docs/superpowers/specs/` 中的 Judge 早期文档只作为历史材料;如果与本文或代码冲突,以本文和测试为准。
 
@@ -89,6 +89,12 @@ Judge 开启后 footer 显示:
 - `agents/driver.md`:Driver agent 的角色定义和 `judge_complete` 约束。
 
 ## 当前重要行为
+
+### driving 中途用户插话
+
+Judge 处于 `driving` 阶段时,TUI 里的交互式用户输入不会进入 Judge 主 session 的新一轮对话,而是由 Judge 包装为 `[USER INTERJECTION during driving]` 后转发给当前 Driver。
+
+这条消息通过 Driver 的 `sendUserInput()` 发送:Driver 正在 streaming 时走 `steer`,空闲时走新一轮 `prompt`。Judge 不做事前 LLM 审批,但 DECIDE 监督循环继续保留。插话只影响当前 run,不写入 taskbook 或持久化 state。
 
 ### Judge 决策采集
 

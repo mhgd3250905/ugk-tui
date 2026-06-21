@@ -50,7 +50,7 @@ export interface DriverSessionLike {
 	readonly isStreaming: boolean;
 	getAllTools?(): Array<{ name: string }>;
 	subscribe(listener: (event: DriverSessionEvent) => void): () => void;
-	prompt(text: string): Promise<void>;
+	prompt(text: string, options?: { source?: "interactive" | "rpc" | "extension" }): Promise<void>;
 	steer(text: string): Promise<void>;
 	followUp(text: string): Promise<void>;
 	dispose(): void;
@@ -230,14 +230,14 @@ export async function createDriverSession(
 		sessionFile: session.sessionFile,
 		visibleSession: session,
 		async start() {
-			await session.prompt(options.initialPrompt);
+			await session.prompt(options.initialPrompt, { source: "extension" });
 		},
 		async sendUserInput(text: string) {
 			if (session.isStreaming) {
 				await session.steer(text);
 				return;
 			}
-			await session.prompt(text);
+			await session.prompt(text, { source: "extension" });
 		},
 		async ask(text: string) {
 			const capture = { chunks: [] as string[] };
@@ -246,7 +246,7 @@ export async function createDriverSession(
 				if (session.isStreaming) {
 					await session.steer(text);
 				} else {
-					await session.prompt(text);
+					await session.prompt(text, { source: "extension" });
 				}
 				return capture.chunks.join("");
 			} finally {

@@ -60,6 +60,7 @@ export interface JudgeEscalationContext {
 
 export interface JudgeDriverHandle {
 	start(): Promise<void>;
+	sendUserInput(text: string): Promise<void>;
 	dispose(): void;
 	getSummary(): DriverSummary;
 	/** driver transcript 的 widget 行(格式化好的尾部,直接喂 setWidget)。 */
@@ -434,6 +435,9 @@ export async function createJudgeDriver(opts: JudgeDriverOptions): Promise<Judge
 	return {
 		async start() {
 			await driver?.start();
+		},
+		async sendUserInput(text: string) {
+			await driver?.sendUserInput(text);
 		},
 		dispose() {
 			if (disposed) return;

@@ -498,7 +498,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 		}
 	}
 
-	async function startActiveJudgeDriver(ctx: ExtensionContext, spec: RequirementsSpec): Promise<void> {
+	async function startActiveJudgeDriver(ctx: ExtensionContext, spec: RequirementsSpec, options: { background?: boolean } = {}): Promise<void> {
 		setJudgeStatus(ctx, "⚖ driving");
 		activeDriver?.dispose();
 		clearJudgeDriverWidget(ctx.ui); // 清理上一轮 driver 的 widget,新一轮会重建
@@ -760,7 +760,20 @@ export function registerJudge(pi: ExtensionAPI): void {
 				ctx.ui.notify(`打开过程终端失败(${result.error})。可手动 tail -f ${liveLogPath}`, "warning");
 			}
 		}
-		await activeDriver.start();
+		const startedDriver = activeDriver;
+		const startPromise = startedDriver.start().then(() => {
+			if (activeDriver === startedDriver) refreshDriverWidget();
+		});
+		if (options.background) {
+			void startPromise.catch((error) => {
+				if (activeDriver !== startedDriver) return;
+				ctx.ui.notify(`Judge driver start failed: ${error instanceof Error ? error.message : String(error)}`, "warning");
+			});
+			refreshDriverWidget(); // driver 起来后立即显示一次 widget
+			ctx.ui.notify("Judge driver started.", "info");
+			return;
+		}
+		await startPromise;
 		refreshDriverWidget(); // driver 起来后立即显示一次 widget
 		ctx.ui.notify("Judge driver started.", "info");
 	}
@@ -839,7 +852,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 			pi.setActiveTools(JUDGE_NORMAL_TOOLS);
 			state = startDriving(setTaskbookForRun(setRequirementsSpec(createJudgeState(), loaded.spec), name));
 			persistState(pi, state);
-			await startActiveJudgeDriver(ctx, loaded.spec);
+			await startActiveJudgeDriver(ctx, loaded.spec, { background: true });
 		} catch (error) {
 			ctx.ui.notify(`运行任务书失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
 		}
@@ -990,6 +1003,33 @@ export function registerJudge(pi: ExtensionAPI): void {
 			block: true,
 			reason: `Judge aligning: command blocked (not read-only). Command: ${command}`,
 		};
+	});
+
+	pi.on("input", async (event, ctx) => {
+		if (state.phase !== "driving") return { action: "continue" };
+		if (event.source !== "interactive") return { action: "continue" };
+
+		if (!activeDriver) {
+			ctx.ui.notify("Driver 未运行,无法转发用户消息。", "warning");
+			return { action: "continue" };
+		}
+
+		const wrapped = [
+			"[USER INTERJECTION during driving]",
+			"The user typed the following while you were working. Treat it as authoritative guidance from the user (not a Judge steer). Incorporate it into your current work or revise as needed.",
+			"",
+			event.text,
+		].join("\n");
+
+		try {
+			await activeDriver.sendUserInput(wrapped);
+			const suffix = event.text.length > 50 ? "..." : "";
+			ctx.ui.notify(`已转发用户插话给 Driver: ${event.text.slice(0, 50)}${suffix}`, "info");
+		} catch (error) {
+			ctx.ui.notify(`转发用户插话给 Driver 失败: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		}
+
+		return { action: "handled" };
 	});
 
 	pi.on("session_start", async (_event, ctx) => {

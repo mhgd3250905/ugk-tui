@@ -54,6 +54,7 @@ test("shared driver session exposes the base creator", async () => {
 test("driver session can collect assistant text for a single prompt without transcript diffing", async () => {
 	let listener: ((event: any) => void) | undefined;
 	const prompts: string[] = [];
+	const promptOptions: any[] = [];
 	const sessionHandle = {
 		isStreaming: false,
 		subscribe(callback: (event: any) => void) {
@@ -64,8 +65,9 @@ test("driver session can collect assistant text for a single prompt without tran
 			});
 			return () => {};
 		},
-		async prompt(text: string) {
+		async prompt(text: string, options?: any) {
 			prompts.push(text);
+			promptOptions.push(options);
 			listener?.({
 				type: "message_update",
 				assistantMessageEvent: { type: "text_delta", delta: `response for ${text}` },
@@ -78,13 +80,21 @@ test("driver session can collect assistant text for a single prompt without tran
 	const factory: DriverSessionFactory = async () => ({ session: sessionHandle });
 	const driver = await createDriverSession(createOptions(), factory);
 
+	await driver.start();
 	const first = await driver.ask("first");
+	await driver.sendUserInput("third");
 	const second = await driver.ask("second");
 
-	assert.deepEqual(prompts, ["first", "second"]);
+	assert.deepEqual(prompts, ["start driver", "first", "third", "second"]);
+	assert.deepEqual(promptOptions, [
+		{ source: "extension" },
+		{ source: "extension" },
+		{ source: "extension" },
+		{ source: "extension" },
+	]);
 	assert.equal(first, "response for first");
 	assert.equal(second, "response for second");
-	assert.equal(driver.getTranscriptText(), "old verdictresponse for firstresponse for second");
+	assert.equal(driver.getTranscriptText(), "old verdictresponse for start driverresponse for firstresponse for thirdresponse for second");
 });
 
 test("driver resource loader can inject an explicit agent definition", () => {

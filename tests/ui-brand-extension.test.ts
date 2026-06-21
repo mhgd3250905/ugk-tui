@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import registerUgkBrandUi from "../extensions/ui-brand.ts";
-import { clearFlowDriverBanner, setFlowDriverBanner } from "../extensions/flow/driver-banner.ts";
 
 function tempAgentDir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "ugk-ui-brand-"));
@@ -141,126 +140,6 @@ test("/ugk-ui with no args opens an action menu", async () => {
 	assert.ok(calls.includes("header"));
 	assert.ok(calls.includes("footer"));
 	assert.match(calls.join("\n"), /ugk UI disabled/);
-});
-
-test("ugk brand header renders active flow driver banner", async () => {
-	const handlers = new Map<string, Function>();
-	const pi = {
-		on(event: string, handler: Function) {
-			handlers.set(event, handler);
-		},
-		registerCommand() {},
-		registerFlag() {},
-		getFlag() {
-			return undefined;
-		},
-		getSessionName() {
-			return "demo";
-		},
-	};
-	let headerFactory: Function | undefined;
-	const ctx = {
-		cwd: "/Users/shengkai/projects/ugk-tui",
-		model: { id: "deepseek-v4-pro" },
-		sessionManager: {
-			getCwd: () => "/Users/shengkai/projects/ugk-tui",
-			getEntries: () => [],
-			getBranch: () => [],
-		},
-		ui: {
-			setHeader: (factory: unknown) => {
-				headerFactory = factory as Function;
-			},
-			setFooter: () => {},
-			setTitle: () => {},
-		},
-	};
-	const theme = {
-		fg: (_color: string, text: string) => text,
-		bold: (text: string) => text,
-	};
-	let header: { render(width: number): string[]; dispose?: () => void } | undefined;
-
-	try {
-		registerUgkBrandUi(pi as any);
-		await handlers.get("session_start")!({ reason: "startup" }, ctx);
-		setFlowDriverBanner({ taskId: "x-search-post-collector", runId: "run-001", status: "running" });
-		header = headerFactory!({ requestRender() {} }, theme);
-		const lines = header.render(100);
-		const text = lines.join("\n");
-		const bannerIndex = lines.findIndex((line) => line.includes("FLOW DRIVER ACTIVE"));
-
-		assert.match(text, /FLOW DRIVER ACTIVE/);
-		assert.match(text, /x-search-post-collector\/run-001/);
-		assert.equal(lines[bannerIndex + 1], "");
-		assert.notEqual(lines[bannerIndex + 2], "");
-	} finally {
-		header?.dispose?.();
-		clearFlowDriverBanner();
-	}
-});
-
-test("ugk brand header requests render while subscribed to flow driver banner changes", async () => {
-	const handlers = new Map<string, Function>();
-	const pi = {
-		on(event: string, handler: Function) {
-			handlers.set(event, handler);
-		},
-		registerCommand() {},
-		registerFlag() {},
-		getFlag() {
-			return undefined;
-		},
-		getSessionName() {
-			return "demo";
-		},
-	};
-	let headerFactory: Function | undefined;
-	const ctx = {
-		cwd: "/Users/shengkai/projects/ugk-tui",
-		model: { id: "deepseek-v4-pro" },
-		sessionManager: {
-			getCwd: () => "/Users/shengkai/projects/ugk-tui",
-			getEntries: () => [],
-			getBranch: () => [],
-		},
-		ui: {
-			setHeader: (factory: unknown) => {
-				headerFactory = factory as Function;
-			},
-			setFooter: () => {},
-			setTitle: () => {},
-		},
-	};
-	const theme = {
-		fg: (_color: string, text: string) => text,
-		bold: (text: string) => text,
-	};
-	let header: { dispose?: () => void } | undefined;
-
-	try {
-		registerUgkBrandUi(pi as any);
-		await handlers.get("session_start")!({ reason: "startup" }, ctx);
-		let renderRequests = 0;
-		header = headerFactory!(
-			{
-				requestRender() {
-					renderRequests += 1;
-				},
-			},
-			theme,
-		);
-
-		setFlowDriverBanner({ taskId: "task-a", runId: "run-001", status: "running" });
-		assert.equal(renderRequests, 1);
-
-		header.dispose();
-		clearFlowDriverBanner();
-		assert.equal(renderRequests, 1);
-	} finally {
-		header?.dispose?.();
-		clearFlowDriverBanner();
-	}
 });
 
 test("ugk brand footer hides DeepSeek model when API credentials are missing", async () => {

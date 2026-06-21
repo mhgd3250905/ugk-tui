@@ -1,5 +1,4 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { Type, type AssistantMessage, type TextContent } from "@earendil-works/pi-ai";
 import {
@@ -53,6 +52,20 @@ import {
 } from "../shared/driver-session.ts";
 import { resolveBashCommand } from "../doctor/checks.ts";
 import registerQuestionnaire from "./questionnaire.ts";
+import { formatDeliveryReport } from "./delivery.ts";
+import {
+	buildBashLiveLogCommand,
+	buildWindowsLiveLogLaunchPlan,
+	openPreparedLiveLogTerminal,
+	setOpenLiveLogTerminalForTests,
+} from "./terminal-launcher.ts";
+
+// Re-export so existing test imports from "./judge.ts" keep working unchanged.
+export {
+	buildBashLiveLogCommand,
+	buildWindowsLiveLogLaunchPlan,
+	setOpenLiveLogTerminalForTests,
+} from "./terminal-launcher.ts";
 
 const JUDGE_ALIGNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const JUDGE_NORMAL_TOOLS = ["read", "bash", "edit", "write"];
@@ -84,140 +97,6 @@ function clearJudgeDriverWidget(ui: { setWidget?: (key: string, content: unknown
 	}
 }
 
-function quotePowerShellLiteral(value: string): string {
-	return `'${value.replace(/'/g, "''")}'`;
-}
-
-function quoteBashLiteral(value: string): string {
-	return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-export function buildBashLiveLogCommand(liveLogPath: string): string {
-	const bashPath = liveLogPath.replace(/\\/g, "/");
-	const quotedDir = quoteBashLiteral(path.posix.dirname(bashPath));
-	const quotedPath = quoteBashLiteral(bashPath);
-	return `mkdir -p ${quotedDir}; touch ${quotedPath}; tail -n +1 -f ${quotedPath}; printf '\\n[Judge live log exited]\\n'; read -r -p 'Press Enter to close...' _`;
-}
-
-type WindowsLiveLogLaunchPlan = {
-	command: string;
-	args: string[];
-};
-
-export function buildWindowsLiveLogLaunchPlan(liveLogPath: string, bashExecutable = resolveBashCommand().command): WindowsLiveLogLaunchPlan {
-	const bashCommand = buildBashLiveLogCommand(liveLogPath);
-	return {
-		command: "cmd.exe",
-		args: ["/d", "/s", "/c", "start", "\"\"", bashExecutable, "--noprofile", "--norc", "-lc", bashCommand],
-	};
-}
-
-function spawnDetached(command: string, args: string[], options: { windowsHide?: boolean } = {}): { ok: boolean; error?: string } {
-	try {
-		const child = spawn(command, args, {
-			detached: true,
-			stdio: "ignore",
-			...options,
-		});
-		child.once("error", () => {
-			// 防止辅助终端启动失败变成未处理错误;同步可捕获失败由返回值表达。
-		});
-		child.unref();
-		return { ok: true };
-	} catch (err) {
-		return { ok: false, error: err instanceof Error ? err.message : String(err) };
-	}
-}
-
-function ensureLiveLogFile(liveLogPath: string): { ok: boolean; error?: string } {
-	try {
-		mkdirSync(path.dirname(liveLogPath), { recursive: true });
-		appendFileSync(liveLogPath, "", "utf8");
-		return { ok: true };
-	} catch (error) {
-		return { ok: false, error: error instanceof Error ? error.message : String(error) };
-	}
-}
-
-function openPreparedLiveLogTerminal(liveLogPath: string): { ok: boolean; error?: string } {
-	const prepared = ensureLiveLogFile(liveLogPath);
-	if (!prepared.ok) return prepared;
-	return (openLiveLogTerminalForTests ?? openLiveLogTerminal)(liveLogPath);
-}
-
-/**
- * 在新终端窗口打开 live.log 的实时跟踪。
- * 零污染主 agent context:过程数据只写文件、只在新终端显示。
- * 跨平台兼容(macOS / Linux / Windows):
- *   - Windows:用 cmd start 打开承载 bash tail 的可见过程终端窗口。
- *   - macOS:osascript 让 Terminal.app 跑 tail(路径转义处理空格)。
- *   - Linux:which 检测可用终端(gnome-terminal -- / konsole -e / xterm -e / x-terminal-emulator),用各自正确的参数语法。
- * 开窗失败不抛错(只返回 error),因为这只是辅助查看,不影响 Judge 主流程。
- */
-function openLiveLogTerminal(liveLogPath: string): { ok: boolean; error?: string } {
-	try {
-		if (process.platform === "win32") {
-			// Windows 不写 launcher 文件,通过 cmd start 让系统打开一个可见的独立 bash tail 过程终端。
-			const plan = buildWindowsLiveLogLaunchPlan(liveLogPath);
-			return spawnDetached(plan.command, plan.args, {
-				windowsHide: false,
-			});
-		}
-
-		if (process.platform === "darwin") {
-			// macOS:osascript 指挥 Terminal.app。路径里的双引号和反斜杠转义。
-			const escapedPath = liveLogPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-			const script = `tell application "Terminal"
-  activate
-  do script "tail -f \\"${escapedPath}\\""
-end tell`;
-			return spawnDetached("osascript", ["-e", script]);
-		}
-
-		// Linux:同步检测可用终端(预检避免 spawn 异步 ENOENT 无法捕获的问题)。
-		const term = detectLinuxTerminal();
-		if (!term) {
-			return { ok: false, error: "no supported terminal emulator found (tried x-terminal-emulator, gnome-terminal, konsole, xterm)" };
-		}
-		// 各终端的"执行命令"参数语法不同:
-		//   gnome-terminal: -- <cmd> <args>
-		//   konsole: -e <cmd> <args>
-		//   xterm: -e <cmd> <args>
-		//   x-terminal-emulator: -e <cmd> <args>(Debian 系别名,语法同 -e)
-		const sep = term.bin === "gnome-terminal" ? "--" : "-e";
-		return spawnDetached(term.bin, [sep, "tail", "-f", liveLogPath]);
-	} catch (err) {
-		return { ok: false, error: err instanceof Error ? err.message : String(err) };
-	}
-}
-
-let openLiveLogTerminalForTests:
-	| ((liveLogPath: string) => { ok: boolean; error?: string })
-	| undefined;
-
-export function setOpenLiveLogTerminalForTests(opener: typeof openLiveLogTerminalForTests): void {
-	openLiveLogTerminalForTests = opener;
-}
-
-/** 同步检测 Linux 上可用的终端模拟器(预检,避免 spawn 异步错误无法捕获)。 */
-function detectLinuxTerminal(): { bin: string } | null {
-	const candidates = [
-		{ bin: "x-terminal-emulator" }, // Debian 系默认别名
-		{ bin: "gnome-terminal" }, // GNOME
-		{ bin: "konsole" }, // KDE
-		{ bin: "xterm" }, // 兜底,大多装了
-	];
-	const which = process.platform === "win32" ? "where" : "which";
-	for (const c of candidates) {
-		try {
-			execFileSync(which, [c.bin], { stdio: "ignore" });
-			return c;
-		} catch {
-			// 这个终端没装,试下一个
-		}
-	}
-	return null;
-}
 export const JUDGE_AGENT_DEFINITION_PATH = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
 	"..",
@@ -343,108 +222,6 @@ function createJudgeVerdictProviderHandle(options: {
 			session = undefined;
 		},
 	};
-}
-
-function formatDeliveryReport(options: {
-	status: "PASS" | "FAIL";
-	finalVerdict: JudgeFinalVerdict;
-	summary: DriverSummary;
-	tail: TranscriptTail;
-}): string {
-	const truncateForDisplay = (value: string, maxLength: number): string => {
-		const normalized = value.replace(/\s+/g, " ").trim();
-		if (normalized.length <= maxLength) return normalized;
-		return `${normalized.slice(0, maxLength - 3)}...`;
-	};
-	const parseJsonText = (jsonText: string): string => {
-		try {
-			const value = JSON.parse(jsonText);
-			if (Array.isArray(value)) {
-				return value
-					.map((item) => item && typeof item === "object" && "text" in item ? String((item as { text?: unknown }).text ?? "") : "")
-					.filter(Boolean)
-					.join("\n");
-			}
-			if (value && typeof value === "object" && "text" in value) {
-				return String((value as { text?: unknown }).text ?? "");
-			}
-		} catch {
-			return "";
-		}
-		return "";
-	};
-	const summarizeDisplayText = (value: string, maxLength: number): string => {
-		const trimmed = value.trim();
-		if (!trimmed) return "";
-		const contentMatch = /^content=(\[.*\]|\{.*\})$/s.exec(trimmed);
-		if (contentMatch) {
-			const parsed = parseJsonText(contentMatch[1]);
-			return parsed ? truncateForDisplay(parsed, maxLength) : "工具返回内容已隐藏,完整过程见 live.log";
-		}
-		if (/^content=\[/.test(trimmed) || /^content=\{/.test(trimmed)) {
-			return "工具返回内容已隐藏,完整过程见 live.log";
-		}
-		return truncateForDisplay(trimmed, maxLength);
-	};
-	const extractEvidenceArtifacts = (): string[] => {
-		const paths = new Set<string>();
-		for (const item of options.finalVerdict.evidence) {
-			const matches = item.matchAll(/(?:[A-Za-z]:[\\/]|\/)[^\s`"',;，；。)）\]]+\.[A-Za-z0-9]{1,8}/g);
-			for (const match of matches) {
-				paths.add(match[0]);
-			}
-		}
-		return Array.from(paths).slice(0, 8);
-	};
-	const formatArtifact = (artifact: DriverSummary["artifacts"][number]): string => `- 📄 ${artifact.path}`;
-	const evidenceArtifacts = extractEvidenceArtifacts();
-	const outputLines = options.summary.artifacts.length > 0
-		? options.summary.artifacts.map(formatArtifact)
-		: evidenceArtifacts.length > 0
-			? evidenceArtifacts.map((path) => `- 📄 ${path}`)
-		: options.tail.assistantOutput.trim()
-			? [
-				"- driver 未产出文件,以下为 driver 的结果摘要:",
-				`  ${summarizeDisplayText(options.tail.assistantOutput, 500)}`,
-			]
-			: ["- ⚠️ driver 未产出可展示的结果(无文件、无输出摘要)。完整过程见 live.log。"];
-	const evidenceLines = options.finalVerdict.evidence.map((item) => `- ${item}`);
-	const paths = options.summary.pathsTried;
-	const visiblePaths = paths.length > 15
-		? [
-			...paths.slice(0, 5).map((path, index) => ({ path, index })),
-			{ omitted: paths.length - 7 },
-			...paths.slice(-2).map((path, offset) => ({ path, index: paths.length - 2 + offset })),
-		]
-		: paths.map((path, index) => ({ path, index }));
-	const pathLines = visiblePaths.length > 0
-		? visiblePaths.map((entry) => {
-			if ("omitted" in entry) return `... 中间省略 ${entry.omitted} 步,完整过程见 live.log`;
-			const state = entry.path.failed ? "✗" : "✓";
-			const reason = entry.path.failed ? summarizeDisplayText(entry.path.resultSummary, 80) : "";
-			const args = entry.path.failed && entry.path.argsSummary ? `; args: ${summarizeDisplayText(entry.path.argsSummary, 80)}` : "";
-			return `${entry.index + 1}. ${entry.path.toolName} ${state}${reason ? ` - ${reason}` : ""}${args}`;
-		})
-		: ["- (none)"];
-	const lines = [
-		`${options.status === "PASS" ? "✅" : "❌"} Judge ${options.status}`,
-		options.finalVerdict.reason,
-		"",
-		"📦 产出",
-		...outputLines,
-	];
-
-	if (evidenceLines.length > 0) {
-		lines.push("", "🔍 验收证据", ...evidenceLines);
-	}
-
-	lines.push(
-		"",
-		`🛣️ 走过的路径(${paths.length} 步,steer ${options.summary.steerCount}/5)`,
-		...pathLines,
-	);
-
-	return lines.join("\n");
 }
 
 function createJudgeWakeupHandler(
@@ -927,9 +704,10 @@ export function registerJudge(pi: ExtensionAPI): void {
 						);
 
 						if (finalVerdict.status === "pass") {
-							const confirm = (ctx.ui as { confirm?: (message: string) => Promise<boolean> | boolean }).confirm;
-							const acknowledged = typeof confirm === "function"
-								? await confirm.call(ctx.ui, "Judge PASS. Accept this delivery?")
+							// pi's confirm signature is (title, message, opts?) -> Promise<boolean>.
+							// Previously this called confirm with a single arg, leaving message undefined.
+							const acknowledged = ctx.ui?.confirm
+								? await ctx.ui.confirm("Judge PASS", "Accept this delivery?")
 								: false;
 							if (acknowledged) {
 								state = completeJudge({ ...state, summary: deliveryReport });

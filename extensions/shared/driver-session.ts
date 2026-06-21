@@ -24,7 +24,7 @@ export interface DriverSessionOptions {
 	agentDefinitionPath?: string;
 }
 
-type DriverSessionEvent = {
+export type DriverSessionEvent = {
 	type?: string;
 	assistantMessageEvent?: {
 		type?: string;
@@ -36,6 +36,13 @@ type DriverSessionEvent = {
 	};
 	toolName?: string;
 	isError?: boolean;
+	/**
+	 * Extra fields emitted by some driver event sources (e.g. tool_result).
+	 * Optional because not every event carries them; consumers read them defensively.
+	 */
+	input?: unknown;
+	result?: unknown;
+	output?: unknown;
 };
 
 export interface DriverSessionLike {
@@ -108,7 +115,7 @@ function formatRuntimeEvent(event: DriverSessionEvent): string | undefined {
 	return undefined;
 }
 
-function getAssistantMessageText(event: DriverSessionEvent): string {
+export function getAssistantMessageText(event: DriverSessionEvent): string {
 	if (event.type !== "message_end") return "";
 	if (event.message?.role !== "assistant") return "";
 	const content = event.message.content;

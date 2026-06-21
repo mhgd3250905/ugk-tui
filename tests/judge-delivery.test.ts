@@ -46,10 +46,29 @@ function makePi() {
 	};
 }
 
-function makeCtx(confirmResult = true) {
+function makeCtx(confirmResult: boolean | null = true) {
 	setOpenLiveLogTerminalForTests(noopLiveLogOpener);
 	const notifications: Array<{ message: string; type?: string }> = [];
 	const widgetCalls: Array<{ key: string; content: unknown }> = [];
+	const ui: any = {
+		notify(message: string, type?: string) {
+			notifications.push({ message, type });
+		},
+		select(title: string, options: string[]) {
+			// 过程查看终端菜单:测试默认"不打开"
+			if (title.includes("过程查看终端")) return options.find((o) => o.startsWith("不打开")) ?? options[0];
+			return options[0];
+		},
+		editor() {
+			return "";
+		},
+		setWidget(key: string, content: unknown) {
+			widgetCalls.push({ key, content });
+		},
+	};
+	if (confirmResult !== null) {
+		ui.confirm = () => confirmResult;
+	}
 	const ctx = {
 		hasUI: true,
 		mode: "tui",
@@ -58,25 +77,7 @@ function makeCtx(confirmResult = true) {
 				return [];
 			},
 		},
-		ui: {
-			notify(message: string, type?: string) {
-				notifications.push({ message, type });
-			},
-			select(title: string, options: string[]) {
-				// 过程查看终端菜单:测试默认"不打开"
-				if (title.includes("过程查看终端")) return options.find((o) => o.startsWith("不打开")) ?? options[0];
-				return options[0];
-			},
-			editor() {
-				return "";
-			},
-			confirm() {
-				return confirmResult;
-			},
-			setWidget(key: string, content: unknown) {
-				widgetCalls.push({ key, content });
-			},
-		},
+		ui,
 	};
 	return { ctx, notifications, widgetCalls };
 }
@@ -487,9 +488,9 @@ test("final PASS delivery report uses evidence file paths when driver artifacts 
 	assert.doesNotMatch(report, /未产出/);
 });
 
-test("final PASS without user ack can be accepted later with /judge ack", async () => {
+test("final PASS without confirm UI can be accepted later with /judge ack", async () => {
 	const { pi, commands, handlers, entries } = makePi();
-	const { ctx, notifications, widgetCalls } = makeCtx(false);
+	const { ctx, notifications, widgetCalls } = makeCtx(null);
 	const prompts: string[] = [];
 	installDecisionSession([
 		JSON.stringify({ status: "pass", reason: "满足", evidence: ["文件存在"] }),
@@ -532,6 +533,40 @@ test("final PASS without user ack can be accepted later with /judge ack", async 
 
 	assert.equal(entries.at(-1)?.data.phase, "done");
 	assert.match(notifications.map((entry) => entry.message).join("\n"), /accepted/i);
+});
+
+test("rejected final PASS with remaining steer budget returns to driving", async () => {
+	const { pi, commands, handlers, entries } = makePi();
+	const { ctx, notifications } = makeCtx(false);
+	const wakeupResults: any[] = [];
+	installDecisionSession([
+		JSON.stringify({ status: "pass", reason: "满足", evidence: ["文件存在"] }),
+	], []);
+	setJudgeDriverFactoryForTests(async (options: any) => ({
+		async start() {
+			wakeupResults.push(await options.onWakeup(completedWakeupContext()));
+		},
+		dispose() {},
+		getSummary() {
+			return completedWakeupContext().summary;
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire", input: {} }, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+		setJudgeDecisionSessionFactoryForTests(undefined);
+	}
+
+	assert.equal(entries.at(-1)?.data.phase, "driving");
+	assert.equal(entries.at(-1)?.data.pendingAckStatus, undefined);
+	assert.equal(wakeupResults[0].action, "steer");
+	assert.match(wakeupResults[0].direction, /User rejected the PASS delivery/);
+	assert.match(notifications.map((entry) => entry.message).join("\n"), /rejected/i);
 });
 
 test("/judge ack accepts restored pending PASS delivery without parsing report text", async () => {

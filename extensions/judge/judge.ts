@@ -641,7 +641,8 @@ export function registerJudge(pi: ExtensionAPI): void {
 					if (finalVerdict.status === "pass") {
 						// pi's confirm signature is (title, message, opts?) -> Promise<boolean>.
 						// Previously this called confirm with a single arg, leaving message undefined.
-						const acknowledged = ctx.ui?.confirm
+						const canAskForAck = Boolean(ctx.ui?.confirm);
+						const acknowledged = canAskForAck
 							? await ctx.ui.confirm("Judge PASS", "Accept this delivery?")
 							: false;
 						if (acknowledged) {
@@ -662,11 +663,30 @@ export function registerJudge(pi: ExtensionAPI): void {
 							restoreActiveTools();
 							return { action: "pass", keepWatching: false };
 						}
+						if (canAskForAck && canContinueAfterFail) {
+							state = startDriving({ ...state, summary: deliveryReport });
+							persistState(pi, state);
+							setJudgeStatus(ctx, "⚖ driving");
+							ctx.ui.notify("Judge PASS rejected; driver will continue revising.", "warning");
+							return {
+								action: "steer",
+								direction: [
+									"User rejected the PASS delivery.",
+									"Revise the work until the user can accept it, then call judge_complete again.",
+								].join("\n"),
+								keepWatching: true,
+							};
+						}
 						state = markPendingAck(enterDelivering({ ...state, summary: deliveryReport }), "pass");
 						persistState(pi, state);
 						setJudgeStatus(ctx, "⚖ delivering");
 						clearDriverWidget();
-						ctx.ui.notify("Judge delivery is waiting for user acknowledgement. Run /judge ack to accept it later.", "warning");
+						ctx.ui.notify(
+							canAskForAck
+								? "Judge PASS rejected, but no steer budget remains. Run /judge ack to accept it anyway or /judge toggle to stop Judge."
+								: "Judge delivery is waiting for user acknowledgement. Run /judge ack to accept it later.",
+							"warning",
+						);
 						return { action: "pass", keepWatching: false };
 					}
 

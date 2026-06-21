@@ -75,6 +75,7 @@ Judge 开启后 footer 显示:
    - Judge 对每条 `acceptance` 做最终 PASS/FAIL。
    - PASS 报告显示产出、验收证据、走过的路径。
    - 如果 TUI 支持 confirm,可立即接受;否则进入 pending ack,用户后续用 `/judge ack` 接受。
+   - 如果用户拒绝 PASS 且仍有 steer 预算,Judge 会把这次拒绝当作继续修订信号,回到 `driving` 并要求 Driver 再次修到可接受。
 
 ## 关键实现文件
 

@@ -20,6 +20,7 @@ import { installUgkSessionViewPatch } from "./ugk-session-view-patch.js";
 import { ensureUgkQuietStartupDefault } from "./ugk-startup-settings.js";
 import { runUgkUpdatePreflight } from "./update-preflight.js";
 import { ensureWorkspaceTrusted } from "./workspace-trust.js";
+import { runFlowCleanupOnce } from "./flow-cleanup.js";
 
 applyUgkRuntimePolicy();
 
@@ -40,6 +41,8 @@ if (!trust.trusted) {
 	console.error(trust.reason || "Workspace trust declined.");
 	process.exit(1);
 }
+
+await runFlowCleanupOnce();
 
 const { InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
 installUgkSessionViewPatch({ InteractiveMode });

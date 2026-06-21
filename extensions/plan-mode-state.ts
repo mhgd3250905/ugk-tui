@@ -45,8 +45,16 @@ export function startExecution(state: PlanModeState): PlanModeState {
 	};
 }
 
-export function completeExecution(_state: PlanModeState): PlanModeState {
-	return createPlanModeState();
+export function completeExecution(state: PlanModeState): PlanModeState {
+	// Keep savedTools so the caller can restore the pre-plan tool set (incl. MCP/dynamic).
+	// Without this, the S1 fix is incomplete: completing an execution would fall back to
+	// NORMAL_MODE_TOOLS and lose dynamically registered tools.
+	return {
+		planModeEnabled: false,
+		executionMode: false,
+		todoItems: [],
+		savedTools: state.savedTools,
+	};
 }
 
 export function restorePlanModeState(state: PlanModeState, persisted?: PersistedPlanModeState): PlanModeState {

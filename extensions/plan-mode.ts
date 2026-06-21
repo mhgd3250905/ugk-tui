@@ -35,10 +35,20 @@ function getActiveToolsSafely(pi: ExtensionAPI): string[] | undefined {
 	return typeof pi.getActiveTools === "function" ? pi.getActiveTools() : undefined;
 }
 
-/** Restore the saved snapshot, or fall back to NORMAL_MODE_TOOLS if none captured. */
-function restoreActiveTools(pi: ExtensionAPI, state: { savedTools: string[] | undefined }): void {
+/**
+ * Restore the saved snapshot, or fall back to NORMAL_MODE_TOOLS if none captured.
+ * @param clearSnapshot when false (e.g. entering execution), keep savedTools so a later
+ *   completeExecution can restore again. Defaults to true (final exit/cleanup).
+ */
+function restoreActiveTools(
+	pi: ExtensionAPI,
+	state: { savedTools: string[] | undefined },
+	clearSnapshot = true,
+): void {
 	pi.setActiveTools(state.savedTools ?? NORMAL_MODE_TOOLS);
-	state.savedTools = undefined;
+	if (clearSnapshot) {
+		state.savedTools = undefined;
+	}
 }
 
 // Type guard for assistant messages
@@ -287,7 +297,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 		if (choice?.startsWith("Execute")) {
 			state = startExecution(state);
-			restoreActiveTools(pi, state);
+			// Restore tools for execution but keep the snapshot so completeExecution can restore again.
+			restoreActiveTools(pi, state, false);
 			updateStatus(ctx);
 
 			const execMessage =

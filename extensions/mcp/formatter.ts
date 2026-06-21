@@ -37,8 +37,5 @@ function normalizeFailedServers(failedServers: McpCommandState["failedServers"])
 	if (!failedServers) {
 		return [];
 	}
-	if (failedServers instanceof Map) {
-		return Array.from(failedServers.entries(), ([name, error]) => [name, String(error)]);
-	}
-	return Object.entries(failedServers).map(([name, error]) => [name, String(error)]);
+	return Array.from(failedServers.entries(), ([name, error]) => [name, String(error)]);
 }

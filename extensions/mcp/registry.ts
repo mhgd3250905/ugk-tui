@@ -8,14 +8,9 @@ import {
 	killClientProcess,
 	listTools,
 } from "./client.ts";
+import type { McpServerConfig } from "./config.ts";
 
 export type McpConnectionStatus = "connected" | "failed" | "disconnected";
-
-export type McpServerConfig = {
-	command: string;
-	args?: string[];
-	env?: Record<string, string>;
-};
 
 export type McpOperationOptions = {
 	timeoutMs?: number;

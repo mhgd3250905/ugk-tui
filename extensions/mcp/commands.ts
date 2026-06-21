@@ -27,7 +27,7 @@ export type McpCommandState = {
 	registry: Pick<McpRegistry, "connections" | "disconnectAll">;
 	permissionState: McpPermissionState;
 	serverTools: Map<string, string[]>;
-	failedServers?: Map<string, string> | Record<string, string>;
+	failedServers?: Map<string, string>;
 	warnings?: string[];
 	staleServerTools?: Map<string, string[]>;
 };
@@ -35,7 +35,7 @@ export type McpCommandState = {
 export type McpReloadResult = {
 	connections?: McpConnection[];
 	registered?: Map<string, string[]> | Record<string, string[]>;
-	failed?: Map<string, string> | Record<string, string>;
+	failed?: Map<string, string>;
 	warnings?: string[];
 };
 
@@ -330,10 +330,7 @@ function countFailed(failedServers: McpCommandState["failedServers"]): number {
 	if (!failedServers) {
 		return 0;
 	}
-	if (failedServers instanceof Map) {
-		return failedServers.size;
-	}
-	return Object.keys(failedServers).length;
+	return failedServers.size;
 }
 
 function notify(context: CommandContext, message: string): void {

@@ -29,13 +29,6 @@
 - 进度跟踪:`[DONE:n]` 标记 + widget ☐/☑ + 状态栏 `📋 N/M`
 - 稳定阶段边界:阻止 `curl | sh`、`curl -o`、curl 上传/变更请求等非只读 bash 形态
 
-### flow task 工作流
-- `/flow task create "目标"` — 进入显式 Task 草案创建流程
-- `/flow task prove <task-id>` — 用真实样例证明 Task 能跑通
-- `/flow run <task-id>` — 运行已 verified/active 的 Task
-- `/flow task review <run-id>` — main agent 主持复盘并沉淀经验
-- 设计原则:main 不记打法,task skill 记打法;driver subagent 隔离执行;todo 记录执行事实和证据;只有成功或修复成功并经用户确认的经验才能写回 Task 资产。
-
 ### Chrome CDP 本地浏览器控制
 - `/cdp status|ask|on|off|port|launch|tabs`
 - 默认 `ask` 模式,控制本地登录态 Chrome 前需要说明原因并经过用户确认

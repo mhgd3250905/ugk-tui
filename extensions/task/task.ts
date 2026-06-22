@@ -1,7 +1,14 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { extractRequirementsSpec, formatRequirementsSpec, isSafeCommand } from "../judge/judge-utils.ts";
+import {
+	extractArtifactsFromToolInput,
+	extractRequirementsSpec,
+	formatRequirementsSpec,
+	isSafeCommand,
+	summarizeToolArgs,
+} from "../judge/judge-utils.ts";
 import {
 	abortTask,
 	createTaskState,
@@ -10,6 +17,8 @@ import {
 	landTask,
 	markPlanQuestionnaireUsed,
 	markReviewQuestionnaireUsed,
+	recordExecuteProcessEntry,
+	setPendingTransition,
 	setTaskSpec,
 	setTaskReviewResult,
 	startExecuting,
@@ -18,6 +27,7 @@ import {
 } from "./task-state.ts";
 import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, saveTaskbook, taskDir } from "./task-book.ts";
 import { dispatchChecker } from "./task-checker.ts";
+import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
 import { runVerify } from "./task-verify.ts";
 import { dispatchWorker, type TaskWorkerResult } from "./task-worker.ts";
@@ -26,8 +36,24 @@ const TASK_STATE_TYPE = "task-state";
 const TASK_PLAN_CONTEXT_TYPE = "task-plan-context";
 const TASK_REVIEW_CONTEXT_TYPE = "task-review-context";
 const TASK_PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
-const TASK_EXECUTING_TOOLS = ["read", "write", "edit", "bash"];
+const TASK_EXECUTING_TOOLS = ["read", "write", "edit", "bash", "task_complete"];
 const TASK_NORMAL_TOOLS = ["read", "bash", "edit", "write", "subagent"];
+
+const taskCompleteTool = defineTool({
+	name: "task_complete",
+	label: "Task Complete",
+	description: "Signal that /task executing phase has completed and review can start.",
+	parameters: Type.Object({
+		summary: Type.Optional(Type.String({ description: "Short completion summary" })),
+	}),
+	async execute(_toolCallId, params) {
+		const summary = typeof params.summary === "string" ? params.summary : "";
+		return {
+			content: [{ type: "text", text: summary ? `task_complete received: ${summary}` : "task_complete received." }],
+			details: { completed: true, summary },
+		};
+	},
+});
 
 const MENU_TO_ACTION = new Map<string, string | undefined>([
 	["新建任务", "new"],
@@ -35,9 +61,13 @@ const MENU_TO_ACTION = new Map<string, string | undefined>([
 	["继续对齐", "clarify"],
 	["修改当前 Spec", "change-spec"],
 	["运行 taskbook", "run"],
+	["运行 taskbook(复用)", "run"],
+	["查看 taskbook 详情", "show"],
 	["编辑 taskbook", "edit"],
 	["列出 taskbook", "list"],
 	["保存为 taskbook", "save"],
+	["自动保存 taskbook", "save"],
+	["删除 taskbook", "delete"],
 	["继续复盘", "continue-review"],
 	["放弃", "abort"],
 	["停止本次执行", "stop"],
@@ -56,8 +86,8 @@ export function getTaskCommandMenuOptions(state: TaskState): string[] {
 			: ["继续对齐", "退出 Task", "Exit"];
 	}
 	if (state.phase === "executing") return ["停止本次执行", "Exit"];
-	if (state.phase === "reviewing") return ["保存为 taskbook", "继续复盘", "放弃", "退出 Task", "Exit"];
-	return ["新建任务", "运行 taskbook", "编辑 taskbook", "列出 taskbook", "Exit"];
+	if (state.phase === "reviewing") return ["自动保存 taskbook", "继续复盘", "放弃", "退出 Task", "Exit"];
+	return ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "删除 taskbook", "Exit"];
 }
 
 export async function resolveTaskCommandArgs(args: string, ctx: any, state: TaskState): Promise<string | undefined> {
@@ -138,6 +168,10 @@ function restoreTaskState(data: unknown): TaskState | undefined {
 		planQuestionnaireUsed: record.planQuestionnaireUsed === true,
 		reviewQuestionnaireUsed: record.reviewQuestionnaireUsed === true,
 		executeRunDir: typeof record.executeRunDir === "string" ? record.executeRunDir : undefined,
+		executeProcessLog: Array.isArray(record.executeProcessLog) ? record.executeProcessLog as TaskState["executeProcessLog"] : [],
+		pendingTransition: record.pendingTransition === "execute" || record.pendingTransition === "review" || record.pendingTransition === "save"
+			? record.pendingTransition
+			: undefined,
 	};
 }
 
@@ -160,14 +194,24 @@ async function handleTaskList(ctx: any, tokens: string[]): Promise<void> {
 	ctx.ui.notify(formatTaskList(await listTaskbooks(cwdOf(ctx), tagFromTokens(tokens))), "info");
 }
 
-async function handleTaskShow(ctx: any, name: string | undefined): Promise<void> {
-	if (!name) {
-		ctx.ui.notify("Usage: /task show <name>", "warning");
-		return;
+async function chooseTaskbookName(ctx: any, name: string | undefined, tag?: string): Promise<string | undefined> {
+	if (name) return name;
+	const items = await listTaskbooks(cwdOf(ctx), tag);
+	if (items.length === 0) {
+		ctx.ui.notify("No taskbooks found.", "warning");
+		return undefined;
 	}
-	const loaded = await loadTaskbook(cwdOf(ctx), name);
+	if (!ctx.ui?.select) return items[0].name;
+	const selected = await ctx.ui.select("选择 taskbook", items.map((item) => item.name));
+	return selected || undefined;
+}
+
+async function handleTaskShow(ctx: any, name: string | undefined): Promise<void> {
+	const finalName = await chooseTaskbookName(ctx, name);
+	if (!finalName) return;
+	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
 	if (!loaded) {
-		ctx.ui.notify(`taskbook "${name}" 不存在`, "warning");
+		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
 		return;
 	}
 	ctx.ui.notify([
@@ -192,26 +236,13 @@ function scopeFromTokens(tokens: string[]): "user" | "project" {
 	return tokens.includes("--project") ? "project" : "user";
 }
 
-function optionValue(tokens: string[], name: string): string | undefined {
-	const index = tokens.indexOf(name);
-	return index >= 0 ? tokens[index + 1] : undefined;
-}
-
-async function parseRuntimeInputTokens(tokens: string[]): Promise<unknown> {
-	const inputFile = optionValue(tokens, "--input-file");
-	if (inputFile) return JSON.parse(await readFile(inputFile, "utf8"));
-	const inputJson = optionValue(tokens, "--input-json");
-	if (inputJson) return JSON.parse(Buffer.from(inputJson, "base64").toString("utf8"));
-	return parseRuntimeInputValue(optionValue(tokens, "--input"));
-}
-
-function parseRuntimeInputValue(value: string | undefined): unknown {
-	if (value === undefined) return {};
-	try {
-		return JSON.parse(value);
-	} catch {
-		return value;
-	}
+function parseTaskCommand(resolvedArgs: string): { action: string; name?: string; tokens: string[]; rawInput: string } {
+	const tokens = resolvedArgs.trim().split(/\s+/).filter(Boolean);
+	const action = (tokens[0] ?? "list").toLowerCase();
+	const name = tokens[1];
+	const prefix = name ? `${tokens[0]} ${name}` : tokens[0] ?? "";
+	const rawInput = prefix ? resolvedArgs.slice(prefix.length).trim() : "";
+	return { action, name, tokens, rawInput };
 }
 
 function runtimeFields(contract: unknown): string[] {
@@ -220,26 +251,22 @@ function runtimeFields(contract: unknown): string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : [];
 }
 
-async function resolveRuntimeInput(ctx: any, contract: unknown, tokens: string[]): Promise<unknown> {
-	if (tokens.includes("--input-file") || tokens.includes("--input-json") || tokens.includes("--input")) {
-		return await parseRuntimeInputTokens(tokens);
-	}
+async function resolveRuntimeInput(ctx: any, skill: string, contract: unknown, rawInput: string): Promise<unknown> {
+	return await resolveRuntimeInputFromText(ctx, skill, contract, rawInput);
+}
+
+async function resolveSelfCheckInput(ctx: any, contract: unknown): Promise<unknown> {
 	const fields = runtimeFields(contract);
-	if (tokens.length > 0 && fields.length === tokens.length) {
-		return Object.fromEntries(fields.map((field, index) => [field, tokens[index]]));
-	}
-	if (tokens.length === 1) {
-		try {
-			return JSON.parse(tokens[0]);
-		} catch {
-			return tokens[0];
-		}
-	}
-	if (tokens.length > 0) return tokens;
+	if (fields.length === 0) return {};
+	return Object.fromEntries(fields.map((field) => [field, ""]));
+}
+
+async function askSelfCheckInput(ctx: any, contract: unknown): Promise<unknown> {
+	const fields = runtimeFields(contract);
 	if (fields.length === 0) return {};
 	const entries: Array<[string, string]> = [];
 	for (const field of fields) {
-		const value = await ctx.ui?.input?.(`task input: ${field}`, field);
+		const value = await ctx.ui?.input?.(`verify 自证示例输入: ${field}`, field);
 		entries.push([field, value ?? ""]);
 	}
 	return Object.fromEntries(entries);
@@ -318,22 +345,51 @@ function setTaskRunWidget(ctx: any, lines: string[] | undefined): void {
 	ctx.ui?.setWidget?.("task-run-view", lines, { placement: "aboveEditor" });
 }
 
-async function handleTaskRun(ctx: any, name: string | undefined, inputTokens: string[]): Promise<void> {
-	if (!name) {
-		ctx.ui.notify("Usage: /task run <name> [input...]", "warning");
-		return;
+function formatExecuteSummary(state: TaskState, completionSummary = ""): string {
+	const lines = [
+		"[TASK EXECUTE SUMMARY]",
+		"",
+		completionSummary.trim() ? `AgentSummary: ${completionSummary.trim()}` : "",
+		state.executeRunDir ? `RunDir: ${state.executeRunDir}` : "",
+		"",
+		"ProcessLog:",
+	];
+	for (const entry of state.executeProcessLog) {
+		if (entry.kind === "artifact") {
+			lines.push(`[${entry.timestamp}] artifact ${entry.artifactPath}`);
+		} else {
+			lines.push(`[${entry.timestamp}] ${entry.toolName}: ${entry.argsSummary ?? ""}`);
+		}
 	}
-	const loaded = await loadTaskbook(cwdOf(ctx), name);
+	return lines.filter((line) => line !== "").join("\n");
+}
+
+function taskCompleteSummaryFromEvent(event: any): string {
+	const candidates = [
+		event?.result?.details?.summary,
+		event?.result?.summary,
+		event?.input?.summary,
+	];
+	return candidates.find((value) => typeof value === "string") ?? "";
+}
+
+async function handleTaskRun(ctx: any, name: string | undefined, rawInput: string): Promise<void> {
+	const finalName = await chooseTaskbookName(ctx, name);
+	if (!finalName) return;
+	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
 	if (!loaded) {
-		ctx.ui.notify(`taskbook "${name}" 不存在`, "warning");
+		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
 		return;
 	}
+	const finalRawInput = !name && !rawInput.trim()
+		? await ctx.ui?.input?.("一句话输入", "")
+		: rawInput;
 
 	const startedAt = Date.now();
-	const runDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${name}-${startedAt}`);
+	const runDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${finalName}-${startedAt}`);
 	const outputDir = path.join(runDir, "output");
 	await mkdir(outputDir, { recursive: true });
-	const runtimeInput = await resolveRuntimeInput(ctx, loaded.contract, inputTokens);
+	const runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, finalRawInput ?? "");
 	const maxRetry = 3;
 	let lastVerifyResult: Awaited<ReturnType<typeof runVerify>> | undefined;
 	let lastWorkerResult: TaskWorkerResult | undefined;
@@ -342,7 +398,7 @@ async function handleTaskRun(ctx: any, name: string | undefined, inputTokens: st
 	try {
 	for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
 		setTaskRunWidget(ctx, [
-			`⏳ taskbook "${name}" 运行中...`,
+			`⏳ taskbook "${finalName}" 运行中...`,
 			`尝试 ${attempt + 1}/${maxRetry + 1}`,
 			"worker 执行中...",
 		]);
@@ -361,7 +417,7 @@ async function handleTaskRun(ctx: any, name: string | undefined, inputTokens: st
 		}
 
 		setTaskRunWidget(ctx, [
-			`⏳ taskbook "${name}" 运行中...`,
+			`⏳ taskbook "${finalName}" 运行中...`,
 			`尝试 ${attempt + 1}/${maxRetry + 1}`,
 			"verify 执行中...",
 		]);
@@ -372,7 +428,7 @@ async function handleTaskRun(ctx: any, name: string | undefined, inputTokens: st
 		});
 
 		if (lastVerifyResult.passed) {
-			await appendRunToTaskbook(loaded.scope, cwdOf(ctx), name, {
+			await appendRunToTaskbook(loaded.scope, cwdOf(ctx), finalName, {
 				timestamp: new Date().toISOString(),
 				status: "pass",
 				input: runtimeInput,
@@ -401,7 +457,7 @@ async function handleTaskRun(ctx: any, name: string | undefined, inputTokens: st
 		feedback = checkerResult;
 	}
 
-	await appendRunToTaskbook(loaded.scope, cwdOf(ctx), name, {
+	await appendRunToTaskbook(loaded.scope, cwdOf(ctx), finalName, {
 		timestamp: new Date().toISOString(),
 		status: "fail",
 		input: runtimeInput,
@@ -417,20 +473,23 @@ async function handleTaskRun(ctx: any, name: string | undefined, inputTokens: st
 }
 
 async function handleTaskDelete(ctx: any, name: string | undefined, tokens: string[]): Promise<void> {
-	if (!name) {
-		ctx.ui.notify("Usage: /task delete <name> [--project]", "warning");
+	const finalName = await chooseTaskbookName(ctx, name);
+	if (!finalName) return;
+	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
+	if (!loaded) {
+		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
 		return;
 	}
-	const scope = scopeFromTokens(tokens);
+	const scope = name ? scopeFromTokens(tokens) : loaded.scope;
 	const ok = ctx.ui?.confirm
-		? await ctx.ui.confirm("删除 taskbook", `删除 ${scope} taskbook "${name}"?`)
+		? await ctx.ui.confirm("删除 taskbook", `删除 ${scope} taskbook "${finalName}"?`)
 		: false;
 	if (!ok) {
 		ctx.ui.notify("已取消删除。", "info");
 		return;
 	}
-	await deleteTaskbook(scope, cwdOf(ctx), name);
-	ctx.ui.notify(`taskbook "${name}" 已删除。`, "info");
+	await deleteTaskbook(scope, cwdOf(ctx), finalName);
+	ctx.ui.notify(`taskbook "${finalName}" 已删除。`, "info");
 }
 
 export function registerTask(pi: ExtensionAPI): void {
@@ -461,32 +520,132 @@ export function registerTask(pi: ExtensionAPI): void {
 		ctx.ui.notify("Task planning mode. 请用 questionnaire 对齐 one-step 任务和机器验收标准。", "info");
 	}
 
+	async function startTaskExecute(ctx: any): Promise<void> {
+		if (!state.spec) {
+			ctx.ui.notify("没有 Spec,先用 /task new 对齐。", "warning");
+			return;
+		}
+		if (!state.planQuestionnaireUsed) {
+			ctx.ui.notify("planning 阶段未用 questionnaire,拒绝执行。", "warning");
+			pi.sendUserMessage?.("请先用 questionnaire 跟用户确认 Spec 假设,再重新输出 Spec。", { deliverAs: "followUp" });
+			return;
+		}
+		const executeRunDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${state.taskbookName ?? "draft"}-${Date.now()}`);
+		await mkdir(path.join(executeRunDir, "output"), { recursive: true });
+		state = startExecuting(state, executeRunDir);
+		restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
+		pi.setActiveTools?.(TASK_EXECUTING_TOOLS);
+		persistState();
+		setTaskStatus(ctx, "🔧 executing");
+		pi.sendUserMessage?.([
+			"现在请在同一个对话里亲手把任务做完。",
+			"",
+			"Spec:",
+			formatRequirementsSpec(state.spec),
+			"",
+			`TASK_OUTPUT_DIR: ${path.join(executeRunDir, "output")}`,
+			"",
+			"要求:",
+			"- 必须实际产出文件,不能只描述",
+			"- 产出默认放到 TASK_OUTPUT_DIR",
+			"- 不要调用 subagent 工具",
+			"- 完成后调用 task_complete 工具",
+		].join("\n"), { deliverAs: "followUp" });
+	}
+
+	async function prepareReviewFromExecute(ctx: any, completionSummary = ""): Promise<void> {
+		if (state.phase !== "executing") return;
+		state = setPendingTransition({ ...state, summary: formatExecuteSummary(state, completionSummary) }, "review");
+		persistState();
+		ctx.ui.notify(`execute 完成,产出在 ${state.executeRunDir ? path.join(state.executeRunDir, "output") : "(unknown)"}。按 Enter 进 review 复盘,或输入意见。`, "info");
+	}
+
+	async function enterReviewFromPending(ctx: any): Promise<void> {
+		if (state.phase !== "executing" || state.pendingTransition !== "review") return;
+		state = enterReviewing(state, state.summary);
+		pi.setActiveTools?.(TASK_PLANNING_TOOLS);
+		persistState();
+		setTaskStatus(ctx, "📋 reviewing");
+		pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary), { deliverAs: "followUp" });
+	}
+
+	async function saveCurrentTask(ctx: any, name: string | undefined, tokens: string[]): Promise<void> {
+		if (!state.spec || !state.reviewResult) {
+			ctx.ui.notify("没有 review 产出,先复盘。", "warning");
+			return;
+		}
+		if (!state.reviewQuestionnaireUsed) {
+			ctx.ui.notify("review 未用 questionnaire 核对,拒绝保存。", "warning");
+			return;
+		}
+		const finalName = name ?? state.taskbookName ?? await ctx.ui?.input?.("taskbook 名字", "my-task");
+		if (!finalName?.trim()) {
+			ctx.ui.notify("缺少 taskbook 名字。", "warning");
+			return;
+		}
+		const scope = scopeFromTokens(tokens);
+		await saveTaskbook(scope, cwdOf(ctx), finalName.trim(), {
+			description: state.reviewResult.description,
+			spec: state.spec,
+			skill: state.reviewResult.skill,
+			verify: state.reviewResult.verify,
+			contract: state.reviewResult.contract,
+			tags: state.reviewResult.tags,
+		});
+		const outputDir = state.executeRunDir ? path.join(state.executeRunDir, "output") : undefined;
+		if (!outputDir?.trim()) {
+			ctx.ui.notify("缺少首次成功产出的 outputDir,拒绝 landed。", "warning");
+			return;
+		}
+		let runtimeInput = await resolveSelfCheckInput(ctx, state.reviewResult.contract);
+		let verifyResult = await runVerify({
+			verifyPath: path.join(taskDir(scope, cwdOf(ctx), finalName.trim()), "verify.mjs"),
+			outputDir,
+			input: runtimeInput,
+		});
+		if (!verifyResult.passed && runtimeFields(state.reviewResult.contract).length > 0) {
+			runtimeInput = await askSelfCheckInput(ctx, state.reviewResult.contract);
+			verifyResult = await runVerify({
+				verifyPath: path.join(taskDir(scope, cwdOf(ctx), finalName.trim()), "verify.mjs"),
+				outputDir,
+				input: runtimeInput,
+			});
+		}
+		if (!verifyResult.passed) {
+			ctx.ui.notify(`verify 自证失败,未进入 landed:\n${JSON.stringify(verifyResult.failures, null, 2)}`, "warning");
+			return;
+		}
+		state = landTask(state);
+		persistState();
+		restoreActiveTools();
+		setTaskStatus(ctx, undefined);
+		ctx.ui.notify(`taskbook "${finalName.trim()}" 已就绪。以后用 \`/task run ${finalName.trim()} <一句话>\` 复用。`, "info");
+	}
+
+	pi.registerTool?.(taskCompleteTool);
+
 	pi.registerCommand("task", {
 		description: "UGK task delegation system",
 		handler: async (args, ctx) => {
 			const resolvedArgs = await resolveTaskCommandArgs(args, ctx, state);
 			if (resolvedArgs === undefined) return;
-			const tokens = resolvedArgs.trim().split(/\s+/).filter(Boolean);
-			const action = (tokens[0] ?? "list").toLowerCase();
-			const name = tokens[1];
+			const { action, name, tokens, rawInput } = parseTaskCommand(resolvedArgs);
 
 			if (action === "new" || action === "clarify") {
 				enableTask(ctx);
 				return;
 			}
 			if (action === "edit") {
-				if (!name) {
-					ctx.ui.notify("Usage: /task edit <name>", "warning");
-					return;
-				}
-				const loaded = await loadTaskbook(cwdOf(ctx), name);
+				const finalName = await chooseTaskbookName(ctx, name);
+				if (!finalName) return;
+				const loaded = await loadTaskbook(cwdOf(ctx), finalName);
 				if (!loaded) {
-					ctx.ui.notify(`taskbook "${name}" 不存在`, "warning");
+					ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
 					return;
 				}
 				restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
 				state = setTaskSpec(enterPlanning(state), loaded.spec);
-				state = { ...state, taskbookName: name };
+				state = { ...state, taskbookName: finalName };
 				pi.setActiveTools?.(TASK_PLANNING_TOOLS);
 				persistState();
 				setTaskStatus(ctx, "📋 task");
@@ -494,36 +653,7 @@ export function registerTask(pi: ExtensionAPI): void {
 				return;
 			}
 			if (action === "execute") {
-				if (!state.spec) {
-					ctx.ui.notify("没有 Spec,先用 /task new 对齐。", "warning");
-					return;
-				}
-				if (!state.planQuestionnaireUsed) {
-					ctx.ui.notify("planning 阶段未用 questionnaire,拒绝执行。", "warning");
-					pi.sendUserMessage?.("请先用 questionnaire 跟用户确认 Spec 假设,再重新输出 Spec。", { deliverAs: "followUp" });
-					return;
-				}
-				const executeRunDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${state.taskbookName ?? "draft"}-${Date.now()}`);
-				await mkdir(path.join(executeRunDir, "output"), { recursive: true });
-				state = startExecuting(state, executeRunDir);
-				restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
-				pi.setActiveTools?.(TASK_EXECUTING_TOOLS);
-				persistState();
-				setTaskStatus(ctx, "🔧 executing");
-				pi.sendUserMessage?.([
-					"现在请在同一个对话里亲手把任务做完。",
-					"",
-					"Spec:",
-					formatRequirementsSpec(state.spec),
-					"",
-					`TASK_OUTPUT_DIR: ${path.join(executeRunDir, "output")}`,
-					"",
-					"要求:",
-					"- 必须实际产出文件,不能只描述",
-					"- 产出默认放到 TASK_OUTPUT_DIR",
-					"- 不要调用 subagent 工具",
-					"- 完成后用 /task 进入菜单继续复盘",
-				].join("\n"), { deliverAs: "followUp" });
+				await startTaskExecute(ctx);
 				return;
 			}
 			if (action === "continue-review") {
@@ -531,63 +661,11 @@ export function registerTask(pi: ExtensionAPI): void {
 					ctx.ui.notify("只有 executing 阶段完成后才能进入 review。", "warning");
 					return;
 				}
-				const inlineSummary = tokens.slice(1).join(" ").trim();
-				const summary = inlineSummary || await ctx.ui?.editor?.("执行摘要", "写明实际做了什么、产出了哪些文件、走过哪些关键命令");
-				if (!summary?.trim()) {
-					ctx.ui.notify("缺少执行摘要,无法复盘。", "warning");
-					return;
-				}
-				state = enterReviewing(state, summary.trim());
-				pi.setActiveTools?.(TASK_PLANNING_TOOLS);
-				persistState();
-				setTaskStatus(ctx, "📋 reviewing");
-				pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary), { deliverAs: "followUp" });
+				await prepareReviewFromExecute(ctx, rawInput);
 				return;
 			}
 			if (action === "save") {
-				if (!state.spec || !state.reviewResult) {
-					ctx.ui.notify("没有 review 产出,先复盘。", "warning");
-					return;
-				}
-				if (!state.reviewQuestionnaireUsed) {
-					ctx.ui.notify("review 未用 questionnaire 核对,拒绝保存。", "warning");
-					return;
-				}
-				const finalName = name ?? await ctx.ui?.input?.("taskbook 名字", "my-task");
-				if (!finalName?.trim()) {
-					ctx.ui.notify("缺少 taskbook 名字。", "warning");
-					return;
-				}
-				const scope = scopeFromTokens(tokens);
-				await saveTaskbook(scope, cwdOf(ctx), finalName.trim(), {
-					description: state.reviewResult.description,
-					spec: state.spec,
-					skill: state.reviewResult.skill,
-					verify: state.reviewResult.verify,
-					contract: state.reviewResult.contract,
-					tags: state.reviewResult.tags,
-				});
-				const outputDir = optionValue(tokens, "--output-dir") ??
-					(state.executeRunDir ? path.join(state.executeRunDir, "output") : undefined);
-				const runtimeInput = await parseRuntimeInputTokens(tokens);
-				if (!outputDir?.trim()) {
-					ctx.ui.notify("缺少首次成功产出的 outputDir,拒绝 landed。", "warning");
-					return;
-				}
-				const verifyResult = await runVerify({
-					verifyPath: path.join(taskDir(scope, cwdOf(ctx), finalName.trim()), "verify.mjs"),
-					outputDir: outputDir.trim(),
-					input: runtimeInput,
-				});
-				if (!verifyResult.passed) {
-					ctx.ui.notify(`verify 自证失败,未进入 landed:\n${JSON.stringify(verifyResult.failures, null, 2)}`, "warning");
-					return;
-				}
-				state = landTask(state);
-				persistState();
-				restoreActiveTools();
-				setTaskStatus(ctx, undefined);
-				ctx.ui.notify(`taskbook "${finalName.trim()}" 已保存。`, "info");
+				await saveCurrentTask(ctx, name, tokens);
 				return;
 			}
 			if (action === "change-spec") {
@@ -605,7 +683,7 @@ export function registerTask(pi: ExtensionAPI): void {
 			}
 			if (action === "list") return await handleTaskList(ctx, tokens);
 			if (action === "show") return await handleTaskShow(ctx, name);
-			if (action === "run") return await handleTaskRun(ctx, name, tokens.slice(2));
+			if (action === "run") return await handleTaskRun(ctx, name, rawInput);
 			if (action === "delete") return await handleTaskDelete(ctx, name, tokens);
 			if (action === "stop" || action === "exit" || action === "toggle" || action === "abort") {
 				state = abortTask(state);
@@ -629,6 +707,8 @@ export function registerTask(pi: ExtensionAPI): void {
 			if (isActivePhase(state.phase)) {
 				restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
 				if (state.phase === "planning") pi.setActiveTools?.(TASK_PLANNING_TOOLS);
+				if (state.phase === "executing") pi.setActiveTools?.(TASK_EXECUTING_TOOLS);
+				if (state.phase === "reviewing") pi.setActiveTools?.(TASK_PLANNING_TOOLS);
 				setTaskStatus(ctx, state.phase === "executing" ? "🔧 executing" : "📋 task");
 			}
 			break;
@@ -670,6 +750,25 @@ export function registerTask(pi: ExtensionAPI): void {
 			if (state.phase === "reviewing") state = markReviewQuestionnaireUsed(state);
 			persistState();
 		}
+		if (state.phase === "executing") {
+			if (["bash", "write", "edit", "chrome_cdp", "task_complete"].includes(event.toolName)) {
+				state = recordExecuteProcessEntry(state, {
+					kind: "tool_call",
+					toolName: event.toolName,
+					argsSummary: summarizeToolArgs(event.input),
+					timestamp: new Date().toISOString(),
+				});
+				for (const artifact of extractArtifactsFromToolInput(event.toolName, event.input)) {
+					state = recordExecuteProcessEntry(state, {
+						kind: "artifact",
+						artifactPath: artifact.path,
+						timestamp: new Date().toISOString(),
+					});
+				}
+				persistState();
+			}
+			return undefined;
+		}
 		if (state.phase !== "planning" || event.toolName !== "bash") return undefined;
 		const command = event.input.command as string;
 		if (isSafeCommand(command)) return undefined;
@@ -677,6 +776,34 @@ export function registerTask(pi: ExtensionAPI): void {
 			block: true,
 			reason: `Task planning: command blocked (not read-only). Command: ${command}`,
 		};
+	});
+
+	pi.on("tool_execution_end", async (event, ctx) => {
+		if (state.phase !== "executing" || event.toolName !== "task_complete" || event.isError) return;
+		await prepareReviewFromExecute(ctx, taskCompleteSummaryFromEvent(event));
+	});
+
+	pi.on("input", async (event, ctx) => {
+		if (!state.pendingTransition || event.source !== "interactive") return;
+		const text = typeof event.text === "string" ? event.text.trim() : "";
+		if (text) {
+			state = setPendingTransition(state, undefined);
+			persistState();
+			pi.sendUserMessage?.(`用户对当前 /task 阶段的补充或修改意见:\n\n${text}`, { deliverAs: "followUp" });
+			return { handled: true };
+		}
+		if (state.pendingTransition === "execute") {
+			await startTaskExecute(ctx);
+			return { handled: true };
+		}
+		if (state.pendingTransition === "review") {
+			await enterReviewFromPending(ctx);
+			return { handled: true };
+		}
+		if (state.pendingTransition === "save") {
+			await saveCurrentTask(ctx, undefined, []);
+			return { handled: true };
+		}
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -690,8 +817,9 @@ export function registerTask(pi: ExtensionAPI): void {
 				return;
 			}
 			state = setTaskReviewResult(state, result);
+			state = setPendingTransition(state, "save");
 			persistState();
-			ctx.ui.notify("review 产出已解析。用 /task save <name> 保存。", "info");
+			ctx.ui.notify("复盘完成。按 Enter 自动保存(会跑 verify 自证),或输入修改意见。", "info");
 			return;
 		}
 		const spec = extractRequirementsSpec(getTextContent(lastAssistant));
@@ -699,9 +827,9 @@ export function registerTask(pi: ExtensionAPI): void {
 			ctx.ui.notify("Task planning did not find a complete RequirementsSpec yet.", "warning");
 			return;
 		}
-		state = setTaskSpec(state, spec);
+		state = setPendingTransition(setTaskSpec(state, spec), "execute");
 		persistState();
-		ctx.ui.notify("Spec 已对齐。用 /task 进入菜单,选“开始执行”。", "info");
+		ctx.ui.notify("Spec 已对齐。按 Enter 进 execute 阶段(我亲手做一遍验证可行性),或输入修改意见。", "info");
 		return undefined;
 	});
 }

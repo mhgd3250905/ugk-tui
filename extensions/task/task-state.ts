@@ -1,6 +1,7 @@
 import type { RequirementsSpec } from "../judge/judge-state.ts";
 
 export type TaskPhase = "planning" | "executing" | "reviewing" | "landed" | "aborted" | "done";
+export type TaskPendingTransition = "execute" | "review" | "save";
 
 export interface TaskReviewResult {
 	description: string;
@@ -8,6 +9,14 @@ export interface TaskReviewResult {
 	verify: string;
 	contract: unknown;
 	tags?: string[];
+}
+
+export interface ExecuteProcessEntry {
+	kind: "tool_call" | "artifact";
+	toolName?: string;
+	argsSummary?: string;
+	artifactPath?: string;
+	timestamp: string;
 }
 
 export interface TaskState {
@@ -20,7 +29,9 @@ export interface TaskState {
 	planQuestionnaireUsed: boolean;
 	reviewQuestionnaireUsed: boolean;
 	executeRunDir?: string;
+	executeProcessLog: ExecuteProcessEntry[];
 	reviewResult?: TaskReviewResult;
+	pendingTransition?: TaskPendingTransition;
 }
 
 export function createTaskState(): TaskState {
@@ -33,6 +44,8 @@ export function createTaskState(): TaskState {
 		planQuestionnaireUsed: false,
 		reviewQuestionnaireUsed: false,
 		executeRunDir: undefined,
+		executeProcessLog: [],
+		pendingTransition: undefined,
 	};
 }
 
@@ -46,12 +59,18 @@ export function enterPlanning(state: TaskState): TaskState {
 		planQuestionnaireUsed: false,
 		reviewQuestionnaireUsed: false,
 		executeRunDir: undefined,
+		executeProcessLog: [],
 		reviewResult: undefined,
+		pendingTransition: undefined,
 	};
 }
 
 export function setTaskSpec(state: TaskState, spec: RequirementsSpec): TaskState {
 	return { ...state, spec };
+}
+
+export function setPendingTransition(state: TaskState, pendingTransition: TaskPendingTransition | undefined): TaskState {
+	return { ...state, pendingTransition };
 }
 
 export function setTaskbookName(state: TaskState, taskbookName: string | undefined): TaskState {
@@ -71,7 +90,14 @@ export function startExecuting(state: TaskState, executeRunDir?: string): TaskSt
 		retryCount: 0,
 		reviewQuestionnaireUsed: false,
 		executeRunDir,
+		executeProcessLog: [],
+		pendingTransition: undefined,
 	};
+}
+
+export function recordExecuteProcessEntry(state: TaskState, entry: ExecuteProcessEntry): TaskState {
+	if (state.phase !== "executing") return state;
+	return { ...state, executeProcessLog: [...state.executeProcessLog, entry] };
 }
 
 export function enterReviewing(state: TaskState, summary: string): TaskState {
@@ -81,6 +107,7 @@ export function enterReviewing(state: TaskState, summary: string): TaskState {
 		summary,
 		reviewQuestionnaireUsed: false,
 		reviewResult: undefined,
+		pendingTransition: undefined,
 	};
 }
 
@@ -94,7 +121,7 @@ export function setTaskReviewResult(state: TaskState, reviewResult: TaskReviewRe
 }
 
 export function landTask(state: TaskState): TaskState {
-	return { ...state, phase: "landed" };
+	return { ...state, phase: "landed", pendingTransition: undefined };
 }
 
 export function abortTask(state: TaskState): TaskState {
@@ -105,6 +132,8 @@ export function abortTask(state: TaskState): TaskState {
 		planQuestionnaireUsed: false,
 		reviewQuestionnaireUsed: false,
 		executeRunDir: undefined,
+		executeProcessLog: [],
+		pendingTransition: undefined,
 	};
 }
 
@@ -116,5 +145,7 @@ export function completeTask(state: TaskState): TaskState {
 		planQuestionnaireUsed: false,
 		reviewQuestionnaireUsed: false,
 		executeRunDir: undefined,
+		executeProcessLog: [],
+		pendingTransition: undefined,
 	};
 }

@@ -7,6 +7,7 @@ import {
 	enterPlanning,
 	enterReviewing,
 	landTask,
+	recordExecuteProcessEntry,
 	markPlanQuestionnaireUsed,
 	markReviewQuestionnaireUsed,
 	setTaskReviewResult,
@@ -32,6 +33,8 @@ test("task state starts inactive with retry defaults", () => {
 		planQuestionnaireUsed: false,
 		reviewQuestionnaireUsed: false,
 		executeRunDir: undefined,
+		executeProcessLog: [],
+		pendingTransition: undefined,
 	});
 });
 
@@ -53,6 +56,7 @@ test("planning resets spec, summary, review result and C-2 flags", () => {
 	assert.equal(state.reviewQuestionnaireUsed, false);
 	assert.equal(state.reviewResult, undefined);
 	assert.equal(state.executeRunDir, undefined);
+	assert.deepEqual(state.executeProcessLog, []);
 });
 
 test("startExecuting requires planning questionnaire", () => {
@@ -78,6 +82,14 @@ test("questionnaire flags are idempotent and phase-scoped", () => {
 
 test("review and terminal transitions keep the minimum useful state", () => {
 	const executing = startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)));
+	const logged = recordExecuteProcessEntry(executing, {
+		kind: "tool_call",
+		toolName: "bash",
+		argsSummary: "command=npm test",
+		timestamp: "2026-06-23T00:00:00.000Z",
+	});
+	assert.equal(logged.executeProcessLog.length, 1);
+
 	const reviewing = setTaskReviewResult(enterReviewing(executing, "执行摘要"), {
 		description: "desc",
 		skill: "# skill",

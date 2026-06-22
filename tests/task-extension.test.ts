@@ -8,8 +8,18 @@ import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs } from 
 import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
 import { loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
+import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT, TASK_REVIEW_PROMPT } from "../extensions/task/task-prompts.ts";
 import { setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
+
+const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+const testAgentDir = mkdtempSync(path.join(os.tmpdir(), "ugk-task-extension-agent-"));
+process.env.PI_CODING_AGENT_DIR = testAgentDir;
+process.on("exit", () => {
+	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	rmSync(testAgentDir, { recursive: true, force: true });
+});
 
 const spec = {
 	goal: "生成报告",
@@ -21,6 +31,7 @@ const spec = {
 
 function makePi() {
 	const commands = new Map<string, any>();
+	const tools: any[] = [];
 	const handlers = new Map<string, Function[]>();
 	const entries: Array<{ customType: string; data: unknown }> = [];
 	const activeTools: string[][] = [];
@@ -35,6 +46,9 @@ function makePi() {
 		pi: {
 			registerCommand(name: string, options: any) {
 				commands.set(name, options);
+			},
+			registerTool(tool: any) {
+				tools.push(tool);
 			},
 			appendEntry(customType: string, data: unknown) {
 				entries.push({ customType, data });
@@ -53,6 +67,7 @@ function makePi() {
 				handlers.set(event, [...(handlers.get(event) ?? []), handler]);
 			},
 		},
+		tools,
 	};
 }
 
@@ -103,15 +118,17 @@ test("task menu changes by phase and maps selection to action", async () => {
 	const executing = startExecuting(markPlanQuestionnaireUsed(planning));
 	const reviewing = enterReviewing(executing, "done");
 
-	assert.deepEqual(getTaskCommandMenuOptions(createTaskState()), ["新建任务", "运行 taskbook", "编辑 taskbook", "列出 taskbook", "Exit"]);
+	assert.deepEqual(getTaskCommandMenuOptions(createTaskState()), ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "删除 taskbook", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(enterPlanning(createTaskState())), ["继续对齐", "退出 Task", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(planning), ["开始执行", "继续对齐", "修改当前 Spec", "退出 Task", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(executing), ["停止本次执行", "Exit"]);
-	assert.deepEqual(getTaskCommandMenuOptions(reviewing), ["保存为 taskbook", "继续复盘", "放弃", "退出 Task", "Exit"]);
+	assert.deepEqual(getTaskCommandMenuOptions(reviewing), ["自动保存 taskbook", "继续复盘", "放弃", "退出 Task", "Exit"]);
 
 	const { ctx } = makeCtx();
 	ctx.ui.select = () => "列出 taskbook";
 	assert.equal(await resolveTaskCommandArgs("", ctx, createTaskState()), "list");
+	ctx.ui.select = () => "运行 taskbook(复用)";
+	assert.equal(await resolveTaskCommandArgs("", ctx, createTaskState()), "run");
 	ctx.ui.select = () => "Exit";
 	assert.equal(await resolveTaskCommandArgs("", ctx, createTaskState()), undefined);
 	assert.equal(await resolveTaskCommandArgs("show foo", ctx, createTaskState()), "show foo");
@@ -241,7 +258,7 @@ test("/task execute enforces C-2 and switches to non-subagent tools", async () =
 
 	await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
 	await commands.get("task").handler("execute", ctx);
-	assert.deepEqual(activeTools.at(-1), ["read", "write", "edit", "bash"]);
+	assert.deepEqual(activeTools.at(-1), ["read", "write", "edit", "bash", "task_complete"]);
 	assert.equal((entries.at(-1)?.data as any).phase, "executing");
 	assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "🔧 executing" });
 	assert.match(userMessages.at(-1)?.text ?? "", /不要调用 subagent/);
@@ -273,12 +290,13 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.equal(extractTaskReviewResult("{}"), undefined);
 });
 
-test("/task continue-review parses review result and save enforces review questionnaire", async () => {
-	const { pi, commands, handlers, entries, activeTools } = makePi();
+test("task_complete records process log and Enter gates review/save transitions", async () => {
+	const { pi, commands, handlers, entries, activeTools, tools, userMessages } = makePi();
 	const { cwd, ctx, notifications, statusCalls } = makeCtx();
 	registerTask(pi as any);
 
 	try {
+		assert.ok(tools.some((tool) => tool.name === "task_complete"));
 		await commands.get("task").handler("new", ctx);
 		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
 		await handlers.get("agent_end")![0]({
@@ -288,15 +306,32 @@ test("/task continue-review parses review result and save enforces review questi
 			}],
 		}, ctx);
 		await commands.get("task").handler("execute", ctx);
-		await commands.get("task").handler("continue-review 已生成 report.json", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "bash", input: { command: "npm test" } }, ctx);
+		await handlers.get("tool_call")![0]({ toolName: "write", input: { path: path.join(cwd, "report.json") } }, ctx);
+		await handlers.get("tool_call")![0]({ toolName: "task_complete", input: { summary: "已生成 report.json" } }, ctx);
 
+		assert.deepEqual(activeTools.at(-1), ["read", "write", "edit", "bash", "task_complete"]);
+		assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "🔧 executing" });
+		assert.equal((entries.at(-1)?.data as any).phase, "executing");
+		assert.ok((entries.at(-1)?.data as any).executeProcessLog.length >= 2);
+
+		await handlers.get("tool_execution_end")![0]({ toolName: "task_complete", isError: false, result: { details: { summary: "已生成 report.json" } } }, ctx);
+		assert.equal((entries.at(-1)?.data as any).phase, "executing");
+		assert.equal((entries.at(-1)?.data as any).pendingTransition, "review");
+		assert.match(notifications.at(-1)?.message ?? "", /按 Enter 进 review/);
+
+		await handlers.get("input")![0]({ source: "interactive", text: "" }, ctx);
 		assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
 		assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "📋 reviewing" });
+		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
+		assert.match(userMessages.at(-1)?.text ?? "", /TASK REVIEW MODE/);
 
 		const injected = await handlers.get("before_agent_start")![0]({}, ctx);
 		assert.equal(injected.message.customType, "task-review-context");
-		assert.match(injected.message.content, /已生成 report\.json/);
+		assert.match(injected.message.content, /npm test/);
+		assert.match(injected.message.content, /report\.json/);
 
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
 		await handlers.get("agent_end")![0]({
 			messages: [{
 				role: "assistant",
@@ -305,15 +340,13 @@ test("/task continue-review parses review result and save enforces review questi
 \`\`\`` }],
 			}],
 		}, ctx);
-		assert.equal((entries.at(-1)?.data as any).reviewResult.description, "生成报告");
+		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
+		assert.equal((entries.at(-1)?.data as any).pendingTransition, "save");
+		assert.equal(await loadTaskbook(cwd, "my-task"), null);
 
-		await commands.get("task").handler("save report --project", ctx);
-		assert.match(notifications.at(-1)?.message ?? "", /review 未用 questionnaire/);
-
-		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
-		await commands.get("task").handler("save report --project", ctx);
+		await handlers.get("input")![0]({ source: "interactive", text: "" }, ctx);
 		assert.equal((entries.at(-1)?.data as any).phase, "landed");
-		assert.match(notifications.at(-1)?.message ?? "", /已保存/);
+		assert.match(notifications.at(-1)?.message ?? "", /已就绪/);
 		assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: undefined });
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -335,7 +368,9 @@ test("/task save runs verify self-check before landed", async () => {
 			}],
 		}, ctx);
 		await commands.get("task").handler("execute", ctx);
-		await commands.get("task").handler("continue-review 已生成 report.json", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "task_complete", input: { summary: "已生成 report.json" } }, ctx);
+		await handlers.get("tool_execution_end")![0]({ toolName: "task_complete", isError: false, result: { details: { summary: "已生成 report.json" } } }, ctx);
+		await handlers.get("input")![0]({ source: "interactive", text: "" }, ctx);
 		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
 		await handlers.get("agent_end")![0]({
 			messages: [{
@@ -346,7 +381,7 @@ test("/task save runs verify self-check before landed", async () => {
 			}],
 		}, ctx);
 
-		await commands.get("task").handler(`save bad --project --output-dir ${cwd} --input {}`, ctx);
+		await commands.get("task").handler("save bad --project", ctx);
 
 		assert.match(notifications.at(-1)?.message ?? "", /verify 自证失败/);
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
@@ -401,6 +436,59 @@ test("/task delete removes a confirmed taskbook", async () => {
 	}
 });
 
+test("/task menu selects taskbook name for show edit delete and run", async () => {
+	const { pi, commands, entries } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => ({
+		agent: "worker",
+		agentSource: "user",
+		task: "task",
+		exitCode: 0,
+		messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+	}) as any);
+	setTaskDispatcherForTests(async () => ({ text: "一句话" }));
+
+	try {
+		for (const name of ["menu-show", "menu-edit", "menu-delete", "menu-run"]) {
+			await saveTaskbook("project", cwd, name, {
+				description: name,
+				spec,
+				skill: "# Skill",
+				verify: name === "menu-run"
+					? "const input = JSON.parse(process.env.TASK_INPUT); if (input.text !== '一句话') process.exit(1); process.exit(0);\n"
+					: "process.exit(0);\n",
+				contract: name === "menu-run" ? { runtimeInput: ["text"], artifacts: [] } : { artifacts: [] },
+			});
+		}
+
+		ctx.ui.select = (title: string) => title === "Task" ? "查看 taskbook 详情" : "menu-show";
+		await commands.get("task").handler("", ctx);
+		assert.match(notifications.at(-1)?.message ?? "", /# menu-show \[project\]/);
+
+		ctx.ui.select = (title: string) => title === "Task" ? "编辑 taskbook" : "menu-edit";
+		await commands.get("task").handler("", ctx);
+		assert.equal((entries.at(-1)?.data as any).taskbookName, "menu-edit");
+
+		await commands.get("task").handler("exit", ctx);
+		ctx.ui.select = (title: string) => title === "Task" ? "运行 taskbook(复用)" : "menu-run";
+		ctx.ui.input = () => "一句话";
+		await commands.get("task").handler("", ctx);
+		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
+		assert.deepEqual((await loadTaskbook(cwd, "menu-run"))?.taskbook.runs.at(-1)?.input, { text: "一句话" });
+
+		ctx.ui.select = (title: string) => title === "Task" ? "删除 taskbook" : "menu-delete";
+		await commands.get("task").handler("", ctx);
+		assert.equal(await loadTaskbook(cwd, "menu-delete"), null);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("/task run executes worker, verify, and records a pass run", async () => {
 	const { pi, commands } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
@@ -414,6 +502,7 @@ test("/task run executes worker, verify, and records a pass run", async () => {
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
 	}) as any);
+	setTaskDispatcherForTests(async () => ({ url: "https://x" }));
 	try {
 		await saveTaskbook("project", cwd, "runner", {
 			description: "runner",
@@ -423,7 +512,7 @@ test("/task run executes worker, verify, and records a pass run", async () => {
 			contract: { runtimeInput: ["url"], artifacts: [] },
 		});
 
-		await commands.get("task").handler("run runner https://x", ctx);
+		await commands.get("task").handler("run runner 把这个下下来 https://x", ctx);
 		const loaded = await loadTaskbook(cwd, "runner");
 
 		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
@@ -431,11 +520,12 @@ test("/task run executes worker, verify, and records a pass run", async () => {
 		assert.deepEqual(loaded?.taskbook.runs.at(-1)?.input, { url: "https://x" });
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
 
-test("/task run accepts input-file and shows pass artifacts with widget", async () => {
+test("/task run preserves natural language input with spaces and shows pass artifacts with widget", async () => {
 	const { pi, commands } = makePi();
 	const { cwd, ctx, notifications, widgetCalls } = makeCtx();
 	registerTask(pi as any);
@@ -451,9 +541,8 @@ test("/task run accepts input-file and shows pass artifacts with widget", async 
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
 		} as any;
 	});
+	setTaskDispatcherForTests(async () => ({ text: "Hello world" }));
 	try {
-		const inputFile = path.join(cwd, "input.json");
-		await writeFile(inputFile, JSON.stringify({ text: "Hello world" }), "utf8");
 		await saveTaskbook("project", cwd, "runner-file", {
 			description: "runner file",
 			spec,
@@ -462,7 +551,7 @@ test("/task run accepts input-file and shows pass artifacts with widget", async 
 			contract: { runtimeInput: ["text"], artifacts: [{ name: "count.json", type: "file", required: true }] },
 		});
 
-		await commands.get("task").handler(`run runner-file --input-file ${inputFile}`, ctx);
+		await commands.get("task").handler("run runner-file Hello world", ctx);
 
 		const message = notifications.at(-1)?.message ?? "";
 		assert.match(message, /PASS/);
@@ -473,11 +562,12 @@ test("/task run accepts input-file and shows pass artifacts with widget", async 
 		assert.equal(widgetCalls.at(-1)?.lines, undefined);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
 
-test("/task run accepts base64 input-json", async () => {
+test("/task run asks for missing input when no raw text is provided", async () => {
 	const { pi, commands } = makePi();
 	const { cwd, ctx } = makeCtx();
 	registerTask(pi as any);
@@ -490,23 +580,24 @@ test("/task run accepts base64 input-json", async () => {
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
 	}) as any);
+	setTaskDispatcherForTests(async () => undefined);
 	try {
 		await saveTaskbook("project", cwd, "runner-b64", {
 			description: "runner b64",
 			spec,
 			skill: "# Skill",
-			verify: "const input = JSON.parse(process.env.TASK_INPUT); if (input.text !== 'Hello world') process.exit(1); process.exit(0);\n",
-			contract: { artifacts: [] },
+			verify: "const input = JSON.parse(process.env.TASK_INPUT); if (input.text !== 'text') process.exit(1); process.exit(0);\n",
+			contract: { runtimeInput: ["text"], artifacts: [] },
 		});
-		const b64 = Buffer.from(JSON.stringify({ text: "Hello world" }), "utf8").toString("base64");
 
-		await commands.get("task").handler(`run runner-b64 --input-json ${b64}`, ctx);
+		await commands.get("task").handler("run runner-b64", ctx);
 		const loaded = await loadTaskbook(cwd, "runner-b64");
 
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
-		assert.deepEqual(loaded?.taskbook.runs.at(-1)?.input, { text: "Hello world" });
+		assert.deepEqual(loaded?.taskbook.runs.at(-1)?.input, { text: "text" });
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
@@ -578,7 +669,9 @@ test("/task save defaults to execute output dir when no output-dir is passed", a
 		await mkdir(path.join(executeRunDir, "output"), { recursive: true });
 		await writeFile(path.join(executeRunDir, "output", "report.json"), "{}", "utf8");
 
-		await commands.get("task").handler("continue-review 已生成 report.json", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "task_complete", input: { summary: "已生成 report.json" } }, ctx);
+		await handlers.get("tool_execution_end")![0]({ toolName: "task_complete", isError: false, result: { details: { summary: "已生成 report.json" } } }, ctx);
+		await handlers.get("input")![0]({ source: "interactive", text: "" }, ctx);
 		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
 		await handlers.get("agent_end")![0]({
 			messages: [{
@@ -592,7 +685,7 @@ test("/task save defaults to execute output dir when no output-dir is passed", a
 		await commands.get("task").handler("save smart --project", ctx);
 
 		assert.equal((entries.at(-1)?.data as any).phase, "landed");
-		assert.match(notifications.at(-1)?.message ?? "", /已保存/);
+		assert.match(notifications.at(-1)?.message ?? "", /已就绪/);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

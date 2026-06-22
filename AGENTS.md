@@ -53,6 +53,7 @@
 
 ### ugk 品牌 UI
 - `extensions/ui-brand.ts` 通过 pi UI hook 设置 header/footer/title
+- header/footer 组件不得在 render 阶段持有或读取 `ExtensionContext`;必须在 `session_start` 时抽取普通 session 数据,避免 session replacement/reload 后 stale ctx 崩溃
 - `/ugk-ui on|off|status` 可运行中切换
 - `themes/ugk-geek.json` 提供默认低刺激荧光绿主题
 

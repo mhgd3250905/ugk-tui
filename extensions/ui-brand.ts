@@ -60,7 +60,7 @@ function clearStartupScreen(ctx: ExtensionContext): void {
 	process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
 }
 
-function hasSessionMessages(ctx: ExtensionContext): boolean {
+function hasSessionMessages(ctx: { sessionManager?: { getEntries?: () => unknown[]; getBranch?: () => unknown[] } }): boolean {
 	const entries = ctx.sessionManager?.getEntries?.() ?? ctx.sessionManager?.getBranch?.() ?? [];
 	return entries.length > 0;
 }
@@ -121,53 +121,68 @@ function colorFooterStatusLine(statuses: string[], fallback: string, theme: any)
 	return values.map((status) => theme.fg(classifyUgkStatusTone(status), status)).join(" ");
 }
 
-function isStaleExtensionCtxError(error: unknown): boolean {
-	return error instanceof Error && /extension ctx is stale/i.test(error.message);
+interface BrandUiSessionSource {
+	cwd: string;
+	modelId?: string;
+	modelContextWindow?: number;
+	thinkingLevel?: string;
+	contextUsage?: { percent?: number; contextWindow?: number };
+	sessionManager?: {
+		getCwd?: () => string;
+		getEntries?: () => unknown[];
+		getBranch?: () => unknown[];
+	};
+}
+
+function createBrandUiSessionSource(ctx: ExtensionContext): BrandUiSessionSource {
+	return {
+		cwd: ctx.cwd ?? process.cwd(),
+		modelId: ctx.model?.id,
+		modelContextWindow: ctx.model?.contextWindow,
+		thinkingLevel: (ctx as any).session?.state?.thinkingLevel,
+		contextUsage: ctx.getContextUsage?.(),
+		sessionManager: ctx.sessionManager,
+	};
 }
 
 class UgkHeader implements Component {
-	private readonly ctx: ExtensionContext;
+	private readonly source: BrandUiSessionSource;
 	private readonly theme: any;
 
-	constructor(ctx: ExtensionContext, theme: any) {
-		this.ctx = ctx;
+	constructor(source: BrandUiSessionSource, theme: any) {
+		this.source = source;
 		this.theme = theme;
 	}
 
 	invalidate(): void {}
 
 	render(width: number): string[] {
-		try {
-			const cwd = this.ctx.sessionManager?.getCwd?.() ?? this.ctx.cwd ?? process.cwd();
-			const modelId = resolveUgkDisplayModelId(this.ctx.model?.id, getDeepSeekStatus());
-			const options = {
-				version: VERSION,
-				cwdName: path.basename(cwd),
-				modelId,
-				width,
-			};
-			const lines = hasSessionMessages(this.ctx)
-				? buildUgkHeaderLines(options)
-				: buildUgkStartupScreenLines({
-						...options,
-						rows: process.stdout.rows || 24,
-					});
-			const rendered = ["", ...lines.map((line, i) => colorHeaderLine(line, i, this.theme)), ""];
-			return rendered;
-		} catch (error) {
-			if (isStaleExtensionCtxError(error)) return [];
-			throw error;
-		}
+		const cwd = this.source.sessionManager?.getCwd?.() ?? this.source.cwd;
+		const modelId = resolveUgkDisplayModelId(this.source.modelId, getDeepSeekStatus());
+		const options = {
+			version: VERSION,
+			cwdName: path.basename(cwd),
+			modelId,
+			width,
+		};
+		const lines = hasSessionMessages(this.source)
+			? buildUgkHeaderLines(options)
+			: buildUgkStartupScreenLines({
+					...options,
+					rows: process.stdout.rows || 24,
+				});
+		const rendered = ["", ...lines.map((line, i) => colorHeaderLine(line, i, this.theme)), ""];
+		return rendered;
 	}
 }
 
-function collectUsage(ctx: ExtensionContext): UgkFooterUsage {
+function collectUsage(source: BrandUiSessionSource): UgkFooterUsage {
 	let input = 0;
 	let output = 0;
 	let cacheRead = 0;
 	let cacheWrite = 0;
 	let cost = 0;
-	const entries = ctx.sessionManager?.getEntries?.() ?? ctx.sessionManager?.getBranch?.() ?? [];
+	const entries = source.sessionManager?.getEntries?.() ?? source.sessionManager?.getBranch?.() ?? [];
 	for (const entry of entries) {
 		const message = (entry as any).message as AssistantMessage | undefined;
 		if ((entry as any).type !== "message" || message?.role !== "assistant" || !message.usage) continue;
@@ -177,7 +192,7 @@ function collectUsage(ctx: ExtensionContext): UgkFooterUsage {
 		cacheWrite += message.usage.cacheWrite || 0;
 		cost += message.usage.cost?.total || 0;
 	}
-	const context = ctx.getContextUsage?.();
+	const context = source.contextUsage;
 	return {
 		input,
 		output,
@@ -185,19 +200,19 @@ function collectUsage(ctx: ExtensionContext): UgkFooterUsage {
 		cacheWrite,
 		cost,
 		contextPercent: context?.percent ?? null,
-		contextWindow: context?.contextWindow ?? ctx.model?.contextWindow ?? 0,
+		contextWindow: context?.contextWindow ?? source.modelContextWindow ?? 0,
 	};
 }
 
 class UgkFooter implements Component {
 	private unsubscribe?: () => void;
-	private readonly ctx: ExtensionContext;
+	private readonly source: BrandUiSessionSource;
 	private readonly theme: any;
 	private readonly footerData: any;
 	private readonly tui: { requestRender(): void };
 
-	constructor(ctx: ExtensionContext, theme: any, footerData: any, tui: { requestRender(): void }) {
-		this.ctx = ctx;
+	constructor(source: BrandUiSessionSource, theme: any, footerData: any, tui: { requestRender(): void }) {
+		this.source = source;
 		this.theme = theme;
 		this.footerData = footerData;
 		this.tui = tui;
@@ -211,38 +226,34 @@ class UgkFooter implements Component {
 	invalidate(): void {}
 
 	render(width: number): string[] {
-		try {
-			const statuses = Array.from(this.footerData.getExtensionStatuses?.().values?.() ?? []) as string[];
-			const cwd = this.ctx.sessionManager?.getCwd?.() ?? this.ctx.cwd ?? process.cwd();
-			const lines = buildUgkFooterLines({
-				cwd,
-				branch: this.footerData.getGitBranch?.() ?? null,
-				modelId: resolveUgkDisplayModelId(this.ctx.model?.id, getDeepSeekStatus()) || "no-model",
-				thinkingLevel: (this.ctx as any).session?.state?.thinkingLevel,
-				statuses,
-				usage: collectUsage(this.ctx),
-				width,
-			});
+		const statuses = Array.from(this.footerData.getExtensionStatuses?.().values?.() ?? []) as string[];
+		const cwd = this.source.sessionManager?.getCwd?.() ?? this.source.cwd;
+		const lines = buildUgkFooterLines({
+			cwd,
+			branch: this.footerData.getGitBranch?.() ?? null,
+			modelId: resolveUgkDisplayModelId(this.source.modelId, getDeepSeekStatus()) || "no-model",
+			thinkingLevel: this.source.thinkingLevel,
+			statuses,
+			usage: collectUsage(this.source),
+			width,
+		});
 
-			const [pwd, usage, status] = lines;
-			const coloredPwd = pwd.replace(/^ugk/, this.theme.fg("success", "ugk"));
-			const rendered = [this.theme.fg("dim", coloredPwd), colorFooterUsageLine(usage, this.theme)];
-			if (status.trim()) rendered.push(colorFooterStatusLine(statuses, status, this.theme));
-			return rendered.map((line) => {
-				if (visibleWidth(line) <= width) return line;
-				return truncateToWidth(line, width, this.theme.fg("dim", "..."));
-			});
-		} catch (error) {
-			if (isStaleExtensionCtxError(error)) return [];
-			throw error;
-		}
+		const [pwd, usage, status] = lines;
+		const coloredPwd = pwd.replace(/^ugk/, this.theme.fg("success", "ugk"));
+		const rendered = [this.theme.fg("dim", coloredPwd), colorFooterUsageLine(usage, this.theme)];
+		if (status.trim()) rendered.push(colorFooterStatusLine(statuses, status, this.theme));
+		return rendered.map((line) => {
+			if (visibleWidth(line) <= width) return line;
+			return truncateToWidth(line, width, this.theme.fg("dim", "..."));
+		});
 	}
 }
 
 function applyBrandUi(pi: ExtensionAPI, ctx: ExtensionContext): void {
-	ctx.ui.setHeader((_tui, theme) => new UgkHeader(ctx, theme));
-	ctx.ui.setFooter((tui, theme, footerData) => new UgkFooter(ctx, theme, footerData, tui));
-	ctx.ui.setTitle(formatTitle(pi, ctx.sessionManager?.getCwd?.() ?? ctx.cwd ?? process.cwd()));
+	const source = createBrandUiSessionSource(ctx);
+	ctx.ui.setHeader((_tui, theme) => new UgkHeader(source, theme));
+	ctx.ui.setFooter((tui, theme, footerData) => new UgkFooter(source, theme, footerData, tui));
+	ctx.ui.setTitle(formatTitle(pi, source.sessionManager?.getCwd?.() ?? source.cwd));
 }
 
 function clearBrandUi(ctx: ExtensionContext): void {

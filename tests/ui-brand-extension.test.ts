@@ -90,7 +90,7 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	header.dispose?.();
 });
 
-test("ugk brand header and footer ignore stale extension ctx during render", async () => {
+test("ugk brand header and footer do not read extension ctx during render", async () => {
 	const handlers = new Map<string, Function>();
 	const pi = {
 		on(event: string, handler: Function) {
@@ -139,8 +139,8 @@ test("ugk brand header and footer ignore stale extension ctx during render", asy
 	const footer = footerFactory!({ requestRender() {} }, theme, footerData);
 	stale = true;
 
-	assert.deepEqual(header.render(80), []);
-	assert.deepEqual(footer.render(80), []);
+	assert.match(header.render(80).join("\n"), /ugk v1\.0\.0/);
+	assert.match(footer.render(80).join("\n"), /ugk /);
 });
 
 test("/ugk-ui with no args opens an action menu", async () => {

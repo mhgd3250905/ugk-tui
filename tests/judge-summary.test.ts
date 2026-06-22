@@ -169,3 +169,26 @@ test("buildDecidePrompt includes spec, structured summary, and transcript tail",
 	assert.match(prompt, /tophub\.today/);
 	assert.match(prompt, /对照 acceptance/);
 });
+
+test("buildDecidePrompt caps pathsTried while preserving recent evidence", () => {
+	const pathsTried = Array.from({ length: 40 }, (_, index) => ({
+		toolName: `tool-${index}`,
+		argsSummary: `arg-${index}`,
+		resultSummary: `result-${index}`,
+		failed: false,
+	}));
+
+	const prompt = buildDecidePrompt("spec", {
+		pathsTried,
+		artifacts: [],
+		runningTools: [],
+		turnCount: 1,
+		completed: false,
+	});
+
+	assert.doesNotMatch(prompt, /tool-0/);
+	assert.doesNotMatch(prompt, /tool-9/);
+	assert.match(prompt, /tool-10/);
+	assert.match(prompt, /tool-39/);
+	assert.match(prompt, /"omittedPathCount": 10/);
+});

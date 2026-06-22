@@ -136,6 +136,20 @@ Return parseable JSON only:
 Use PASS only when every acceptance item is satisfied without violating hardConstraints or forbidden actions.
 Use FAIL when any acceptance item is missing, evidence is weak, artifacts are absent, or process evidence contradicts the claim.`;
 
+const MAX_PROMPT_PATHS_TRIED = 30;
+
+function compactSummaryForPrompt(summary: unknown): unknown {
+	if (!summary || typeof summary !== "object" || Array.isArray(summary)) return summary;
+	const record = summary as Record<string, unknown>;
+	if (!Array.isArray(record.pathsTried) || record.pathsTried.length <= MAX_PROMPT_PATHS_TRIED) return summary;
+	// ponytail: last 30 path records bound Judge prompt growth; raise this if older evidence is routinely needed.
+	return {
+		...record,
+		pathsTried: record.pathsTried.slice(-MAX_PROMPT_PATHS_TRIED),
+		omittedPathCount: record.pathsTried.length - MAX_PROMPT_PATHS_TRIED,
+	};
+}
+
 export function buildDecidePrompt(spec: string, summary: unknown, tail: unknown = { toolCalls: [], assistantOutput: "" }): string {
 	return [
 		DECIDE_PROMPT,
@@ -144,7 +158,7 @@ export function buildDecidePrompt(spec: string, summary: unknown, tail: unknown 
 		spec,
 		"",
 		"DriverSummary:",
-		JSON.stringify(summary, null, "\t"),
+		JSON.stringify(compactSummaryForPrompt(summary), null, "\t"),
 		"",
 		"TranscriptTail:",
 		JSON.stringify(tail, null, "\t"),
@@ -159,7 +173,7 @@ export function buildFinalizePrompt(spec: string, summary: unknown, tail: unknow
 		spec,
 		"",
 		"DriverSummary:",
-		JSON.stringify(summary, null, "\t"),
+		JSON.stringify(compactSummaryForPrompt(summary), null, "\t"),
 		"",
 		"TranscriptTail:",
 		JSON.stringify(tail, null, "\t"),

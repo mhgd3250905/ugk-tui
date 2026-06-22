@@ -224,6 +224,7 @@ test("Windows live log launch plan has no Windows Terminal special casing", () =
 test("bash live log command tails the normalized live.log path", () => {
 	const command = buildBashLiveLogCommand("E:\\workspace\\project with spaces\\.judge\\judge-123\\live.log");
 
+	assert.match(command, /export PATH=\/usr\/bin:\/bin:\$PATH/);
 	assert.match(command, /mkdir -p/);
 	assert.match(command, /tail -n \+1 -f/);
 	assert.match(command, /E:\/workspace\/project with spaces\/\.judge\/judge-123\/live\.log/);
@@ -564,7 +565,7 @@ test("/judge run foo loads a taskbook and starts driving without aligning", asyn
 		await commands.get("judge").handler("run foo", ctx);
 
 		assert.deepEqual(starts, ["start"]);
-		assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write"]);
+		assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "subagent"]);
 		assert.equal(entries.at(-1)?.data.phase, "driving");
 		assert.equal(entries.at(-1)?.data.taskbookName, "foo");
 		assert.match(initialPrompt, /从任务书运行/);
@@ -1313,7 +1314,7 @@ test("session_start restores driving Judge state by starting the driver immediat
 	}
 
 	assert.equal(starts, 1);
-	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write"]);
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "subagent"]);
 	assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: "⚖ driving" });
 });
 

@@ -35,7 +35,7 @@ Judge 开启后 footer 显示:
 - `⚖ driving`:Driver 执行和 Judge 监督阶段。
 - `⚖ delivering`:最终交付确认阶段。
 
-关闭 Judge 会清理 footer/widget,并恢复普通工具集 `read,bash,edit,write`。
+关闭 Judge 会清理 footer/widget,并恢复进入 Judge 前的工具集。Driver 执行阶段至少启用 `read,bash,edit,write,subagent`,避免复杂任务里需要手动委派子代理时被工具集挡住。
 
 ## 任务书(Taskbook)
 
@@ -139,7 +139,7 @@ Windows 当前策略:
 
 - 通过 `resolveBashCommand()` 使用项目配置或 Git Bash。
 - 使用 `cmd.exe /d /s /c start "" <bash> --noprofile --norc -lc <command>`。
-- bash command 会先 `mkdir -p` 和 `touch live.log`,再 `tail -n +1 -f live.log`。
+- bash command 会先显式补 `PATH=/usr/bin:/bin:$PATH`,再 `mkdir -p`、`touch live.log`、`tail -n +1 -f live.log`;这是为了兼容 `--noprofile --norc` 下 PATH 丢失导致 `mkdir/touch/tail: command not found` 的 Windows 环境。
 - 不使用 Windows Terminal 特殊适配,不检测 `WT_SESSION`,不调用 `wt.exe`。
 
 测试必须 mock opener,不能真实打开系统终端。

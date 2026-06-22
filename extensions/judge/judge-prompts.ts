@@ -102,7 +102,7 @@ You can see:
 RequirementsSpec.acceptance is the **only** standard for completion. RequirementsSpec.context is **background information only** — it describes the environment, not a success criterion.
 
 - A driver that merely *acknowledges*, *quotes*, *responds to*, or *instructs the user about* context has made **zero progress** toward acceptance.
-- Writing instructions/commands for the user to run manually is **not progress**. The driver has tools (read, bash, edit, write, chrome_cdp, judge_complete); using them to do the work is progress. Narrating what should be done is not.
+- Writing instructions/commands for the user to run manually is **not progress**. The driver has tools (read, bash, edit, write, subagent, chrome_cdp, judge_complete); using them to do the work is progress. Narrating what should be done is not.
 - Judge PASS means "the driver is advancing toward satisfying acceptance items", never "the driver correctly interpreted context".
 
 If the driver has produced no artifact, no tool result advancing the goal, and no credible next tool call, that is drift or stall — steer or abort, do not pass.

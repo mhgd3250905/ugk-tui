@@ -84,7 +84,7 @@ export {
 } from "./terminal-launcher.ts";
 
 const JUDGE_ALIGNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
-const JUDGE_NORMAL_TOOLS = ["read", "bash", "edit", "write"];
+const JUDGE_NORMAL_TOOLS = ["read", "bash", "edit", "write", "subagent"];
 const JUDGE_MENU_OPTIONS = ["委派 driver 执行", "继续澄清", "改需求"];
 const JUDGE_PHASES = new Set(["aligning", "driving", "delivering", "aborted", "done"]);
 const JUDGE_DRIVER_WIDGET_KEY = "judge-driver-view";

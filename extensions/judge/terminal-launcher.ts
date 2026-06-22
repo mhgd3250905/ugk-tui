@@ -22,7 +22,7 @@ export function buildBashLiveLogCommand(liveLogPath: string): string {
 	const bashPath = liveLogPath.replace(/\\/g, "/");
 	const quotedDir = quoteBashLiteral(path.posix.dirname(bashPath));
 	const quotedPath = quoteBashLiteral(bashPath);
-	return `mkdir -p ${quotedDir}; touch ${quotedPath}; tail -n +1 -f ${quotedPath}; printf '\\n[Judge live log exited]\\n'; read -r -p 'Press Enter to close...' _`;
+	return `export PATH=/usr/bin:/bin:$PATH; mkdir -p ${quotedDir}; touch ${quotedPath}; tail -n +1 -f ${quotedPath}; printf '\\n[Judge live log exited]\\n'; read -r -p 'Press Enter to close...' _`;
 }
 
 export type WindowsLiveLogLaunchPlan = {

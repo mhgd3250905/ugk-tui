@@ -90,6 +90,10 @@ const JUDGE_PHASES = new Set(["aligning", "driving", "delivering", "aborted", "d
 const JUDGE_DRIVER_WIDGET_KEY = "judge-driver-view";
 type PassDeliveryAction = "accept" | "revise" | "stop" | "pending";
 
+export function shouldOpenLiveLogTerminal(ctx: { hasUI?: boolean }, env: NodeJS.ProcessEnv = process.env): boolean {
+	return Boolean(ctx.hasUI) && env.UGK_SKIP_JUDGE_LIVE_LOG_TERMINAL !== "1";
+}
+
 /** 把 Judge verdict 格式化成 widget 用的单行文本。 */
 function formatJudgeVerdictLine(verdict: { action: string; direction?: string; reason?: string; keepWatching?: boolean }): string {
 	if (verdict.action === "pass") {
@@ -815,7 +819,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 			},
 		});
 		// 委派后自动打开新终端实时看 driver + Judge 过程(零污染主 agent context)。
-		if (ctx.hasUI) {
+		if (shouldOpenLiveLogTerminal(ctx)) {
 			const liveLogPath = activeDriver.getLiveLogPath?.() ?? path.join(runDir, "live.log");
 			const result = openPreparedLiveLogTerminal(liveLogPath);
 			if (result.ok) {

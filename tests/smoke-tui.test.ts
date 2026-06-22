@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildReport, hasCrashText } from "../scripts/smoke-tui.mjs";
+import { buildReport, chooseDriver, hasCrashText, parseDriver } from "../scripts/smoke-tui.mjs";
 
 test("smoke report marks failed scenarios and crash text", () => {
 	const scenarios = [
@@ -15,4 +15,14 @@ test("smoke report marks failed scenarios and crash text", () => {
 	assert.match(report, /- ❌ doctor — timeout/);
 	assert.match(report, /Crash text: detected/);
 	assert.match(report, /Exit code: 1/);
+});
+
+test("smoke driver selection is explicit about TUI availability", () => {
+	assert.equal(parseDriver([]), "auto");
+	assert.equal(parseDriver(["--driver", "tui"]), "tui");
+	assert.equal(parseDriver(["--driver=rpc"]), "rpc");
+
+	assert.equal(chooseDriver("auto", { hasNodePty: true }), "tui");
+	assert.equal(chooseDriver("auto", { hasNodePty: false }), "rpc");
+	assert.equal(chooseDriver("tui", { hasNodePty: false }), "tui");
 });

@@ -11,6 +11,7 @@ import {
 	setJudgeDriverFactoryForTests,
 	setOpenLiveLogTerminalForTests,
 	setJudgeVerdictProviderForTests,
+	shouldOpenLiveLogTerminal,
 } from "../extensions/judge/judge.ts";
 import { ALIGN_PROMPT } from "../extensions/judge/judge-prompts.ts";
 import { loadTaskbook, saveTaskbook } from "../extensions/judge/taskbook.ts";
@@ -263,6 +264,12 @@ test("Windows live log launch plan opens bash tail in a visible system terminal"
 	assert.match(plan.args[9], /tail -n \+1 -f/);
 	assert.equal("launcher" in plan, false);
 	assert.doesNotMatch(plan.args.join(" "), /Get-Content/);
+});
+
+test("live log terminal can be disabled for smoke runs", () => {
+	assert.equal(shouldOpenLiveLogTerminal({ hasUI: true }, { UGK_SKIP_JUDGE_LIVE_LOG_TERMINAL: "1" }), false);
+	assert.equal(shouldOpenLiveLogTerminal({ hasUI: true }, {}), true);
+	assert.equal(shouldOpenLiveLogTerminal({ hasUI: false }, {}), false);
 });
 
 test("/judge enters aligning mode, switches to readonly tools, and injects ALIGN_PROMPT", async () => {

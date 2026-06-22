@@ -1,6 +1,6 @@
 # Judge 模块现状与接手指南
 
-更新时间: 2026-06-21
+更新时间: 2026-06-22
 
 本文是 Judge 模块的当前权威入口。`docs/handoff/` 和 `docs/superpowers/specs/` 中的 Judge 早期文档只作为历史材料;如果与本文或代码冲突,以本文和测试为准。
 
@@ -20,6 +20,13 @@ Judge 是 UGK 的实时监督模式:先把用户需求对齐成 `RequirementsSpe
 - `/judge run <name>`:加载任务书,跳过 ALIGN,直接启动 Driver。
 - `/judge edit <name>`:进入任务书编辑对齐模式,Judge 会拿着现有 Spec 用 `questionnaire` 逐条确认;产出修订 Spec 后可选择存回、继续调整或放弃。
 - `/judge list`:列出项目内任务书。
+
+`/judge` 菜单按当前状态展示,避免无效项:
+
+- 未开启:`新建监督任务` / `运行任务书` / `编辑任务书` / `列出任务书` / `诊断: 检查 bash 新窗口`。
+- `aligning`:无 Spec 时只显示 `继续澄清` / `退出 Judge`;有 Spec 后显示 `开始执行` / `继续澄清` / `修改当前 Spec` / `保存为任务书` / `退出 Judge`。
+- `driving`:`停止本次执行`。
+- `delivering`:等待 PASS ack 时显示 `接受交付` / `退出 Judge`,否则只显示 `退出 Judge`。
 
 Judge 开启后 footer 显示:
 
@@ -74,8 +81,9 @@ Judge 开启后 footer 显示:
    - Driver 成功调用 `judge_complete` 后进入最终判定。
    - Judge 对每条 `acceptance` 做最终 PASS/FAIL。
    - PASS 报告显示产出、验收证据、走过的路径。
-   - 如果 TUI 支持 confirm,可立即接受;否则进入 pending ack,用户后续用 `/judge ack` 接受。
-   - 如果用户拒绝 PASS 且仍有 steer 预算,Judge 会把这次拒绝当作继续修订信号,回到 `driving` 并要求 Driver 再次修到可接受。
+   - TUI 中 PASS 明确选择 `接受交付` / `继续修订` / `停止 Judge`;无确认 UI 时进入 pending ack,用户后续用 `/judge ack` 接受。
+   - `继续修订` 且仍有 steer 预算时,回到 `driving` 并要求 Driver 再次修到可接受。
+   - FAIL 若仍有 steer 预算会继续纠偏;若预算耗尽或不可继续,记录失败并结束本次 Judge。
 
 ## 关键实现文件
 

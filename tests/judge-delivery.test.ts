@@ -538,6 +538,7 @@ test("final PASS without confirm UI can be accepted later with /judge ack", asyn
 test("rejected final PASS with remaining steer budget returns to driving", async () => {
 	const { pi, commands, handlers, entries } = makePi();
 	const { ctx, notifications } = makeCtx(false);
+	(ctx.ui as any).select = (title: string, options: string[]) => title === "Judge PASS" ? "继续修订" : options[0];
 	const wakeupResults: any[] = [];
 	installDecisionSession([
 		JSON.stringify({ status: "pass", reason: "满足", evidence: ["文件存在"] }),
@@ -566,7 +567,7 @@ test("rejected final PASS with remaining steer budget returns to driving", async
 	assert.equal(entries.at(-1)?.data.pendingAckStatus, undefined);
 	assert.equal(wakeupResults[0].action, "steer");
 	assert.match(wakeupResults[0].direction, /User rejected the PASS delivery/);
-	assert.match(notifications.map((entry) => entry.message).join("\n"), /rejected/i);
+	assert.match(notifications.map((entry) => entry.message).join("\n"), /continue revising/i);
 });
 
 test("/judge ack accepts restored pending PASS delivery without parsing report text", async () => {
@@ -691,7 +692,7 @@ test("final FAIL returns to driving and steers the driver with evidence", async 
 
 test("final FAIL at max steer reports status without steering again", async () => {
 	const { pi, commands, handlers, entries } = makePi();
-	const { ctx, notifications } = makeCtx(true);
+	const { ctx, notifications, widgetCalls } = makeCtx(true);
 	const prompts: string[] = [];
 	const wakeupResults: any[] = [];
 	installDecisionSession([
@@ -719,14 +720,15 @@ test("final FAIL at max steer reports status without steering again", async () =
 		setJudgeDecisionSessionFactoryForTests(undefined);
 	}
 
-	assert.equal(entries.at(-1)?.data.phase, "delivering");
+	assert.equal(entries.at(-1)?.data.phase, "done");
 	assert.equal(wakeupResults[0].action, "pass");
 	assert.equal(wakeupResults[0].keepWatching, false);
 	assert.match(notifications.map((entry) => entry.message).join("\n"), /仍不满足验收/);
+	assert.deepEqual(widgetCalls.at(-1), { key: "judge-driver-view", content: undefined });
 
 	await commands.get("judge").handler("ack", ctx);
 
-	assert.equal(entries.at(-1)?.data.phase, "delivering");
+	assert.equal(entries.at(-1)?.data.phase, "done");
 	assert.match(notifications.map((entry) => entry.message).join("\n"), /PASS/);
 });
 

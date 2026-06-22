@@ -86,18 +86,9 @@ export {
 const JUDGE_ALIGNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const JUDGE_NORMAL_TOOLS = ["read", "bash", "edit", "write"];
 const JUDGE_MENU_OPTIONS = ["委派 driver 执行", "继续澄清", "改需求"];
-const JUDGE_COMMAND_MENU_OPTIONS = [
-	"新建对齐(从零)",
-	"运行任务书",
-	"保存任务书",
-	"编辑任务书",
-	"列出任务书",
-	"Toggle Judge",
-	"检查 bash 新窗口打开",
-	"Exit",
-];
 const JUDGE_PHASES = new Set(["aligning", "driving", "delivering", "aborted", "done"]);
 const JUDGE_DRIVER_WIDGET_KEY = "judge-driver-view";
+type PassDeliveryAction = "accept" | "revise" | "stop" | "pending";
 
 /** 把 Judge verdict 格式化成 widget 用的单行文本。 */
 function formatJudgeVerdictLine(verdict: { action: string; direction?: string; reason?: string; keepWatching?: boolean }): string {
@@ -423,6 +414,23 @@ export function registerJudge(pi: ExtensionAPI): void {
 		return state.phase === "aligning" || state.phase === "driving" || state.phase === "delivering";
 	}
 
+	function getJudgeCommandMenuOptions(): string[] {
+		if (state.phase === "aligning") {
+			return state.spec
+				? ["开始执行", "继续澄清", "修改当前 Spec", "保存为任务书", "退出 Judge", "Exit"]
+				: ["继续澄清", "退出 Judge", "Exit"];
+		}
+		if (state.phase === "driving") {
+			return ["停止本次执行", "Exit"];
+		}
+		if (state.phase === "delivering") {
+			return state.pendingAckStatus === "pass"
+				? ["接受交付", "退出 Judge", "Exit"]
+				: ["退出 Judge", "Exit"];
+		}
+		return ["新建监督任务", "运行任务书", "编辑任务书", "列出任务书", "诊断: 检查 bash 新窗口", "Exit"];
+	}
+
 	function enableJudge(ctx: ExtensionContext): void {
 		restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
 			? pi.getActiveTools()
@@ -451,6 +459,23 @@ export function registerJudge(pi: ExtensionAPI): void {
 		clearJudgeDriverWidget(ctx.ui);
 		setJudgeStatus(ctx, undefined);
 		ctx.ui.notify("Judge disabled.", "info");
+	}
+
+	async function choosePassDeliveryAction(ctx: ExtensionContext, canRevise: boolean): Promise<PassDeliveryAction> {
+		if (ctx.ui?.select && ctx.ui?.confirm) {
+			const options = canRevise ? ["接受交付", "继续修订", "停止 Judge"] : ["接受交付", "停止 Judge"];
+			const choice = await ctx.ui.select("Judge PASS", options);
+			if (choice === "接受交付") return "accept";
+			if (choice === "继续修订") return "revise";
+			if (choice === "停止 Judge") return "stop";
+			return "pending";
+		}
+		const acknowledged = ctx.ui?.confirm
+			? await ctx.ui.confirm("Judge PASS", "Accept this delivery?")
+			: false;
+		if (acknowledged) return "accept";
+		if (!ctx.ui?.confirm) return "pending";
+		return canRevise ? "revise" : "pending";
 	}
 
 	function checkBashLiveLogWindow(ctx: ExtensionContext): void {
@@ -661,13 +686,8 @@ export function registerJudge(pi: ExtensionAPI): void {
 					);
 
 					if (finalVerdict.status === "pass") {
-						// pi's confirm signature is (title, message, opts?) -> Promise<boolean>.
-						// Previously this called confirm with a single arg, leaving message undefined.
-						const canAskForAck = Boolean(ctx.ui?.confirm);
-						const acknowledged = canAskForAck
-							? await ctx.ui.confirm("Judge PASS", "Accept this delivery?")
-							: false;
-						if (acknowledged) {
+						const passAction = await choosePassDeliveryAction(ctx, canContinueAfterFail);
+						if (passAction === "accept") {
 							if (state.taskbookName && state.spec) {
 								await recordTaskbookRun(ctx, {
 									name: state.taskbookName,
@@ -685,11 +705,11 @@ export function registerJudge(pi: ExtensionAPI): void {
 							restoreActiveTools();
 							return { action: "pass", keepWatching: false };
 						}
-						if (canAskForAck && canContinueAfterFail) {
+						if (passAction === "revise" && canContinueAfterFail) {
 							state = startDriving({ ...state, summary: deliveryReport });
 							persistState(pi, state);
 							setJudgeStatus(ctx, "⚖ driving");
-							ctx.ui.notify("Judge PASS rejected; driver will continue revising.", "warning");
+							ctx.ui.notify("Judge PASS will continue revising.", "warning");
 							return {
 								action: "steer",
 								direction: [
@@ -698,6 +718,15 @@ export function registerJudge(pi: ExtensionAPI): void {
 								].join("\n"),
 								keepWatching: true,
 							};
+						}
+						if (passAction === "stop") {
+							state = abortJudge({ ...state, summary: deliveryReport });
+							persistState(pi, state);
+							clearDriverWidget();
+							setJudgeStatus(ctx, undefined);
+							restoreActiveTools();
+							ctx.ui.notify("Judge delivery stopped.", "info");
+							return { action: "pass", keepWatching: false };
 						}
 						state = markPendingAck(enterDelivering({ ...state, summary: deliveryReport }), "pass");
 						// 暂存 taskbook 沉淀数据:若用户后来 /judge ack 接受,ack handler 会消费它
@@ -714,7 +743,7 @@ export function registerJudge(pi: ExtensionAPI): void {
 						setJudgeStatus(ctx, "⚖ delivering");
 						clearDriverWidget();
 						ctx.ui.notify(
-							canAskForAck
+							ctx.ui?.confirm
 								? "Judge PASS rejected, but no steer budget remains. Run /judge ack to accept it anyway or /judge toggle to stop Judge."
 								: "Judge delivery is waiting for user acknowledgement. Run /judge ack to accept it later.",
 							"warning",
@@ -732,9 +761,10 @@ export function registerJudge(pi: ExtensionAPI): void {
 								updateExperience: false,
 							});
 						}
-						state = enterDelivering({ ...state, summary: deliveryReport });
+						state = completeJudge({ ...state, summary: deliveryReport });
 						persistState(pi, state);
 						clearDriverWidget();
+						setJudgeStatus(ctx, undefined);
 						restoreActiveTools();
 						ctx.ui.notify(`Judge final delivery failed and cannot continue automatically: ${finalVerdict.reason}`, "warning");
 						return { action: "pass", keepWatching: false };
@@ -793,19 +823,30 @@ export function registerJudge(pi: ExtensionAPI): void {
 			}
 		}
 		const startedDriver = activeDriver;
+		function handleDriverStartFailure(error: unknown) {
+			if (activeDriver !== startedDriver) return;
+			state = abortJudge(state);
+			persistState(pi, state);
+			ctx.ui.notify(`Judge driver start failed: ${error instanceof Error ? error.message : String(error)}`, "warning");
+			clearDriverWidget();
+			setJudgeStatus(ctx, undefined);
+			restoreActiveTools();
+		}
 		const startPromise = startedDriver.start().then(() => {
 			if (activeDriver === startedDriver) refreshDriverWidget();
 		});
 		if (options.background) {
-			void startPromise.catch((error) => {
-				if (activeDriver !== startedDriver) return;
-				ctx.ui.notify(`Judge driver start failed: ${error instanceof Error ? error.message : String(error)}`, "warning");
-			});
+			void startPromise.catch(handleDriverStartFailure);
 			refreshDriverWidget(); // driver 起来后立即显示一次 widget
 			ctx.ui.notify("Judge driver started.", "info");
 			return;
 		}
-		await startPromise;
+		try {
+			await startPromise;
+		} catch (error) {
+			handleDriverStartFailure(error);
+			return;
+		}
 		refreshDriverWidget(); // driver 起来后立即显示一次 widget
 		ctx.ui.notify("Judge driver started.", "info");
 	}
@@ -936,17 +977,21 @@ export function registerJudge(pi: ExtensionAPI): void {
 	async function resolveJudgeCommandArgs(args: unknown, ctx: ExtensionContext): Promise<string | undefined> {
 		const raw = String(args ?? "").trim();
 		if (raw) return raw;
-		if (!ctx.ui?.select) return "toggle";
+		if (!ctx.ui?.select) return undefined;
 
-		const selection = await ctx.ui.select("Judge", JUDGE_COMMAND_MENU_OPTIONS);
+		const selection = await ctx.ui.select("Judge", getJudgeCommandMenuOptions());
 		if (!selection || selection === "Exit") return undefined;
-		if (selection === "新建对齐(从零)") return "align";
+		if (selection === "新建监督任务") return "align";
 		if (selection === "运行任务书") return "run";
-		if (selection === "保存任务书") return "save";
+		if (selection === "保存为任务书") return "save";
 		if (selection === "编辑任务书") return "edit";
 		if (selection === "列出任务书") return "list";
-		if (selection === "Toggle Judge") return "toggle";
-		if (selection === "检查 bash 新窗口打开") return "check-bash-window";
+		if (selection === "诊断: 检查 bash 新窗口") return "check-bash-window";
+		if (selection === "退出 Judge" || selection === "停止本次执行") return "toggle";
+		if (selection === "继续澄清") return "clarify";
+		if (selection === "开始执行") return "delegate";
+		if (selection === "修改当前 Spec") return "change-spec";
+		if (selection === "接受交付") return "ack";
 		return undefined;
 	}
 
@@ -961,6 +1006,10 @@ export function registerJudge(pi: ExtensionAPI): void {
 			const tokens = resolvedArgs.trim().split(/\s+/).filter(Boolean);
 			const action = (tokens[0] ?? "").toLowerCase();
 			const name = tokens[1];
+			if (action === "align") {
+				enableJudge(ctx);
+				return;
+			}
 			if (action === "ack") {
 				if (state.phase === "delivering" && state.pendingAckStatus === "pass") {
 					// pending ack 路径补 taskbook PASS 沉淀(reviewer Blocker 修复)
@@ -987,6 +1036,45 @@ export function registerJudge(pi: ExtensionAPI): void {
 					return;
 				}
 				ctx.ui.notify("No pending PASS Judge delivery to accept.", "warning");
+				return;
+			}
+			if (action === "clarify") {
+				if (state.phase !== "aligning") {
+					enableJudge(ctx);
+					return;
+				}
+				state = enterAligning(state);
+				persistState(pi, state);
+				setJudgeStatus(ctx, "⚖ judge");
+				pi.sendUserMessage("继续澄清 Judge RequirementsSpec。请优先使用 questionnaire，并重新输出可解析 JSON。", { deliverAs: "followUp" });
+				return;
+			}
+			if (action === "delegate") {
+				if (!state.spec) {
+					ctx.ui.notify("当前没有可执行的 Judge RequirementsSpec。", "warning");
+					return;
+				}
+				if (!state.aligningQuestionnaireUsed) {
+					ctx.ui.notify("Judge 产出 Spec 前未用 questionnaire 确认假设,拒绝委派。", "warning");
+					return;
+				}
+				state = startDriving(state);
+				persistState(pi, state);
+				await startActiveJudgeDriver(ctx, state.spec);
+				return;
+			}
+			if (action === "change-spec") {
+				if (!state.spec) {
+					ctx.ui.notify("当前没有可修改的 Judge RequirementsSpec。", "warning");
+					return;
+				}
+				const edited = await ctx.ui.editor("修改当前 Spec", formatRequirementsSpec(state.spec));
+				state = enterAligning(state);
+				persistState(pi, state);
+				setJudgeStatus(ctx, "⚖ judge");
+				if (edited?.trim()) {
+					pi.sendUserMessage(`按以下修改后的需求继续 Judge aligning：\n\n${edited.trim()}`, { deliverAs: "followUp" });
+				}
 				return;
 			}
 			if (action === "toggle") {
@@ -1102,7 +1190,11 @@ export function registerJudge(pi: ExtensionAPI): void {
 			restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
 				? pi.getActiveTools()
 				: JUDGE_NORMAL_TOOLS;
+			pi.setActiveTools(JUDGE_NORMAL_TOOLS);
 			setJudgeStatus(ctx, "⚖ driving");
+			if (state.spec && !activeDriver) {
+				await startActiveJudgeDriver(ctx, state.spec, { background: true });
+			}
 		} else if (state.phase === "delivering") {
 			restoreToolsSnapshot ??= typeof pi.getActiveTools === "function"
 				? pi.getActiveTools()
@@ -1150,6 +1242,10 @@ export function registerJudge(pi: ExtensionAPI): void {
 				return;
 			}
 			const choice = await ctx.ui.select("Judge next step", ["存回任务书", "继续调整", "放弃"]);
+			if (!choice) {
+				ctx.ui.notify("Judge next step cancelled; edit mode remains active.", "info");
+				return;
+			}
 			if (choice === "存回任务书") {
 				await updateTaskbookSpec(getCwd(ctx), state.taskbookName!, state.spec!);
 				ctx.ui.notify(`任务书 "${state.taskbookName}" 已更新。`, "info");
@@ -1177,6 +1273,10 @@ export function registerJudge(pi: ExtensionAPI): void {
 		}
 
 		const choice = await ctx.ui.select("Judge next step", JUDGE_MENU_OPTIONS);
+		if (!choice) {
+			ctx.ui.notify("Judge next step cancelled; aligning remains active.", "info");
+			return;
+		}
 		if (choice === "委派 driver 执行") {
 			// C-2 机制闸:aligning 阶段没调过 questionnaire 就选了委派,拒绝,逼 Judge 回去确认假设。
 			// 防止 Judge 偷懒跳过 questionnaire 直接拍 Spec(参见 2026-06-19 知乎验证暴露的问题)。

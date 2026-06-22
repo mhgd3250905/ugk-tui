@@ -279,7 +279,7 @@ test("judge context keeps only the current align prompt and drops it outside ali
 	assert.deepEqual(inactive.messages, [userMessage]);
 });
 
-test("/judge with no args opens an action menu whose toggle enables Judge", async () => {
+test("/judge with no args opens an inactive action menu and starts new Judge work", async () => {
 	const { pi, commands, handlers, activeTools } = makePi();
 	const { ctx, selections, statusCalls } = makeCtx();
 	registerJudge(pi as any);
@@ -288,18 +288,42 @@ test("/judge with no args opens an action menu whose toggle enables Judge", asyn
 	const injected = await handlers.get("before_agent_start")![0]({}, ctx);
 
 	assert.deepEqual(selections.at(-1)?.options, [
-		"新建对齐(从零)",
+		"新建监督任务",
 		"运行任务书",
-		"保存任务书",
 		"编辑任务书",
 		"列出任务书",
-		"Toggle Judge",
-		"检查 bash 新窗口打开",
+		"诊断: 检查 bash 新窗口",
 		"Exit",
 	]);
 	assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
 	assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: "⚖ judge" });
 	assert.equal(injected.message.content, ALIGN_PROMPT);
+});
+
+test("/judge with no args and no select UI does not toggle implicitly", async () => {
+	const { pi, commands, activeTools } = makePi();
+	const { ctx } = makeCtx();
+	delete (ctx.ui as any).select;
+	registerJudge(pi as any);
+
+	await commands.get("judge").handler("", ctx);
+
+	assert.deepEqual(activeTools, []);
+});
+
+test("/judge active menu exposes exit instead of ambiguous toggle", async () => {
+	const { pi, commands } = makePi();
+	const { ctx, selections } = makeCtx();
+	registerJudge(pi as any);
+
+	await commands.get("judge").handler("toggle", ctx);
+	await commands.get("judge").handler("", ctx);
+
+	assert.deepEqual(selections.at(-1)?.options, [
+		"继续澄清",
+		"退出 Judge",
+		"Exit",
+	]);
 });
 
 test("/judge toggle disables an active Judge session", async () => {
@@ -1029,6 +1053,46 @@ test("agent_end edit requirements returns to aligning with editor text", async (
 	assert.deepEqual(userMessages.at(-1)?.options, { deliverAs: "followUp" });
 });
 
+test("agent_end cancelled next-step menu leaves normal aligning active", async () => {
+	const { pi, commands, handlers, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	ctx.ui.select = (title: string, options: string[]) => title === "Judge" ? options[0] : undefined;
+	registerJudge(pi as any);
+
+	await commands.get("judge").handler("", ctx);
+	emitQuestionnaireConfirmed(handlers, ctx);
+	await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+
+	assert.equal(entries.at(-1)?.data.phase, "aligning");
+	assert.match(notifications.at(-1)?.message ?? "", /cancelled/);
+});
+
+test("agent_end cancelled edit next-step menu leaves edit mode active", async () => {
+	const { pi, commands, handlers, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	const tmp = mkdtempSync(path.join(os.tmpdir(), "ugk-taskbook-edit-cancel-"));
+	(ctx as any).cwd = tmp;
+	await saveFixtureTaskbook(tmp, "foo");
+	ctx.ui.select = (title: string, options: string[]) => {
+		if (title === "选择任务书") return "foo";
+		if (title === "Judge next step") return undefined;
+		return options[0];
+	};
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("edit", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx);
+	} finally {
+		rmSync(tmp, { recursive: true, force: true });
+	}
+
+	assert.equal(entries.at(-1)?.data.phase, "aligning");
+	assert.equal(entries.at(-1)?.data.aligningMode, "edit");
+	assert.match(notifications.at(-1)?.message ?? "", /cancelled/);
+});
+
 test("tool_call blocks unsafe bash commands only while Judge is aligning", async () => {
 	const { pi, commands, handlers } = makePi();
 	const { ctx } = makeCtx();
@@ -1149,7 +1213,7 @@ test("driving input continues with a warning when no active driver exists", asyn
 		customType: "judge-state",
 		data: {
 			phase: "driving",
-			spec: fixtureTaskbookSpec(),
+			spec: null,
 			summary: "",
 			steerCount: 0,
 			maxSteer: 5,
@@ -1189,6 +1253,68 @@ test("driving input send failure warns and stays handled", async () => {
 	} finally {
 		setJudgeDriverFactoryForTests(undefined);
 	}
+});
+
+test("driver start failure aborts Judge and restores tools", async () => {
+	const { pi, commands, handlers, activeTools, entries } = makePi();
+	const { ctx, notifications, statusCalls, widgetCalls } = makeCtx();
+	setJudgeDriverFactoryForTests(async () => makeJudgeDriverHandle({
+		async start() {
+			throw new Error("spawn failed");
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await assert.doesNotReject(() => handlers.get("agent_end")![0]({ messages: [assistantWithSpec()] }, ctx));
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+	}
+
+	assert.equal(entries.at(-1)?.data.phase, "aborted");
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "chrome_cdp"]);
+	assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: undefined });
+	assert.deepEqual(widgetCalls.at(-1), { key: "judge-driver-view", content: undefined });
+	assert.match(notifications.map((entry) => entry.message).join("\n"), /Judge driver start failed: spawn failed/);
+});
+
+test("session_start restores driving Judge state by starting the driver immediately", async () => {
+	const { pi, handlers, activeTools } = makePi();
+	const { ctx, statusCalls } = makeCtx();
+	let starts = 0;
+	ctx.sessionManager.getEntries = () => [
+		{
+			type: "custom",
+			customType: "judge-state",
+			data: {
+				phase: "driving",
+				spec: fixtureTaskbookSpec("恢复执行"),
+				summary: "restored",
+				steerCount: 0,
+				maxSteer: 5,
+				keepWatching: true,
+				aligningQuestionnaireUsed: true,
+			},
+		},
+	];
+	setJudgeDriverFactoryForTests(async () => makeJudgeDriverHandle({
+		async start() {
+			starts += 1;
+		},
+	}));
+	registerJudge(pi as any);
+
+	try {
+		await handlers.get("session_start")![0]({ reason: "resume" }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+	}
+
+	assert.equal(starts, 1);
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write"]);
+	assert.deepEqual(statusCalls.at(-1), { key: "judge-mode", value: "⚖ driving" });
 });
 
 test("session_start restores persisted aligning Judge state and readonly tools", async () => {

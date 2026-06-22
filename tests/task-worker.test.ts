@@ -82,9 +82,13 @@ test("dispatchWorker reports failed worker result", async () => {
 	}
 });
 
-test("worker agent declares bounded execution tools", () => {
+test("worker agent inherits all tools and forbids subagent in prompt", () => {
 	const source = readFileSync(path.resolve("agents/worker.md"), "utf8");
 
-	assert.match(source, /^tools: read, write, edit, bash, grep, find, ls$/m);
+	// 不写 tools 字段 = 继承全部默认工具(含 chrome_cdp / mcp)
+	assert.doesNotMatch(source, /^tools:/m);
+	// 但必须在 prompt 里禁止 subagent
+	assert.match(source, /不得调用 subagent|禁止派 subagent|禁止.*subagent/);
+	// 复制提示仍在
 	assert.match(source, /~\/\.pi\/agent\/agents\/worker\.md/);
 });

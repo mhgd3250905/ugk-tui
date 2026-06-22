@@ -126,6 +126,26 @@ function assistantWithSpec() {
 	};
 }
 
+function assistantWithSubagentSpec() {
+	return {
+		role: "assistant",
+		content: [
+			{
+				type: "text",
+				text: `\`\`\`json
+{
+  "goal": "并行审核所有测试用例",
+  "hardConstraints": ["任务必须拆分为 subagent 并行执行"],
+  "acceptance": ["至少一次 subagent 调用", "不得陷入 bash 探测循环"],
+  "forbidden": ["先用 bash 探测 PATH"],
+  "context": "bash PATH 可能损坏"
+}
+\`\`\``,
+			},
+		],
+	};
+}
+
 function fixtureTaskbookSpec(goal = "从任务书运行") {
 	return {
 		goal,
@@ -507,6 +527,35 @@ test("delegate driver uses ctx.cwd for cwd and runDir", async () => {
 
 	assert.equal(received.at(-1)?.cwd, "E:/workspace/judge-project");
 	assert.match(received.at(-1)?.runDir ?? "", /^E:[/\\]workspace[/\\]judge-project[/\\]\.judge[/\\]judge-\d+$/);
+});
+
+test("driver prompt tells subagent-required tasks to use subagent before bash probing", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	let initialPrompt = "";
+	setJudgeDriverFactoryForTests(async (options: any) => {
+		initialPrompt = options.initialPrompt;
+		return makeJudgeDriverHandle();
+	});
+	registerJudge(pi as any);
+
+	try {
+		await commands.get("judge").handler("", ctx);
+		emitQuestionnaireConfirmed(handlers, ctx);
+		await handlers.get("agent_end")![0]({ messages: [assistantWithSubagentSpec()] }, ctx);
+	} finally {
+		setJudgeDriverFactoryForTests(undefined);
+	}
+
+	assert.match(initialPrompt, /first substantive tool call must be subagent/i);
+	assert.match(initialPrompt, /Do not spend turns probing bash\/PATH\/ls first/i);
+});
+
+test("driver agent definition exposes subagent as an executable tool", () => {
+	const source = readFileSync(path.resolve("agents/driver.md"), "utf8");
+
+	assert.match(source, /^tools: .*subagent/m);
+	assert.match(source, /你有工具\(.*subagent.*\)/);
 });
 
 test("/judge save foo writes a taskbook from the current Judge spec", async () => {

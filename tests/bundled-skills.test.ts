@@ -12,6 +12,7 @@ const docxPath = new URL("../skills/docx/SKILL.md", import.meta.url);
 const docxLicensePath = new URL("../skills/docx/LICENSE.txt", import.meta.url);
 const mcpGuidePath = new URL("../skills/mcp-guide/SKILL.md", import.meta.url);
 const mcpConfigureScriptPath = new URL("../skills/mcp-guide/scripts/configure_mcp.py", import.meta.url);
+const bashGuidePath = new URL("../skills/bash-guide/SKILL.md", import.meta.url);
 
 test("bundles Anthropic skill creator as a preinstalled skill", () => {
 	const skill = fs.readFileSync(skillCreatorPath, "utf8");
@@ -42,6 +43,16 @@ test("bundles MCP guide as a preinstalled skill", () => {
 	assert.match(skill, /npm link/);
 	assert.match(skill, /\/mcp status/);
 	assert.equal(fs.existsSync(mcpConfigureScriptPath), true);
+});
+
+test("bundles Bash guide as a preinstalled skill", () => {
+	const skill = fs.readFileSync(bashGuidePath, "utf8");
+
+	assert.match(skill, /^---\s*\nname: bash-guide/m);
+	assert.match(skill, /settings\.json.*shellPath/i);
+	assert.match(skill, /\/doctor/);
+	assert.match(skill, /subagent/i);
+	assert.match(skill, /不要.*反复.*which bash|avoid repeated .*which bash/i);
 });
 
 test("npm package excludes local MCP config files", () => {

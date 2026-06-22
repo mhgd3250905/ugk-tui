@@ -556,6 +556,8 @@ export function registerJudge(pi: ExtensionAPI): void {
 			"[JUDGE DRIVER TASK]",
 			"Execute the following RequirementsSpec. When complete, call the judge_complete tool.",
 			"",
+			"Driver rule: If the RequirementsSpec mentions subagent, parallel subagents, or delegated agents, your first substantive tool call must be subagent. Do not spend turns probing bash/PATH/ls first; use bash only after subagent output shows it is necessary or the Spec explicitly requires bash.",
+			"",
 			specText,
 		].join("\n");
 		if (state.taskbookName) {

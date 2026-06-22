@@ -15,6 +15,31 @@ test("checkBash passes when bash returns ok", async () => {
 	assert.match(result.summary, /bash available/);
 });
 
+test("checkBash persists resolved Windows Git Bash path for child agent sessions", async () => {
+	const agentDir = "C:\\Users\\tester\\.pi\\agent";
+	const settingsPath = "C:\\Users\\tester\\.pi\\agent\\settings.json";
+	const writes = new Map<string, string>();
+	const createdDirs: string[] = [];
+
+	const result = await checkBash({
+		platform: "win32",
+		agentDir,
+		resolveBash: () => ({ command: "D:\\Git\\bin\\bash.exe", source: "common Git Bash location" }),
+		exec: async () => ({ stdout: "ok\n" }),
+		readFile: () => JSON.stringify({ model: "deepseek-v4-pro" }),
+		writeFile: (filePath: string, content: string) => writes.set(filePath, content),
+		mkdir: (dirPath: string) => createdDirs.push(dirPath),
+	} as any);
+
+	assert.equal(result.status, "pass");
+	assert.deepEqual(createdDirs, [agentDir]);
+	const settings = JSON.parse(writes.get(settingsPath) ?? "{}");
+	assert.deepEqual(settings, {
+		model: "deepseek-v4-pro",
+		shellPath: "D:\\Git\\bin\\bash.exe",
+	});
+});
+
 test("checkBash fails when bash cannot execute", async () => {
 	const result = await checkBash({
 		resolveBash: () => ({ command: "bash", source: "PATH" }),

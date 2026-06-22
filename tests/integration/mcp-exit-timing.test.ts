@@ -6,9 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const stubServerPath = fileURLToPath(new URL("./fixtures/mcp-stub-server.mjs", import.meta.url));
-const registryPath = fileURLToPath(new URL("../extensions/mcp/registry.ts", import.meta.url));
-const indexPath = fileURLToPath(new URL("../extensions/mcp/index.ts", import.meta.url));
+const stubServerPath = fileURLToPath(new URL("../fixtures/mcp-stub-server.mjs", import.meta.url));
+const registryPath = fileURLToPath(new URL("../../extensions/mcp/registry.ts", import.meta.url));
+const indexPath = fileURLToPath(new URL("../../extensions/mcp/index.ts", import.meta.url));
 
 function listProcessCommandLines(): string {
 	if (process.platform !== "win32") {

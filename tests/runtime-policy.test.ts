@@ -29,6 +29,21 @@ test("package does not include playwright as a runtime dependency", () => {
 	assert.equal(pkg.dependencies.playwright, undefined);
 });
 
+test("default test script excludes slow MCP stdio integration tests", () => {
+	const pkg = readJson("package.json");
+
+	assert.equal(fs.existsSync("tests/mcp-client.test.ts"), false);
+	assert.equal(fs.existsSync("tests/mcp-registry.test.ts"), false);
+	assert.equal(fs.existsSync("tests/mcp-extension.test.ts"), false);
+	assert.equal(fs.existsSync("tests/mcp-exit-timing.test.ts"), false);
+	assert.equal(fs.existsSync("tests/integration/mcp-client.test.ts"), true);
+	assert.equal(fs.existsSync("tests/integration/mcp-registry.test.ts"), true);
+	assert.equal(fs.existsSync("tests/integration/mcp-extension.test.ts"), true);
+	assert.equal(fs.existsSync("tests/integration/mcp-exit-timing.test.ts"), true);
+	assert.equal(pkg.scripts.test, 'node --test "tests/*.test.ts"');
+	assert.equal(pkg.scripts["test:integration"], 'node --test "tests/integration/*.test.ts"');
+});
+
 test("applyUgkRuntimePolicy disables pi-owned update surfaces", () => {
 	const env = {
 		PI_SKIP_VERSION_CHECK: "0",

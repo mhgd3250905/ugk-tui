@@ -9,11 +9,11 @@ import {
 	createMcpClient,
 	killStdioTransportProcess,
 	listTools,
-} from "../extensions/mcp/client.ts";
+} from "../../extensions/mcp/client.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const stubServerPath = path.join(__dirname, "fixtures", "mcp-stub-server.mjs");
-const hangingServerPath = path.join(__dirname, "fixtures", "mcp-hanging-server.mjs");
+const stubServerPath = path.join(__dirname, "..", "fixtures", "mcp-stub-server.mjs");
+const hangingServerPath = path.join(__dirname, "..", "fixtures", "mcp-hanging-server.mjs");
 
 function getClientProcessPid(client: ReturnType<typeof createMcpClient>): number | undefined {
 	return (client as any)._transport?._process?.pid;

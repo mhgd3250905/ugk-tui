@@ -18,6 +18,8 @@ export interface BashCheckDeps {
 	agentDir?: string;
 	exists?: (candidate: string) => boolean;
 	readFile?: (filePath: string) => string;
+	writeFile?: (filePath: string, content: string) => void;
+	mkdir?: (dirPath: string, options: { recursive: true }) => void;
 }
 
 export interface BashResolution {
@@ -50,6 +52,35 @@ function readShellPathFromSettings(agentDir: string, readFile: (filePath: string
 	} catch {
 		return undefined;
 	}
+}
+
+function readSettings(agentDir: string, readFile: (filePath: string) => string): Record<string, unknown> {
+	try {
+		const settings = JSON.parse(readFile(path.join(agentDir, "settings.json")));
+		return settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+	} catch {
+		return {};
+	}
+}
+
+function persistBashResolutionForChildAgents(resolution: BashResolution, deps: BashCheckDeps): void {
+	const platform = deps.platform ?? process.platform;
+	if (platform !== "win32" || resolution.source === "settings.json shellPath") return;
+	if (!path.win32.isAbsolute(resolution.command) || path.basename(resolution.command).toLowerCase() !== "bash.exe") return;
+
+	const agentDir = deps.agentDir ?? defaultAgentDir();
+	const readFile = deps.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
+	const writeFile = deps.writeFile ?? ((filePath: string, content: string) => fs.writeFileSync(filePath, content));
+	const mkdir = deps.mkdir ?? ((dirPath: string, options: { recursive: true }) => {
+		fs.mkdirSync(dirPath, options);
+	});
+	const settingsPath = path.join(agentDir, "settings.json");
+	const settings = readSettings(agentDir, readFile);
+	if (settings.shellPath === resolution.command) return;
+
+	settings.shellPath = resolution.command;
+	mkdir(agentDir, { recursive: true });
+	writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 export function resolveBashCommand(deps: BashCheckDeps = {}): BashResolution {
@@ -97,6 +128,7 @@ export async function checkBash(deps: BashCheckDeps = {}): Promise<DoctorResult>
 	try {
 		const result = await exec(bash.command, ["-lc", "echo ok"], { timeout: 3000 });
 		if (String(result.stdout).includes("ok")) {
+			persistBashResolutionForChildAgents(bash, deps);
 			return { status: "pass", summary: `bash available (${bash.source}: ${bash.command})` };
 		}
 		return {

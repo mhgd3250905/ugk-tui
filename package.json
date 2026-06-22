@@ -14,7 +14,8 @@
   ],
   "scripts": {
     "cron:start": "node cron/service.ts",
-    "test": "node --test \"tests/*.test.ts\""
+    "test": "node --test \"tests/*.test.ts\"",
+    "test:integration": "node --test \"tests/integration/*.test.ts\""
   },
   "pi": {
     "extensions": [

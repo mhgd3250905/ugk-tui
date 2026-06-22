@@ -5,12 +5,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import registerUgkExtension from "../extensions/index.ts";
-import { registerMcp, createMcpDoctorCheck } from "../extensions/mcp/index.ts";
-import { loadMcpConfig } from "../extensions/mcp/config.ts";
+import registerUgkExtension from "../../extensions/index.ts";
+import { registerMcp, createMcpDoctorCheck } from "../../extensions/mcp/index.ts";
+import { loadMcpConfig } from "../../extensions/mcp/config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const stubServerPath = path.join(__dirname, "fixtures", "mcp-stub-server.mjs");
+const stubServerPath = path.join(__dirname, "..", "fixtures", "mcp-stub-server.mjs");
 const isolatedUserConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-test-user-"));
 const isolatedHome = path.join(isolatedUserConfigRoot, "home");
 
@@ -351,7 +351,7 @@ test("process cleanup waits for async registry disconnect", async () => {
 		registry: registry as any,
 		loadConfig: () => ({ servers: new Map(), errors: [] }),
 	});
-	const mcpModule = await import("../extensions/mcp/index.ts");
+	const mcpModule = await import("../../extensions/mcp/index.ts");
 
 	assert.equal(typeof mcpModule.disconnectMcpCleanupRegistries, "function");
 	assert.ok(process.listenerCount("beforeExit") >= beforeExitListeners);

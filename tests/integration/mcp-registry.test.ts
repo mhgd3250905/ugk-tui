@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type McpConnection, McpRegistry } from "../extensions/mcp/registry.ts";
+import { type McpConnection, McpRegistry } from "../../extensions/mcp/registry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const stubServerPath = path.join(__dirname, "fixtures", "mcp-stub-server.mjs");
-const hangingServerPath = path.join(__dirname, "fixtures", "mcp-hanging-server.mjs");
+const stubServerPath = path.join(__dirname, "..", "fixtures", "mcp-stub-server.mjs");
+const hangingServerPath = path.join(__dirname, "..", "fixtures", "mcp-hanging-server.mjs");
 
 const connectOpts = {
 	connectTimeoutMs: 1000,

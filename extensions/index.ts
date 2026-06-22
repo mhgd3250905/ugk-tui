@@ -27,6 +27,7 @@ import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
 import registerJudge from "./judge/judge.ts";
+import registerTask from "./task/task.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
 import { createCoreDoctorChecks } from "./doctor/checks.ts";
@@ -50,6 +51,9 @@ export function suppressNaturalAtAutocomplete(current: AutocompleteProvider): Au
 				return null;
 			}
 			return current.getSuggestions(lines, cursorLine, cursorCol, options);
+		},
+		applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+			return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
 		},
 	};
 }
@@ -102,6 +106,9 @@ export default function (pi: ExtensionAPI) {
 
 	// 1.3b.2) judge:需求对齐骨架(/judge 只读澄清 + driver stub)
 	registerJudge(pi);
+
+	// 1.3b.3) task:固定任务 taskbook 创造/复用系统
+	registerTask(pi);
 
 	// 1.3c) chrome-cdp:受保护的本地登录态 Chrome 控制器(/cdp + chrome_cdp tool)
 	registerChromeCdp(pi);

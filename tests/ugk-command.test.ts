@@ -82,3 +82,21 @@ test("autocomplete wrapper leaves natural @agent text alone", async () => {
 	assert.notEqual(await provider.getSuggestions(["@./"], 0, 3, { signal: new AbortController().signal }), null);
 	assert.equal(calls, 2);
 });
+
+test("autocomplete wrapper preserves prototype applyCompletion", () => {
+	class Provider {
+		async getSuggestions() {
+			return { items: [{ value: "x", label: "x" }], prefix: "@" };
+		}
+
+		applyCompletion(lines: string[], _cursorLine: number, _cursorCol: number) {
+			return { lines: [...lines, "applied"], cursorLine: 1, cursorCol: 7 };
+		}
+	}
+
+	const provider = suppressNaturalAtAutocomplete(new Provider() as any);
+	assert.deepEqual(
+		provider.applyCompletion(["@"], 0, 1, { value: "x", label: "x" }, "@"),
+		{ lines: ["@", "applied"], cursorLine: 1, cursorCol: 7 },
+	);
+});

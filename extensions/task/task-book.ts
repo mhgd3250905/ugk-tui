@@ -1,0 +1,244 @@
+import { existsSync } from "node:fs";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import type { RequirementsSpec } from "../judge/judge-state.ts";
+
+export interface VerifyFailure {
+	assertion: string;
+	expected: string;
+	actual: string;
+	hint?: string;
+}
+
+export interface TaskRun {
+	timestamp: string;
+	status: "pass" | "fail";
+	input: unknown;
+	exitCode: number;
+	verifyFailures: VerifyFailure[];
+	duration: number;
+}
+
+export interface Taskbook {
+	name: string;
+	description: string;
+	scope: "user" | "project";
+	createdAt: string;
+	updatedAt: string;
+	tags?: string[];
+	runs: TaskRun[];
+}
+
+export interface LoadedTaskbook {
+	taskbook: Taskbook;
+	spec: RequirementsSpec;
+	skill: string;
+	verify: string;
+	contract: unknown;
+	scope: "user" | "project";
+	dir: string;
+}
+
+export function tasksRootUser(): string {
+	return path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"), "tasks");
+}
+
+export function tasksRootProject(cwd: string): string {
+	return path.join(cwd, ".tasks");
+}
+
+export function taskDir(scope: "user" | "project", cwd: string, name: string): string {
+	return path.join(scope === "project" ? tasksRootProject(cwd) : tasksRootUser(), name);
+}
+
+export function isValidTaskbookName(name: string): boolean {
+	return /^[A-Za-z0-9_-]+$/.test(name);
+}
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+export function isRequirementsSpec(value: unknown): value is RequirementsSpec {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const record = value as Record<string, unknown>;
+	return (
+		typeof record.goal === "string" &&
+		isStringArray(record.hardConstraints) &&
+		isStringArray(record.acceptance) &&
+		isStringArray(record.forbidden) &&
+		typeof record.context === "string"
+	);
+}
+
+function isVerifyFailure(value: unknown): value is VerifyFailure {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const record = value as Record<string, unknown>;
+	return (
+		typeof record.assertion === "string" &&
+		typeof record.expected === "string" &&
+		typeof record.actual === "string" &&
+		(record.hint === undefined || typeof record.hint === "string")
+	);
+}
+
+function isTaskRun(value: unknown): value is TaskRun {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const record = value as Record<string, unknown>;
+	return (
+		typeof record.timestamp === "string" &&
+		(record.status === "pass" || record.status === "fail") &&
+		typeof record.exitCode === "number" &&
+		Array.isArray(record.verifyFailures) &&
+		record.verifyFailures.every(isVerifyFailure) &&
+		typeof record.duration === "number" &&
+		"input" in record
+	);
+}
+
+export function isTaskbook(value: unknown): value is Taskbook {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const record = value as Record<string, unknown>;
+	return (
+		typeof record.name === "string" &&
+		typeof record.description === "string" &&
+		(record.scope === "user" || record.scope === "project") &&
+		typeof record.createdAt === "string" &&
+		typeof record.updatedAt === "string" &&
+		(record.tags === undefined || isStringArray(record.tags)) &&
+		Array.isArray(record.runs) &&
+		record.runs.every(isTaskRun)
+	);
+}
+
+function normalizeTaskbook(value: unknown): Taskbook {
+	if (!isTaskbook(value)) throw new Error("Invalid taskbook.json");
+	return value;
+}
+
+export function sortAndTrimRuns(runs: TaskRun[]): TaskRun[] {
+	return [...runs]
+		.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+		.slice(-10);
+}
+
+async function readJson(filePath: string): Promise<unknown> {
+	return JSON.parse(await readFile(filePath, "utf8"));
+}
+
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+	await writeFile(filePath, `${JSON.stringify(value, null, "\t")}\n`, "utf8");
+}
+
+async function loadFromDir(scope: "user" | "project", dir: string): Promise<LoadedTaskbook | null> {
+	const taskbookPath = path.join(dir, "taskbook.json");
+	const specPath = path.join(dir, "spec.json");
+	const skillPath = path.join(dir, "skill.md");
+	const verifyPath = path.join(dir, "verify.mjs");
+	const contractPath = path.join(dir, "contract.json");
+	try {
+		const [taskbookData, specData, skill, verify, contract] = await Promise.all([
+			readJson(taskbookPath),
+			readJson(specPath),
+			readFile(skillPath, "utf8"),
+			readFile(verifyPath, "utf8"),
+			readJson(contractPath),
+		]);
+		const taskbook = normalizeTaskbook(taskbookData);
+		if (!isRequirementsSpec(specData)) throw new Error("Invalid spec.json");
+		return { taskbook, spec: specData, skill, verify, contract, scope, dir };
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ENOENT" && !existsSync(taskbookPath) && !existsSync(specPath)) return null;
+		throw error;
+	}
+}
+
+export async function saveTaskbook(scope: "user" | "project", cwd: string, name: string, data: {
+	description: string;
+	spec: RequirementsSpec;
+	skill: string;
+	verify: string;
+	contract: unknown;
+	tags?: string[];
+}): Promise<Taskbook> {
+	if (!isValidTaskbookName(name)) throw new Error(`Invalid taskbook name: ${name}`);
+	const dir = taskDir(scope, cwd, name);
+	const existing = await loadFromDir(scope, dir).catch(() => null);
+	const now = new Date().toISOString();
+	const taskbook: Taskbook = {
+		name,
+		description: data.description,
+		scope,
+		createdAt: existing?.taskbook.createdAt ?? now,
+		updatedAt: now,
+		tags: data.tags,
+		runs: existing?.taskbook.runs ?? [],
+	};
+	await mkdir(dir, { recursive: true });
+	await Promise.all([
+		writeJson(path.join(dir, "taskbook.json"), taskbook),
+		writeJson(path.join(dir, "spec.json"), data.spec),
+		writeFile(path.join(dir, "skill.md"), data.skill, "utf8"),
+		writeFile(path.join(dir, "verify.mjs"), data.verify, "utf8"),
+		writeJson(path.join(dir, "contract.json"), data.contract),
+	]);
+	return taskbook;
+}
+
+export async function loadTaskbook(cwd: string, name: string): Promise<LoadedTaskbook | null> {
+	if (!isValidTaskbookName(name)) throw new Error(`Invalid taskbook name: ${name}`);
+	return (
+		await loadFromDir("project", taskDir("project", cwd, name)) ??
+		await loadFromDir("user", taskDir("user", cwd, name))
+	);
+}
+
+export async function listTaskbooks(cwd: string, tag?: string): Promise<Array<{ name: string; scope: "user" | "project"; description: string; tags?: string[]; lastRun?: TaskRun }>> {
+	const byName = new Map<string, { name: string; scope: "user" | "project"; description: string; tags?: string[]; lastRun?: TaskRun }>();
+	for (const scope of ["user", "project"] as const) {
+		const root = scope === "user" ? tasksRootUser() : tasksRootProject(cwd);
+		let entries: Awaited<ReturnType<typeof readdir>>;
+		try {
+			entries = await readdir(root, { withFileTypes: true });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			throw error;
+		}
+		for (const entry of entries) {
+			if (!entry.isDirectory() || !isValidTaskbookName(entry.name)) continue;
+			try {
+				const loaded = await loadFromDir(scope, path.join(root, entry.name));
+				if (!loaded || (tag && !loaded.taskbook.tags?.includes(tag))) continue;
+				byName.set(loaded.taskbook.name, {
+					name: loaded.taskbook.name,
+					scope,
+					description: loaded.taskbook.description,
+					tags: loaded.taskbook.tags,
+					lastRun: loaded.taskbook.runs.at(-1),
+				});
+			} catch {
+				// ponytail: list skips broken taskbooks; show/load reports the actual corruption.
+			}
+		}
+	}
+	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function appendRunToTaskbook(scope: "user" | "project", cwd: string, name: string, run: TaskRun): Promise<Taskbook> {
+	const loaded = await loadFromDir(scope, taskDir(scope, cwd, name));
+	if (!loaded) throw new Error(`Taskbook not found: ${name}`);
+	const taskbook: Taskbook = {
+		...loaded.taskbook,
+		updatedAt: new Date().toISOString(),
+		runs: sortAndTrimRuns([...loaded.taskbook.runs, run]),
+	};
+	await writeJson(path.join(loaded.dir, "taskbook.json"), taskbook);
+	return taskbook;
+}
+
+export async function deleteTaskbook(scope: "user" | "project", cwd: string, name: string): Promise<void> {
+	if (!isValidTaskbookName(name)) throw new Error(`Invalid taskbook name: ${name}`);
+	await rm(taskDir(scope, cwd, name), { recursive: true, force: true });
+}

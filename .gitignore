@@ -14,6 +14,7 @@ package-lock.json
 .flow/
 
 # Temp / editor
+.tmp/
 .tmp_*
 .superpowers/
 .DS_Store

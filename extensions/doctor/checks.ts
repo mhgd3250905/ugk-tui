@@ -54,28 +54,35 @@ function readShellPathFromSettings(agentDir: string, readFile: (filePath: string
 	}
 }
 
-function readSettings(agentDir: string, readFile: (filePath: string) => string): Record<string, unknown> {
+function readSettings(
+	agentDir: string,
+	readFile: (filePath: string) => string,
+	exists: (candidate: string) => boolean,
+): Record<string, unknown> | undefined {
+	const settingsPath = path.join(agentDir, "settings.json");
 	try {
-		const settings = JSON.parse(readFile(path.join(agentDir, "settings.json")));
+		const settings = JSON.parse(readFile(settingsPath));
 		return settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
 	} catch {
-		return {};
+		return exists(settingsPath) ? undefined : {};
 	}
 }
 
 function persistBashResolutionForChildAgents(resolution: BashResolution, deps: BashCheckDeps): void {
 	const platform = deps.platform ?? process.platform;
 	if (platform !== "win32" || resolution.source === "settings.json shellPath") return;
-	if (!path.win32.isAbsolute(resolution.command) || path.basename(resolution.command).toLowerCase() !== "bash.exe") return;
+	if (!path.win32.isAbsolute(resolution.command) || path.win32.basename(resolution.command).toLowerCase() !== "bash.exe") return;
 
 	const agentDir = deps.agentDir ?? defaultAgentDir();
+	const exists = deps.exists ?? fs.existsSync;
 	const readFile = deps.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
 	const writeFile = deps.writeFile ?? ((filePath: string, content: string) => fs.writeFileSync(filePath, content));
 	const mkdir = deps.mkdir ?? ((dirPath: string, options: { recursive: true }) => {
 		fs.mkdirSync(dirPath, options);
 	});
 	const settingsPath = path.join(agentDir, "settings.json");
-	const settings = readSettings(agentDir, readFile);
+	const settings = readSettings(agentDir, readFile, exists);
+	if (!settings) return;
 	if (settings.shellPath === resolution.command) return;
 
 	settings.shellPath = resolution.command;
@@ -128,7 +135,11 @@ export async function checkBash(deps: BashCheckDeps = {}): Promise<DoctorResult>
 	try {
 		const result = await exec(bash.command, ["-lc", "echo ok"], { timeout: 3000 });
 		if (String(result.stdout).includes("ok")) {
-			persistBashResolutionForChildAgents(bash, deps);
+			try {
+				persistBashResolutionForChildAgents(bash, deps);
+			} catch {
+				// Keep /doctor truthful: bash works even if settings cannot be updated.
+			}
 			return { status: "pass", summary: `bash available (${bash.source}: ${bash.command})` };
 		}
 		return {

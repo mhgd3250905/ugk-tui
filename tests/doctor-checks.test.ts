@@ -28,8 +28,10 @@ test("checkBash persists resolved Windows Git Bash path for child agent sessions
 		exec: async () => ({ stdout: "ok\n" }),
 		readFile: () => JSON.stringify({ model: "deepseek-v4-pro" }),
 		writeFile: (filePath: string, content: string) => writes.set(filePath, content),
-		mkdir: (dirPath: string) => createdDirs.push(dirPath),
-	} as any);
+		mkdir: (dirPath: string) => {
+			createdDirs.push(dirPath);
+		},
+	});
 
 	assert.equal(result.status, "pass");
 	assert.deepEqual(createdDirs, [agentDir]);
@@ -74,6 +76,42 @@ test("resolveBashCommand falls back to common Windows Git Bash locations", () =>
 	});
 
 	assert.deepEqual(result, { command: shellPath, source: "common Git Bash location" });
+});
+
+test("checkBash does not overwrite an unreadable settings file", async () => {
+	let wrote = false;
+	const result = await checkBash({
+		platform: "win32",
+		agentDir: "C:\\Users\\tester\\.pi\\agent",
+		resolveBash: () => ({ command: "D:\\Git\\bin\\bash.exe", source: "common Git Bash location" }),
+		exec: async () => ({ stdout: "ok\n" }),
+		exists: () => true,
+		readFile: () => "{broken",
+		writeFile: () => {
+			wrote = true;
+		},
+		mkdir: () => {},
+	});
+
+	assert.equal(result.status, "pass");
+	assert.equal(wrote, false);
+});
+
+test("checkBash passes when persisting the resolved bash path fails", async () => {
+	const result = await checkBash({
+		platform: "win32",
+		agentDir: "C:\\Users\\tester\\.pi\\agent",
+		resolveBash: () => ({ command: "D:\\Git\\bin\\bash.exe", source: "common Git Bash location" }),
+		exec: async () => ({ stdout: "ok\n" }),
+		readFile: () => "{}",
+		writeFile: () => {
+			throw new Error("access denied");
+		},
+		mkdir: () => {},
+	});
+
+	assert.equal(result.status, "pass");
+	assert.match(result.summary, /bash available/);
 });
 
 test("checkDeepSeekApi passes and fails using existing status text", async () => {

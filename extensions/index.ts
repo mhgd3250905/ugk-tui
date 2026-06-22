@@ -11,6 +11,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteProvider } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,6 +34,25 @@ import registerMcp, { createMcpDoctorCheck } from "./mcp/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { renderTerminalTable } from "./terminal-table.ts";
+
+function isNaturalBareAtPrefix(lines: string[], cursorLine: number, cursorCol: number): boolean {
+	const currentLine = lines[cursorLine] || "";
+	const textBeforeCursor = currentLine.slice(0, cursorCol);
+	return /(?:^|\s)@[^/\s"~.]*$/.test(textBeforeCursor);
+}
+
+export function suppressNaturalAtAutocomplete(current: AutocompleteProvider): AutocompleteProvider {
+	return {
+		...current,
+		async getSuggestions(lines, cursorLine, cursorCol, options) {
+			if (!options.force && isNaturalBareAtPrefix(lines, cursorLine, cursorCol)) {
+				// ponytail: @agent owns bare @ text; file completion still works via Tab or path-like @./.
+				return null;
+			}
+			return current.getSuggestions(lines, cursorLine, cursorCol, options);
+		},
+	};
+}
 
 function formatUgkStatusTable(deepseekStatus: string): string {
 	const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
@@ -70,6 +90,9 @@ export default function (pi: ExtensionAPI) {
 	registerUiFooter(pi);
 	registerUiStatusline(pi);
 	registerUiTitlebar(pi);
+	pi.on("session_start", async (_event, ctx) => {
+		ctx.ui.addAutocompleteProvider?.(suppressNaturalAtAutocomplete);
+	});
 
 	// 1.3) cron 定时任务(代理常驻 cron 服务的 HTTP API)
 	registerCron(pi);

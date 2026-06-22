@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import registerUgkExtension from "../extensions/index.ts";
+import registerUgkExtension, { suppressNaturalAtAutocomplete } from "../extensions/index.ts";
 
 function tempAgentDir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "ugk-command-"));
@@ -60,4 +60,25 @@ test("/ugk renders a structured status panel", async () => {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 	}
+});
+
+test("autocomplete wrapper leaves natural @agent text alone", async () => {
+	let calls = 0;
+	const provider = suppressNaturalAtAutocomplete({
+		async getSuggestions() {
+			calls += 1;
+			return { items: [{ value: "x", label: "x" }], prefix: "@" };
+		},
+		applyCompletion(lines: string[], cursorLine: number, cursorCol: number) {
+			return { lines, cursorLine, cursorCol };
+		},
+	});
+
+	assert.equal(await provider.getSuggestions(["@"], 0, 1, { signal: new AbortController().signal }), null);
+	assert.equal(await provider.getSuggestions(["@scout"], 0, 6, { signal: new AbortController().signal }), null);
+	assert.equal(calls, 0);
+
+	assert.notEqual(await provider.getSuggestions(["@"], 0, 1, { signal: new AbortController().signal, force: true }), null);
+	assert.notEqual(await provider.getSuggestions(["@./"], 0, 3, { signal: new AbortController().signal }), null);
+	assert.equal(calls, 2);
 });

@@ -90,6 +90,59 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	header.dispose?.();
 });
 
+test("ugk brand header and footer ignore stale extension ctx during render", async () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand() {},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	let headerFactory: Function | undefined;
+	let footerFactory: Function | undefined;
+	let stale = false;
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "deepseek-v4-pro" },
+		get sessionManager() {
+			if (stale) throw new Error("This extension ctx is stale after session replacement or reload.");
+			return {
+				getCwd: () => "/Users/shengkai/projects/ugk-tui",
+				getEntries: () => [],
+				getBranch: () => [],
+			};
+		},
+		getContextUsage: () => ({ percent: 0, contextWindow: 1000000 }),
+		ui: {
+			setHeader: (factory: unknown) => {
+				headerFactory = factory as Function;
+			},
+			setFooter: (factory: unknown) => {
+				footerFactory = factory as Function;
+			},
+			setTitle: () => {},
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await handlers.get("session_start")!({ reason: "startup" }, ctx);
+	const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+	const footerData = { getGitBranch: () => null, getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} };
+	const header = headerFactory!({ requestRender() {} }, theme);
+	const footer = footerFactory!({ requestRender() {} }, theme, footerData);
+	stale = true;
+
+	assert.deepEqual(header.render(80), []);
+	assert.deepEqual(footer.render(80), []);
+});
+
 test("/ugk-ui with no args opens an action menu", async () => {
 	const handlers = new Map<string, Function>();
 	const commands = new Map<string, { handler: Function }>();

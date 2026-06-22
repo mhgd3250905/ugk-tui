@@ -121,6 +121,10 @@ function colorFooterStatusLine(statuses: string[], fallback: string, theme: any)
 	return values.map((status) => theme.fg(classifyUgkStatusTone(status), status)).join(" ");
 }
 
+function isStaleExtensionCtxError(error: unknown): boolean {
+	return error instanceof Error && /extension ctx is stale/i.test(error.message);
+}
+
 class UgkHeader implements Component {
 	private readonly ctx: ExtensionContext;
 	private readonly theme: any;
@@ -133,22 +137,27 @@ class UgkHeader implements Component {
 	invalidate(): void {}
 
 	render(width: number): string[] {
-		const cwd = this.ctx.sessionManager?.getCwd?.() ?? this.ctx.cwd ?? process.cwd();
-		const modelId = resolveUgkDisplayModelId(this.ctx.model?.id, getDeepSeekStatus());
-		const options = {
-			version: VERSION,
-			cwdName: path.basename(cwd),
-			modelId,
-			width,
-		};
-		const lines = hasSessionMessages(this.ctx)
-			? buildUgkHeaderLines(options)
-			: buildUgkStartupScreenLines({
-					...options,
-					rows: process.stdout.rows || 24,
-				});
-		const rendered = ["", ...lines.map((line, i) => colorHeaderLine(line, i, this.theme)), ""];
-		return rendered;
+		try {
+			const cwd = this.ctx.sessionManager?.getCwd?.() ?? this.ctx.cwd ?? process.cwd();
+			const modelId = resolveUgkDisplayModelId(this.ctx.model?.id, getDeepSeekStatus());
+			const options = {
+				version: VERSION,
+				cwdName: path.basename(cwd),
+				modelId,
+				width,
+			};
+			const lines = hasSessionMessages(this.ctx)
+				? buildUgkHeaderLines(options)
+				: buildUgkStartupScreenLines({
+						...options,
+						rows: process.stdout.rows || 24,
+					});
+			const rendered = ["", ...lines.map((line, i) => colorHeaderLine(line, i, this.theme)), ""];
+			return rendered;
+		} catch (error) {
+			if (isStaleExtensionCtxError(error)) return [];
+			throw error;
+		}
 	}
 }
 
@@ -202,26 +211,31 @@ class UgkFooter implements Component {
 	invalidate(): void {}
 
 	render(width: number): string[] {
-		const statuses = Array.from(this.footerData.getExtensionStatuses?.().values?.() ?? []) as string[];
-		const cwd = this.ctx.sessionManager?.getCwd?.() ?? this.ctx.cwd ?? process.cwd();
-		const lines = buildUgkFooterLines({
-			cwd,
-			branch: this.footerData.getGitBranch?.() ?? null,
-			modelId: resolveUgkDisplayModelId(this.ctx.model?.id, getDeepSeekStatus()) || "no-model",
-			thinkingLevel: (this.ctx as any).session?.state?.thinkingLevel,
-			statuses,
-			usage: collectUsage(this.ctx),
-			width,
-		});
+		try {
+			const statuses = Array.from(this.footerData.getExtensionStatuses?.().values?.() ?? []) as string[];
+			const cwd = this.ctx.sessionManager?.getCwd?.() ?? this.ctx.cwd ?? process.cwd();
+			const lines = buildUgkFooterLines({
+				cwd,
+				branch: this.footerData.getGitBranch?.() ?? null,
+				modelId: resolveUgkDisplayModelId(this.ctx.model?.id, getDeepSeekStatus()) || "no-model",
+				thinkingLevel: (this.ctx as any).session?.state?.thinkingLevel,
+				statuses,
+				usage: collectUsage(this.ctx),
+				width,
+			});
 
-		const [pwd, usage, status] = lines;
-		const coloredPwd = pwd.replace(/^ugk/, this.theme.fg("success", "ugk"));
-		const rendered = [this.theme.fg("dim", coloredPwd), colorFooterUsageLine(usage, this.theme)];
-		if (status.trim()) rendered.push(colorFooterStatusLine(statuses, status, this.theme));
-		return rendered.map((line) => {
-			if (visibleWidth(line) <= width) return line;
-			return truncateToWidth(line, width, this.theme.fg("dim", "..."));
-		});
+			const [pwd, usage, status] = lines;
+			const coloredPwd = pwd.replace(/^ugk/, this.theme.fg("success", "ugk"));
+			const rendered = [this.theme.fg("dim", coloredPwd), colorFooterUsageLine(usage, this.theme)];
+			if (status.trim()) rendered.push(colorFooterStatusLine(statuses, status, this.theme));
+			return rendered.map((line) => {
+				if (visibleWidth(line) <= width) return line;
+				return truncateToWidth(line, width, this.theme.fg("dim", "..."));
+			});
+		} catch (error) {
+			if (isStaleExtensionCtxError(error)) return [];
+			throw error;
+		}
 	}
 }
 

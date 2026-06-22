@@ -8,6 +8,7 @@ import {
 	getResultOutput,
 	isFailedResult,
 	mapWithConcurrencyLimit,
+	normalizeAgentModelForCli,
 	truncateParallelOutput,
 } from "../extensions/subagent-runtime.ts";
 
@@ -31,6 +32,12 @@ test("formats token and usage summaries for subagent results", () => {
 		),
 		"2 turns ↑1.2k ↓345 W20 $0.0123 ctx:4.6k deepseek-v4-pro",
 	);
+});
+
+test("normalizes UGK DeepSeek agent model ids for CLI subagents", () => {
+	assert.equal(normalizeAgentModelForCli("deepseek-v4-pro"), "deepseek/deepseek-v4-pro");
+	assert.equal(normalizeAgentModelForCli("deepseek-v4-flash"), "deepseek/deepseek-v4-flash");
+	assert.equal(normalizeAgentModelForCli("openai/gpt-5.4"), "openai/gpt-5.4");
 });
 
 test("extracts final output and display items from subagent messages", () => {

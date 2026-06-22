@@ -35,6 +35,11 @@ export interface SubagentDetails {
 
 export type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, any> };
 
+export function normalizeAgentModelForCli(model: string | undefined): string | undefined {
+	if (!model) return undefined;
+	return /^deepseek-v4-(pro|flash)$/i.test(model) ? `deepseek/${model}` : model;
+}
+
 export function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
 	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;

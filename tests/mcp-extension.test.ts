@@ -128,7 +128,7 @@ test("session_start connects configured MCP servers and registers tools", async 
 	writeProjectConfig(cwd, {
 		alpha: { command: process.execPath, args: [stubServerPath] },
 	});
-	const pi = makePi(["greet"]);
+	const pi = makePi(["local_tool"]);
 	const ctx = makeCtx(cwd);
 
 	const state = registerMcpForTest(pi);
@@ -154,7 +154,7 @@ test("session_start loads install-scope MCP servers from the UGK package root", 
 			},
 		}),
 	);
-	const pi = makePi(["greet"]);
+	const pi = makePi(["local_tool"]);
 	const ctx = makeCtx(cwd, { hasUI: false, ui: undefined });
 
 	const state = registerMcpForTest(pi, { packageRoot });
@@ -170,14 +170,14 @@ test("session_start loads install-scope MCP servers from the UGK package root", 
 
 test("no MCP config has zero side effects", async () => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-empty-"));
-	const pi = makePi(["greet"]);
+	const pi = makePi(["local_tool"]);
 	const ctx = makeCtx(cwd);
 
 	registerMcpForTest(pi);
 	await emit(pi, "session_start", { reason: "startup" }, ctx);
 
 	assert.equal(pi.registeredTools.size, 0);
-	assert.deepEqual(pi.getActiveTools(), ["greet"]);
+	assert.deepEqual(pi.getActiveTools(), ["local_tool"]);
 });
 
 test("session_shutdown disconnects all registry connections", async () => {
@@ -229,7 +229,7 @@ test("reload re-registers prior MCP tool names without duplicate warnings", asyn
 			this.connections.clear();
 		},
 	};
-	const pi = makePi(["greet"]);
+	const pi = makePi(["local_tool"]);
 	const ctx = makeCtx(process.cwd());
 	const state = registerMcpForTest(pi, {
 		registry: registry as any,
@@ -314,7 +314,7 @@ test("before_agent_start omits instructions from disconnected stale servers afte
 			await Promise.all(Array.from(this.connections.values(), (connection: any) => connection.disconnect()));
 		},
 	};
-	const pi = makePi(["greet"]);
+	const pi = makePi(["local_tool"]);
 	const ctx = makeCtx(process.cwd());
 	registerMcpForTest(pi, {
 		registry: registry as any,
@@ -475,7 +475,7 @@ test("/mcp reload treats command contexts with confirm UI as interactive even wi
 			},
 		}),
 	);
-	const pi = makePi(["greet"]);
+	const pi = makePi(["local_tool"]);
 	const notifications: string[] = [];
 	let confirmations = 0;
 
@@ -507,7 +507,7 @@ test("/mcp reload without confirm or select still fail-closes project scope serv
 	writeProjectConfig(cwd, {
 		alpha: { command: process.execPath, args: [stubServerPath] },
 	});
-	const pi = makePi(["greet"]);
+	const pi = makePi(["local_tool"]);
 	const notifications: string[] = [];
 	const state = registerMcpForTest(pi);
 

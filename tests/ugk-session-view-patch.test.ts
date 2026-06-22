@@ -81,8 +81,8 @@ test("session view patch switches visible session and restores main on detach co
 	const ui = mode.createExtensionUIContext();
 	let detached = 0;
 
-	assert.equal(ui.attachSessionView("flow-driver", driverSession, {
-		detachCommand: "/flow detach",
+	assert.equal(ui.attachSessionView("driver-view", driverSession, {
+		detachCommand: "/driver detach",
 		onDetach: () => {
 			detached += 1;
 		},
@@ -94,7 +94,7 @@ test("session view patch switches visible session and restores main on detach co
 	await mode.defaultEditor.onSubmit("继续执行");
 	assert.deepEqual(mode.submitted, ["driver:继续执行"]);
 
-	await mode.defaultEditor.onSubmit(" /flow detach ");
+	await mode.defaultEditor.onSubmit(" /driver detach ");
 
 	assert.equal(detached, 1);
 	assert.equal(mode.session, mainSession);
@@ -162,8 +162,8 @@ test("session switcher renders below editor and handles empty-editor navigation"
 	const mode = new FakeInteractiveMode(createSession("main"));
 	const ui = mode.createExtensionUIContext();
 
-	assert.equal(ui.setSessionSwitcher("flow-driver", {
-		title: "Flow sessions",
+	assert.equal(ui.setSessionSwitcher("driver-view", {
+		title: "Driver sessions",
 		items: [
 			{ id: "main", label: "main", description: "main agent", active: true },
 			{ id: "x/run-001", label: "x/run-001", description: "running" },
@@ -175,7 +175,7 @@ test("session switcher renders below editor and handles empty-editor navigation"
 
 	assert.equal(mode.widgetKey, "ugk-session-switcher");
 	assert.deepEqual(mode.widgetOptions, { placement: "belowEditor" });
-	assert.match(mode.widget.render(80).join("\n"), /Flow sessions/);
+	assert.match(mode.widget.render(80).join("\n"), /Driver sessions/);
 
 	assert.equal(mode.defaultEditor.onExtensionShortcut("\x1b[B"), true);
 	assert.match(mode.widget.render(80).join("\n"), /> x\/run-001/);
@@ -230,12 +230,12 @@ test("session switcher rewraps editor shortcuts after pi replaces them", () => {
 	const mode = new FakeInteractiveMode(createSession("main"));
 	const ui = mode.createExtensionUIContext();
 
-	ui.setSessionSwitcher("flow-driver", {
+	ui.setSessionSwitcher("driver-view", {
 		items: [{ id: "x/run-001", label: "x/run-001" }],
 		onSelect: () => {},
 	});
 	mode.defaultEditor.onExtensionShortcut = () => false;
-	ui.setSessionSwitcher("flow-driver", {
+	ui.setSessionSwitcher("driver-view", {
 		items: [{ id: "x/run-001", label: "x/run-001" }],
 		onSelect: () => {},
 	});

@@ -259,6 +259,26 @@ test("/judge enters aligning mode, switches to readonly tools, and injects ALIGN
 	assert.equal(injected.message.display, false);
 });
 
+test("judge context keeps only the current align prompt and drops it outside aligning", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	registerJudge(pi as any);
+
+	const oldAlignContext = { role: "custom", customType: "judge-align-context", content: "old" };
+	const newAlignContext = { role: "custom", customType: "judge-align-context", content: "new" };
+	const userMessage = { role: "user", content: [{ type: "text", text: "run" }] };
+
+	await commands.get("judge").handler("toggle", ctx);
+	const aligning = await handlers.get("context")![0]({ messages: [oldAlignContext, userMessage, newAlignContext] }, ctx);
+
+	assert.deepEqual(aligning.messages, [userMessage, newAlignContext]);
+
+	await commands.get("judge").handler("toggle", ctx);
+	const inactive = await handlers.get("context")![0]({ messages: [oldAlignContext, userMessage] }, ctx);
+
+	assert.deepEqual(inactive.messages, [userMessage]);
+});
+
 test("/judge with no args opens an action menu whose toggle enables Judge", async () => {
 	const { pi, commands, handlers, activeTools } = makePi();
 	const { ctx, selections, statusCalls } = makeCtx();

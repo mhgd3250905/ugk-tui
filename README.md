@@ -86,7 +86,7 @@ cp agents/*.md ~/.pi/agent/agents/
 | --- | --- |
 | `/ugk` | 弹出状态(列全部能力) |
 | `/check-env` | 自检 adb/scrcpy/设备(没装会提示安装命令) |
-| `跟我打个招呼,我叫 Sam` | 调 `greet` 工具回复 |
+| `帮我看看当前目录结构` | agent 正常读取并总结项目 |
 | `@scout 列出项目目录` | 调 `subagent` 委派 scout(需先装预设 agent) |
 | `/plan` | 切换只读探索模式 |
 | `/judge` | 查看 judge 委托验收菜单 |
@@ -102,7 +102,7 @@ cp agents/*.md ~/.pi/agent/agents/
 ugk
 
 :: 一次性非交互模式(脚本/cron 用)
-ugk --print "用 greet 工具跟我打招呼,我叫 Sam"
+ugk --print "总结当前目录结构"
 
 :: 指定模型
 ugk --model deepseek-reasoner
@@ -146,13 +146,12 @@ Release notes: https://github.com/mhgd3250905/ugk-tui/commits/main
 
 ---
 
-## 包含的能力(v1.1.0)
+## 包含的能力
 
 ### 自定义工具
 
 | 工具 | 作用 |
 | --- | --- |
-| `greet` | 演示用打招呼 |
 | `scrcpy` | 安卓投屏控制(start/stop/status/version) |
 | `subagent` | 子代理委派(single/parallel/chain 三模式) |
 | `cron` | 定时任务管理(status/list/add/remove/history) |
@@ -281,7 +280,7 @@ install/user scope 视为 UGK 级可信配置,默认直接连接;project/local s
 /judge ack
 ```
 
-详见 `docs/judge.md`。
+详见项目仓库的 [`docs/judge.md`](https://github.com/mhgd3250905/ugk-tui/blob/main/docs/judge.md)。
 
 ### cron 定时服务(独立常驻进程)
 

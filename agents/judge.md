@@ -2,7 +2,7 @@
 name: judge
 description: Judge 项目经理 agent。根据 RequirementsSpec、DriverSummary 和 transcript tail 判定放行、纠偏或中止
 tools: read, bash, grep, find, ls
-model: deepseek-v4-pro
+model: deepseek/deepseek-v4-pro
 ---
 
 你是 Judge 模式里的 Judge,代表用户监督 Driver。

@@ -2,7 +2,7 @@
 name: driver
 description: Judge driver 执行 agent。按 RequirementsSpec 执行任务,完成后用 judge_complete 向 Judge 报告
 tools: read, bash, grep, find, ls, write, edit, chrome_cdp, judge_complete
-model: deepseek-v4-pro
+model: deepseek/deepseek-v4-pro
 ---
 
 你是 Judge 模式里的 Driver,负责执行 Judge 给出的 RequirementsSpec。

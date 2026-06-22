@@ -19,7 +19,7 @@ import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
-import { type ExtensionAPI, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./subagent-agents.ts";
 import { getUgkBin } from "./device-env.ts";
 import { renderSubagentCall, renderSubagentResult } from "./subagent-rendering.ts";
@@ -28,6 +28,7 @@ import {
 	getResultOutput,
 	isFailedResult,
 	mapWithConcurrencyLimit,
+	normalizeAgentModelForCli,
 	truncateParallelOutput,
 	type SingleResult,
 	type SubagentDetails,
@@ -97,7 +98,8 @@ async function runSingleAgent(
 	}
 
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	if (agent.model) args.push("--model", agent.model);
+	const model = normalizeAgentModelForCli(agent.model);
+	if (model) args.push("--model", model);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
 	let tmpPromptDir: string | null = null;
@@ -139,6 +141,7 @@ async function runSingleAgent(
 			const invocation = getPiInvocation(args);
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
+				env: { ...process.env, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR || getAgentDir() },
 				shell: invocation.useShell,
 				stdio: ["ignore", "pipe", "pipe"],
 			});

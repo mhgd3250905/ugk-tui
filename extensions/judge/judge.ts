@@ -363,6 +363,24 @@ function restoreJudgeState(data: unknown): JudgeState | undefined {
 	};
 }
 
+function isJudgeAlignContextMessage(message: AgentMessage): boolean {
+	return message.role === "custom" && (message as { customType?: unknown }).customType === "judge-align-context";
+}
+
+function filterJudgeContextMessages(messages: AgentMessage[], state: JudgeState): AgentMessage[] {
+	if (state.phase !== "aligning") {
+		return messages.filter((message) => !isJudgeAlignContextMessage(message));
+	}
+	let keepIndex = -1;
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		if (isJudgeAlignContextMessage(messages[index])) {
+			keepIndex = index;
+			break;
+		}
+	}
+	return messages.filter((message, index) => !isJudgeAlignContextMessage(message) || index === keepIndex);
+}
+
 const judgeCompleteTool = defineTool({
 	name: "judge_complete",
 	label: "Judge Complete",
@@ -1016,6 +1034,10 @@ export function registerJudge(pi: ExtensionAPI): void {
 			},
 		};
 	});
+
+	pi.on("context", async (event) => ({
+		messages: filterJudgeContextMessages(event.messages, state),
+	}));
 
 	pi.on("tool_call", async (event) => {
 		// C-2 机制闸:aligning 阶段调过 questionnaire 就置标志,agent_end 时据此判断能否委派。

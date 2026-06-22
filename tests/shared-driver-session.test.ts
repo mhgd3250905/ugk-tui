@@ -14,7 +14,7 @@ function createOptions(): DriverSessionOptions {
 		cwd: "E:/AII/ugk-core",
 		taskId: "task-a",
 		runId: "run-001",
-		runDir: "E:/AII/ugk-core/.flow/task-a/run-001",
+		runDir: "E:/AII/ugk-core/.judge/task-a/run-001",
 		initialPrompt: "start driver",
 		label: "Shared driver task-a/run-001",
 	};
@@ -112,7 +112,7 @@ test("driver resource loader can inject an explicit agent definition", () => {
 
 	assert.equal(overridden.agentsFiles.at(-1)?.path, agentDefinitionPath);
 	assert.match(overridden.agentsFiles.at(-1)?.content ?? "", /^---\nname: driver/m);
-	assert.match(overridden.agentsFiles.at(-1)?.content ?? "", /model: deepseek-v4-pro/);
+	assert.match(overridden.agentsFiles.at(-1)?.content ?? "", /model: deepseek\/deepseek-v4-pro/);
 });
 
 test("driver resource loader can inject isolated Driver and Judge definitions", () => {

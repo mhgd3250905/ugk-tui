@@ -200,7 +200,7 @@ test("/mcp disable menu lists active MCP servers only", async () => {
 			["beta", ["beta__read"]],
 		]),
 	});
-	const pi = makePi(["greet", "alpha__echo"]);
+	const pi = makePi(["local_tool", "alpha__echo"]);
 	registerMcpCommand(pi as any, state);
 	const selectCalls: Array<{ title: string; options: string[] }> = [];
 
@@ -214,7 +214,7 @@ test("/mcp disable menu lists active MCP servers only", async () => {
 	});
 
 	assert.deepEqual(selectCalls[1].options, ["alpha", "返回"]);
-	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["greet"]);
+	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["local_tool"]);
 });
 
 test("/mcp enable and disable menus notify when no server is available", async () => {
@@ -252,24 +252,24 @@ test("/mcp disable removes only that server's tools and preserves non-MCP tools"
 			["beta", ["beta__read"]],
 		]),
 	});
-	const pi = makePi(["greet", "alpha__echo", "beta__read", "alpha__sum"]);
+	const pi = makePi(["local_tool", "alpha__echo", "beta__read", "alpha__sum"]);
 	registerMcpCommand(pi as any, state);
 
 	await runMcp(pi, "disable alpha");
 
-	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["greet", "beta__read"]);
+	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["local_tool", "beta__read"]);
 });
 
 test("/mcp enable adds that server's tools without duplicates", async () => {
 	const state = makeState({
 		serverTools: new Map([["alpha", ["alpha__echo", "alpha__sum"]]]),
 	});
-	const pi = makePi(["greet", "alpha__echo"]);
+	const pi = makePi(["local_tool", "alpha__echo"]);
 	registerMcpCommand(pi as any, state);
 
 	await runMcp(pi, "enable alpha");
 
-	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["greet", "alpha__echo", "alpha__sum"]);
+	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["local_tool", "alpha__echo", "alpha__sum"]);
 });
 
 test("/mcp enable reports stale servers separately from missing servers", async () => {
@@ -361,7 +361,7 @@ test("/mcp reload removes vanished server tools from active set and never calls 
 		]),
 	});
 	const pi = {
-		...makePi(["greet", "alpha__echo", "beta__read"]),
+		...makePi(["local_tool", "alpha__echo", "beta__read"]),
 		unregisterTool() {
 			throw new Error("unregisterTool must not be called");
 		},
@@ -378,7 +378,7 @@ test("/mcp reload removes vanished server tools from active set and never calls 
 
 	await runMcp(pi as any, "reload");
 
-	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["greet"]);
+	assert.deepEqual(pi.setActiveToolsCalls.at(-1), ["local_tool"]);
 	assert.deepEqual(state.serverTools.get("alpha"), ["alpha__new"]);
 	assert.equal(state.serverTools.has("beta"), false);
 	assert.deepEqual(state.staleServerTools.get("beta"), ["beta__read"]);
@@ -393,7 +393,7 @@ test("/mcp reload clears stale marker when a vanished server returns", async () 
 		serverTools: new Map([["alpha", ["alpha__echo"]]]),
 		staleServerTools: new Map([["beta", ["beta__read"]]]),
 	});
-	const pi = makePi(["greet", "alpha__echo"]);
+	const pi = makePi(["local_tool", "alpha__echo"]);
 	registerMcpCommand(pi as any, state, {
 		async reload() {
 			return {

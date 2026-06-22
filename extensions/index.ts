@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { checkEnv } from "./device-env.ts";
 import { scrcpyTool } from "./scrcpy-tool.ts";
 import registerSubagent from "./subagent.ts";
+import registerSubagentCommand from "./subagent-command.ts";
 import { discoverAgents } from "./subagent-agents.ts";
 import registerUiFooter from "./ui-footer.ts";
 import registerUiStatusline from "./ui-statusline.ts";
@@ -59,6 +60,7 @@ export default function (pi: ExtensionAPI) {
 
 	// 1.1) subagent 工具(从官方 subagent 示例搬运 + Windows spawn 适配)
 	registerSubagent(pi);
+	registerSubagentCommand(pi);
 
 	// 1.2) UI 美化(从官方示例搬运,三处区域互不冲突)
 	//   - footer:底栏 token 统计 + git 分支 + 模型名(/footer 开关)

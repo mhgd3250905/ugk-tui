@@ -13,6 +13,7 @@ import {
 } from "./subagent-runtime.ts";
 
 const COLLAPSED_ITEM_COUNT = 10;
+const RUNNING_ITEM_COUNT = 3;
 
 export function formatToolCall(
 	toolName: string,
@@ -159,7 +160,11 @@ function aggregateUsage(results: SingleResult[]) {
 	return total;
 }
 
-export function renderSubagentResult(result: any, { expanded }: { expanded: boolean }, theme: any): Text | Container {
+export function renderSubagentResult(
+	result: any,
+	{ expanded, isPartial }: { expanded: boolean; isPartial?: boolean },
+	theme: any,
+): Text | Container {
 	const details = result.details as SubagentDetails | undefined;
 	if (!details || details.results.length === 0) {
 		const text = result.content[0];
@@ -170,8 +175,9 @@ export function renderSubagentResult(result: any, { expanded }: { expanded: bool
 
 	if (details.mode === "single" && details.results.length === 1) {
 		const r = details.results[0];
-		const isError = isFailedResult(r);
-		const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
+		const isRunning = isPartial || r.exitCode === -1;
+		const isError = !isRunning && isFailedResult(r);
+		const icon = isRunning ? theme.fg("warning", "⏳") : isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
 		const displayItems = getDisplayItems(r.messages);
 		const finalOutput = getFinalOutput(r.messages);
 
@@ -216,13 +222,14 @@ export function renderSubagentResult(result: any, { expanded }: { expanded: bool
 		let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
 		if (isError && r.stopReason) text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 		if (isError && r.errorMessage) text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
-		else if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
+		else if (displayItems.length === 0) text += `\n${theme.fg("muted", isRunning ? "(running...)" : "(no output)")}`;
 		else {
-			text += `\n${renderDisplayItems(displayItems, expanded, theme, COLLAPSED_ITEM_COUNT)}`;
-			if (displayItems.length > COLLAPSED_ITEM_COUNT) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
+			const limit = isRunning ? RUNNING_ITEM_COUNT : COLLAPSED_ITEM_COUNT;
+			text += `\n${renderDisplayItems(displayItems, expanded, theme, limit)}`;
+			if (displayItems.length > limit) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 		}
 		const usageStr = formatUsageStats(r.usage, r.model);
-		if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
+		if (!isRunning && usageStr) text += `\n${theme.fg("dim", usageStr)}`;
 		return new Text(text, 0, 0);
 	}
 

@@ -73,7 +73,7 @@ mkdir -p ~/.pi/agent/agents
 cp agents/*.md ~/.pi/agent/agents/
 ```
 
-验证:进 ugk 后输入 `@scout 列出当前目录`,能调起 scout 就说明装好了。
+验证:进 ugk 后输入 `@scout 列出当前目录`,能调起 scout 就说明装好了。可用 `/subagent` 查看所有 subagent,并给单个 subagent 设置模型。
 详见 `skills/subagent-guide/SKILL.md`。
 
 ---
@@ -88,6 +88,7 @@ cp agents/*.md ~/.pi/agent/agents/
 | `/check-env` | 自检 adb/scrcpy/设备(没装会提示安装命令) |
 | `帮我看看当前目录结构` | agent 正常读取并总结项目 |
 | `@scout 列出项目目录` | 调 `subagent` 委派 scout(需先装预设 agent) |
+| `/subagent` | 列出所有 subagent,选择后设置该 subagent 的模型 |
 | `/plan` | 切换只读探索模式 |
 | `/judge` | 查看 judge 委托验收菜单 |
 | `/mcp status` | 查看已配置/已连接的 MCP server |
@@ -111,6 +112,7 @@ ugk --model deepseek-reasoner
 进对话后,直接用自然语言或 `/命令` 即可。例:
 - `帮我看看这个项目的结构` — agent 自己探索
 - `@scout 找一下认证代码` — 委派给 scout 子代理
+- `/subagent` — 查看 subagent 并设置单个 subagent 的模型
 - `/implement 加个 Redis 缓存` — scout→planner→worker 全链路
 - `/plan` — 先只读规划再执行
 - `/judge` — 打开 judge 委托验收菜单
@@ -193,6 +195,7 @@ UGK_CLEAR_STARTUP=0 ugk
 | `/ugk` | 看 agent 状态 |
 | `/welcome` | 欢迎模板 |
 | `/check-env` | 一键自检 adb/scrcpy/设备连接 |
+| `/subagent` | 列出 subagent 并设置单个 subagent 模型 |
 | `/update` | 检查并更新 UGK |
 | `/cdp` | 管理本地 Chrome CDP 访问模式、端口、启动和标签页 |
 | `/mcp` | 管理 MCP server 状态、权限模式、reload、enable/disable |

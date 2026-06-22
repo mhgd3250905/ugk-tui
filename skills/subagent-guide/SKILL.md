@@ -109,7 +109,18 @@ model: deepseek-v4-pro                # 可选,指定模型
 
 - `tools` 不写 = 继承全部默认工具;写了 = 只能用列出的(只读 agent 就别给 write/edit/bash)
 - `model` 不写 = 继承全局默认模型
+- 也可以在 ugk 里输入 `/subagent`,选择某个 agent 后设置/清除它的 `model`
 - 改完**无需重启**(agent 每次调用时重新发现),但 @mention 的 agent 名列表在启动时读一次
+
+### 单独设置 subagent 模型
+
+`/model` 只影响 main agent。subagent 的模型写在对应 agent `.md` 的 frontmatter 里:
+
+```markdown
+model: deepseek/deepseek-v4-flash
+```
+
+更省事的方式是在 ugk 里输入 `/subagent`,选择 agent,再选择模型。选择 `继承 main/default` 会删除该 agent 的 `model` 字段。设置后下一次 subagent 调用生效。
 
 **project 级 agent**:放项目 `.pi/agents/*.md`,需在 subagent 工具调用时传 `agentScope: "both"` 并交互确认(安全:防仓库里的恶意 prompt 自动执行)。
 
@@ -120,6 +131,7 @@ model: deepseek-v4-pro                # 可选,指定模型
 1. **委派时机**:探索性/产生噪音的任务(搜索、读多文件、调研)优先委派给 scout,别在主 context 里堆。
 2. **只回摘要**:subagent 默认只返回最终输出(最后一条 assistant 消息),并行任务上限 50KB。这是设计如此,不是 bug。
 3. **隔离即清洁**:subagent 的工具调用不会进主对话 context——这正是它的价值。
-4. **@mention 名字要对**:必须匹配已安装的 agent 名(见 `~/.pi/agent/agents/`),否则 @mention 不生效(会当普通文本)。
-5. **未安装提示**:调 subagent 报 "Unknown agent" 或可用列表为空 → 引导用户跑上面的「安装预设 agent」步骤。
-6. **单层**:subagent 不能再开 subagent(业界一致,Claude Code 也是单层)。
+4. **运行中只看短尾**:运行中的折叠视图只显示最近几条日志;展开或完成后再看完整输出。
+5. **@mention 名字要对**:必须匹配已安装的 agent 名(见 `~/.pi/agent/agents/`),否则 @mention 不生效(会当普通文本)。
+6. **未安装提示**:调 subagent 报 "Unknown agent" 或可用列表为空 → 引导用户跑上面的「安装预设 agent」步骤。
+7. **单层**:subagent 不能再开 subagent(业界一致,Claude Code 也是单层)。

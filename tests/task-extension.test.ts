@@ -515,6 +515,42 @@ test("task_complete records process log and Enter gates review/save transitions"
 	}
 });
 
+test("/task review parse failure asks the reviewer to re-output machine-readable JSON", async () => {
+	const { pi, handlers, userMessages } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterReviewing(startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)), "run-dir"), "done"),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: `明白了。现在输出最终 taskbook JSON：
+
+\`\`\`json
+{
+  "description": "x",
+  "skill": "# Skill
+\`\`\`bash
+echo hi
+\`\`\`",
+  "verify": "process.exit(0)",
+  "contract": {"artifacts":[]}
+}
+\`\`\`` }],
+		}],
+	}, ctx);
+
+	assert.match(notifications.at(-1)?.message ?? "", /Task review did not find/);
+	assert.match(userMessages.at(-1)?.text ?? "", /重新输出/);
+	assert.match(userMessages.at(-1)?.text ?? "", /合法 JSON/);
+	assert.match(userMessages.at(-1)?.text ?? "", /不要输出 markdown 代码块/);
+});
+
 test("/task save runs verify self-check before landed", async () => {
 	const { pi, commands, handlers, entries } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();

@@ -1148,6 +1148,7 @@ export function registerTask(pi: ExtensionAPI): void {
 			const result = extractTaskReviewResult(getTextContent(lastAssistant));
 			if (!result) {
 				ctx.ui.notify("Task review did not find skill/verify/contract JSON yet.", "warning");
+				pi.sendUserMessage?.("你刚才的 taskbook 结果没有被 /task 解析成合法 JSON。请重新输出一个合法 JSON 对象,包含 description、skill、verify、contract；不要输出 markdown 代码块或改动摘要；skill/verify 里的换行必须作为 JSON 字符串内容正确转义。", { deliverAs: "followUp" });
 				return;
 			}
 			state = setTaskReviewResult(state, result);

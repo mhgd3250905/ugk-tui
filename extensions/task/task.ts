@@ -784,7 +784,8 @@ export function registerTask(pi: ExtensionAPI): void {
 	});
 
 	pi.on("input", async (event, ctx) => {
-		if (!state.pendingTransition || event.source !== "interactive") return;
+		if (!state.pendingTransition) return;
+		if (event.source !== "interactive" && event.source !== "rpc") return;
 		const text = typeof event.text === "string" ? event.text.trim() : "";
 		if (text) {
 			state = setPendingTransition(state, undefined);

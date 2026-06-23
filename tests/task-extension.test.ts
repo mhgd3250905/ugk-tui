@@ -264,6 +264,26 @@ test("/task execute enforces C-2 and switches to non-subagent tools", async () =
 	assert.match(userMessages.at(-1)?.text ?? "", /不要调用 subagent/);
 });
 
+test("RPC input can advance an Enter-gated task transition", async () => {
+	const { pi, commands, handlers, activeTools, entries } = makePi();
+	const { ctx } = makeCtx();
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx);
+	await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(spec)}\n\`\`\`` }],
+		}],
+	}, ctx);
+
+	await handlers.get("input")![0]({ source: "rpc", text: "" }, ctx);
+
+	assert.deepEqual(activeTools.at(-1), ["read", "write", "edit", "bash", "task_complete"]);
+	assert.equal((entries.at(-1)?.data as any).phase, "executing");
+});
+
 test("task review prompt parses skill verify contract output", () => {
 	const prompt = buildTaskReviewPrompt(spec, "写入 output/report.json");
 	assert.match(prompt, /TASK REVIEW MODE/);

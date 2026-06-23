@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai";
 import {
 	buildTaskDispatcherPrompt,
 	extractRuntimeInputFromText,
@@ -45,5 +46,29 @@ test("resolveRuntimeInputFromText uses dispatcher result for natural language in
 		assert.deepEqual(value, { url: "https://b23.tv/xxx" });
 	} finally {
 		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("task dispatcher uses the current session model", async () => {
+	const faux = registerFauxProvider();
+	faux.setResponses([fauxAssistantMessage("```json\n{\"text\":\"Hello 世界\"}\n```")]);
+	const model = faux.getModel();
+	let authModel;
+	try {
+		const value = await resolveRuntimeInputFromText({
+			model,
+			modelRegistry: {
+				async getApiKeyAndHeaders(candidate: unknown) {
+					authModel = candidate;
+					return { ok: true, apiKey: "sk-test", headers: { "x-test": "1" } };
+				},
+			},
+		}, "# Skill", contract, "Hello 世界");
+
+		assert.equal(authModel, model);
+		assert.deepEqual(value, { text: "Hello 世界" });
+		assert.equal(faux.state.callCount, 1);
+	} finally {
+		faux.unregister();
 	}
 });

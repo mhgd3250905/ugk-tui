@@ -1,4 +1,4 @@
-import { complete, getModel } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai";
 
 type Dispatcher = (ctx: any, skill: string, contract: unknown, rawInput: string) => Promise<unknown>;
 let dispatcherForTests: Dispatcher | undefined;
@@ -55,8 +55,7 @@ function runtimeFields(contract: unknown): string[] {
 
 async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInput: string): Promise<unknown | undefined> {
 	if (dispatcherForTests) return await dispatcherForTests(ctx, skill, contract, rawInput);
-	const model = ctx.modelRegistry?.find?.("fireworks", "accounts/fireworks/models/deepseek-v4-flash") ??
-		getModel("fireworks", "accounts/fireworks/models/deepseek-v4-flash");
+	const model = ctx.model;
 	const auth = model ? await ctx.modelRegistry?.getApiKeyAndHeaders?.(model) : undefined;
 	if (!model || !auth?.ok || !auth.apiKey) return undefined;
 	const response = await complete(model, {

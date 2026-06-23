@@ -361,6 +361,12 @@ function artifactNames(contract: unknown): string[] {
 		.filter((name): name is string => typeof name === "string");
 }
 
+function resolveRunOutputDir(contract: unknown, fallbackOutputDir: string): string {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return fallbackOutputDir;
+	const outputDir = (contract as Record<string, unknown>).outputDir;
+	return typeof outputDir === "string" && path.isAbsolute(outputDir) ? outputDir : fallbackOutputDir;
+}
+
 async function withTempVerify(cwd: string, verify: string, fn: (verifyPath: string, tempDir: string) => Promise<void>): Promise<void> {
 	const tempDir = path.join(cwd, ".tasks", "tmp", `verify-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	await mkdir(tempDir, { recursive: true });
@@ -591,7 +597,8 @@ async function handleTaskRun(
 
 	const startedAt = Date.now();
 	const runDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${finalName}-${startedAt}`);
-	const outputDir = path.join(runDir, "output");
+	const outputDir = resolveRunOutputDir(loaded.contract, path.join(runDir, "output"));
+	await mkdir(runDir, { recursive: true });
 	await mkdir(outputDir, { recursive: true });
 	const runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, finalRawInput ?? "");
 	const maxRetry = 3;

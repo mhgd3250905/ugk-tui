@@ -325,6 +325,7 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.match(TASK_REVIEW_PROMPT, /required steps/);
 	assert.match(TASK_REVIEW_PROMPT, /noise to omit/);
 	assert.match(TASK_REVIEW_PROMPT, /output path and format/);
+	assert.match(TASK_REVIEW_PROMPT, /contract\.outputDir/);
 	assert.match(TASK_REVIEW_PROMPT, /requiredTools/);
 	assert.match(TASK_REVIEW_PROMPT, /VERIFY DESIGN GATE/);
 	assert.match(TASK_REVIEW_PROMPT, /artifacts/);
@@ -817,6 +818,46 @@ test("/task run executes worker, verify, and records a pass run", async () => {
 		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
 		assert.deepEqual(loaded?.taskbook.runs.at(-1)?.input, { url: "https://x" });
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task run uses absolute contract outputDir as the final output directory", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	const finalOutputDir = path.join(cwd, "B站视频下载");
+	let workerPrompt = "";
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		workerPrompt = args[3];
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	setTaskDispatcherForTests(async () => ({ url: "https://x", expectedOutputDir: finalOutputDir }));
+	try {
+		await saveTaskbook("project", cwd, "custom-output", {
+			description: "custom output",
+			spec,
+			skill: "# Skill",
+			verify: "import {writeFile} from 'node:fs/promises'; if (process.env.TASK_OUTPUT_DIR !== JSON.parse(process.env.TASK_INPUT).expectedOutputDir) process.exit(1); await writeFile(`${process.env.TASK_OUTPUT_DIR}/ok.txt`, 'ok', 'utf8'); process.exit(0);\n",
+			contract: { outputDir: finalOutputDir, runtimeInput: ["url"], artifacts: [{ name: "ok.txt", type: "file" }] },
+		});
+
+		await commands.get("task").handler("run custom-output https://x", ctx);
+
+		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
+		assert.match(workerPrompt, new RegExp(finalOutputDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+		assert.equal(readFileSync(path.join(finalOutputDir, "ok.txt"), "utf8"), "ok");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);

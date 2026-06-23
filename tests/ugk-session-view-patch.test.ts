@@ -243,6 +243,66 @@ test("session switcher rewraps editor shortcuts after pi replaces them", () => {
 	assert.equal(mode.defaultEditor.onExtensionShortcut("\x1b[B"), true);
 });
 
+test("session view patch guards autocomplete providers without applyCompletion", () => {
+	class FakeInteractiveMode {
+		constructor(mainSession) {
+			this.runtimeHost = { session: mainSession };
+			this.defaultEditor = {
+				provider: undefined,
+				setAutocompleteProvider(provider) {
+					this.provider = provider;
+				},
+			};
+			this.editor = this.defaultEditor;
+		}
+
+		get session() {
+			return this.runtimeHost.session;
+		}
+
+		get agent() {
+			return this.session.agent;
+		}
+
+		get sessionManager() {
+			return this.session.sessionManager;
+		}
+
+		createExtensionUIContext() {
+			return {};
+		}
+
+		setupAutocompleteProvider() {
+			this.autocompleteProvider = {
+				async getSuggestions() {
+					return { items: [{ value: "new", label: "new" }], prefix: "/ne" };
+				},
+			};
+			this.defaultEditor.setAutocompleteProvider(this.autocompleteProvider);
+		}
+	}
+
+	installUgkSessionViewPatch({ InteractiveMode: FakeInteractiveMode });
+	const mode = new FakeInteractiveMode(createSession("main"));
+
+	mode.setupAutocompleteProvider();
+
+	assert.equal(typeof mode.autocompleteProvider.applyCompletion, "function");
+	assert.deepEqual(
+		mode.autocompleteProvider.applyCompletion(["/ne"], 0, 3, { value: "new", label: "new" }, "/ne"),
+		{ lines: ["/new "], cursorLine: 0, cursorCol: 5 },
+	);
+	assert.deepEqual(
+		mode.autocompleteProvider.applyCompletion(["read @sr"], 0, 8, { value: "@src/", label: "@src/" }, "@sr"),
+		{ lines: ["read @src/"], cursorLine: 0, cursorCol: 10 },
+	);
+	assert.deepEqual(
+		mode.autocompleteProvider.applyCompletion(["/task run sm"], 0, 12, { value: "smoke", label: "smoke" }, "sm"),
+		{ lines: ["/task run smoke"], cursorLine: 0, cursorCol: 15 },
+	);
+	assert.equal(mode.defaultEditor.provider, mode.autocompleteProvider);
+});
+
 test("session view patch is idempotent", () => {
 	class FakeInteractiveMode {
 		get session() {

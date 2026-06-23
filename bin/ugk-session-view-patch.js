@@ -6,6 +6,48 @@ const SESSION_SWITCHER = Symbol.for("ugk.sessionViewPatch.sessionSwitcher");
 const SESSION_SWITCHER_SHORTCUT = Symbol.for("ugk.sessionViewPatch.sessionSwitcherShortcut");
 const SESSION_SWITCHER_WIDGET_KEY = "ugk-session-switcher";
 
+function fallbackApplyCompletion(lines, cursorLine, cursorCol, item, prefix = "") {
+	const newLines = [...lines];
+	const currentLine = newLines[cursorLine] || "";
+	const safePrefix = typeof prefix === "string" ? prefix : "";
+	const beforePrefix = currentLine.slice(0, Math.max(0, cursorCol - safePrefix.length));
+	const afterCursor = currentLine.slice(cursorCol);
+	const value = String(item?.value ?? item?.label ?? "");
+	const label = String(item?.label ?? value);
+	const isQuotedPrefix = safePrefix.startsWith('"') || safePrefix.startsWith('@"');
+	const hasLeadingQuoteAfterCursor = afterCursor.startsWith('"');
+	const hasTrailingQuoteInItem = value.endsWith('"');
+	const adjustedAfterCursor = isQuotedPrefix && hasTrailingQuoteInItem && hasLeadingQuoteAfterCursor ? afterCursor.slice(1) : afterCursor;
+	const isSlashCommand = safePrefix.startsWith("/") && beforePrefix.trim() === "" && !safePrefix.slice(1).includes("/");
+	if (isSlashCommand) {
+		newLines[cursorLine] = `${beforePrefix}/${value} ${adjustedAfterCursor}`;
+		return { lines: newLines, cursorLine, cursorCol: beforePrefix.length + value.length + 2 };
+	}
+	if (safePrefix.startsWith("@")) {
+		const isDirectory = label.endsWith("/");
+		const suffix = isDirectory ? "" : " ";
+		newLines[cursorLine] = `${beforePrefix + value}${suffix}${adjustedAfterCursor}`;
+		const cursorOffset = isDirectory && hasTrailingQuoteInItem ? value.length - 1 : value.length;
+		return { lines: newLines, cursorLine, cursorCol: beforePrefix.length + cursorOffset + suffix.length };
+	}
+	const isDirectory = label.endsWith("/");
+	const cursorOffset = isDirectory && hasTrailingQuoteInItem ? value.length - 1 : value.length;
+	newLines[cursorLine] = beforePrefix + value + adjustedAfterCursor;
+	return { lines: newLines, cursorLine, cursorCol: beforePrefix.length + cursorOffset };
+}
+
+function ensureAutocompleteApplyCompletion(mode) {
+	const provider = mode.autocompleteProvider;
+	if (!provider || typeof provider.applyCompletion === "function") {
+		return;
+	}
+	provider.applyCompletion = fallbackApplyCompletion;
+	mode.defaultEditor?.setAutocompleteProvider?.(provider);
+	if (mode.editor !== mode.defaultEditor) {
+		mode.editor?.setAutocompleteProvider?.(provider);
+	}
+}
+
 function getEditorText(mode) {
 	const text = mode.editor?.getText?.() ?? mode.defaultEditor?.getText?.() ?? "";
 	return typeof text === "string" ? text : "";
@@ -173,6 +215,7 @@ export function installUgkSessionViewPatch({ InteractiveMode } = {}) {
 	const sessionManagerDescriptor = Object.getOwnPropertyDescriptor(proto, "sessionManager");
 	const originalCreateExtensionUIContext = proto.createExtensionUIContext;
 	const originalSetupExtensionShortcuts = proto.setupExtensionShortcuts;
+	const originalSetupAutocompleteProvider = proto.setupAutocompleteProvider;
 	if (
 		typeof sessionDescriptor?.get !== "function" ||
 		typeof agentDescriptor?.get !== "function" ||
@@ -180,6 +223,14 @@ export function installUgkSessionViewPatch({ InteractiveMode } = {}) {
 		typeof originalCreateExtensionUIContext !== "function"
 	) {
 		return false;
+	}
+
+	if (typeof originalSetupAutocompleteProvider === "function") {
+		proto.setupAutocompleteProvider = function setupUgkAutocompleteProvider(...args) {
+			const result = originalSetupAutocompleteProvider.apply(this, args);
+			ensureAutocompleteApplyCompletion(this);
+			return result;
+		};
 	}
 
 	Object.defineProperty(proto, "session", {

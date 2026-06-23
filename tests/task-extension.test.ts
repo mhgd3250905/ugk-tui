@@ -1000,9 +1000,9 @@ test("/task run preserves natural language input with spaces and shows pass arti
 	}
 });
 
-test("/task run shows worker progress updates in the widget", async () => {
+test("/task run shows worker progress updates in the widget and PASS report", async () => {
 	const { pi, commands } = makePi();
-	const { cwd, ctx, widgetCalls } = makeCtx();
+	const { cwd, ctx, notifications, widgetCalls } = makeCtx();
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async (...args: any[]) => {
 		const onUpdate = args[7];
@@ -1037,6 +1037,58 @@ test("/task run shows worker progress updates in the widget", async () => {
 			.find((text) => text.includes("最近进展"));
 		assert.match(progress ?? "", /1\. 打开 Today 页面/);
 		assert.match(progress ?? "", /2\. 解析工具列表/);
+		assert.match(notifications.at(-1)?.message ?? "", /## 最近进展/);
+		assert.match(notifications.at(-1)?.message ?? "", /打开 Today 页面/);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task run can be stopped and records user notes while worker is running", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	let workerStarted!: () => void;
+	const started = new Promise<void>((resolve) => {
+		workerStarted = resolve;
+	});
+	let signal: AbortSignal | undefined;
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		signal = args[6];
+		workerStarted();
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: signal?.aborted ? 1 : 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "stopped" }] }],
+			stderr: signal?.aborted ? "aborted" : "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	setTaskDispatcherForTests(async () => ({}));
+	try {
+		await saveTaskbook("project", cwd, "runner-stop", {
+			description: "runner stop",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { artifacts: [] },
+		});
+
+		const runPromise = commands.get("task").handler("run runner-stop", ctx);
+		await started;
+		const inputResult = await handlers.get("input")![0]({ source: "interactive", text: "它正在走错路径" }, ctx);
+		await commands.get("task").handler("stop", ctx);
+		await runPromise;
+
+		assert.equal(inputResult?.handled, true);
+		assert.equal(signal?.aborted, true);
+		assert.ok(notifications.some((item) => /已记录/.test(item.message)));
+		assert.ok(notifications.some((item) => /已请求停止/.test(item.message)));
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);

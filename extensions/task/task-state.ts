@@ -1,4 +1,4 @@
-import type { RequirementsSpec } from "../judge/judge-state.ts";
+import type { RequirementsSpec } from "./task-spec.ts";
 
 export type TaskPhase = "planning" | "executing" | "reviewing" | "landed" | "aborted" | "done";
 export type TaskPendingTransition = "execute" | "review" | "save" | "repair";

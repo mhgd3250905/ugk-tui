@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +28,14 @@ const spec = {
 	forbidden: [],
 	context: "",
 };
+
+test("task extension stays independent from plan, judge, CDP, and MCP modules", () => {
+	const taskDir = path.resolve("extensions", "task");
+	for (const file of readdirSync(taskDir).filter((name) => name.endsWith(".ts"))) {
+		const source = readFileSync(path.join(taskDir, file), "utf8");
+		assert.doesNotMatch(source, /from\s+["']\.\.\/(?:plan-mode|judge|chrome-cdp|mcp)\b/, `${file} should stay independent from other extension internals`);
+	}
+});
 
 function makePi(initialActiveTools = ["read", "bash", "edit", "write", "subagent"]) {
 	const commands = new Map<string, any>();
@@ -585,6 +593,51 @@ test("/task save rejects malformed verify failure output before writing taskbook
 	}
 });
 
+test("/task save reruns empty-output negative check after asking runtime input", async () => {
+	const { pi, commands, handlers, entries } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	ctx.ui.input = () => "ok";
+	registerTask(pi as any);
+
+	try {
+		await commands.get("task").handler("new", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+		await handlers.get("agent_end")![0]({
+			messages: [{
+				role: "assistant",
+				content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(spec)}\n\`\`\`` }],
+			}],
+		}, ctx);
+		await commands.get("task").handler("execute", ctx);
+		const executeRunDir = (entries.at(-1)?.data as any).executeRunDir;
+		await writeFile(path.join(executeRunDir, "output", "report.md"), "# ok\n", "utf8");
+		await handlers.get("tool_execution_end")![0]({ toolName: "task_complete", isError: false, result: { details: { summary: "已生成 report.md" } } }, ctx);
+		await handlers.get("input")![0]({ source: "interactive", text: "" }, ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+		await handlers.get("agent_end")![0]({
+			messages: [{
+				role: "assistant",
+				content: [{ type: "text", text: `\`\`\`json
+{
+  "description":"runtime input bad negative",
+  "skill":"# Skill",
+  "verify":"const input = JSON.parse(process.env.TASK_INPUT); if (input.token !== 'ok') { console.log(JSON.stringify([{assertion:'token',expected:'ok',actual:String(input.token)}])); process.exit(1); } process.exit(0);",
+  "contract":{"runtimeInput":["token"],"artifacts":[{"name":"report.md","type":"file"}]}
+}
+\`\`\`` }],
+			}],
+		}, ctx);
+
+		await commands.get("task").handler("save runtime-negative --project", ctx);
+
+		assert.match(notifications.at(-1)?.message ?? "", /空 outputDir 也通过/);
+		assert.equal(await loadTaskbook(cwd, "runtime-negative"), null);
+		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("/task edit loads an existing taskbook into update review", async () => {
 	const { pi, commands, entries, userMessages, activeTools } = makePi();
 	const { cwd, ctx } = makeCtx();
@@ -899,6 +952,49 @@ test("/task run preauthorizes mentioned protected tools for the worker", async (
 		assert.match(confirmations[0].body ?? "", /alpha__echo/);
 		assert.equal(receivedEnv?.UGK_TASK_ALLOW_CHROME_CDP, "1");
 		assert.equal(receivedEnv?.UGK_TASK_ALLOW_MCP_TOOLS, "alpha__echo");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task run does not preauthorize tools mentioned only in contract artifact names", async () => {
+	const { pi, commands } = makePi(["read", "bash", "edit", "write", "subagent", "alpha__echo"]);
+	const { cwd, ctx } = makeCtx();
+	let confirmCalled = false;
+	let receivedEnv: Record<string, string | undefined> | undefined;
+	ctx.ui.confirm = () => {
+		confirmCalled = true;
+		return true;
+	};
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		receivedEnv = args[9];
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	setTaskDispatcherForTests(async () => ({}));
+	try {
+		await saveTaskbook("project", cwd, "runner-artifact-tool-name", {
+			description: "runner artifact tool name",
+			spec,
+			skill: "Write the requested artifact.",
+			verify: "process.exit(0);\n",
+			contract: { artifacts: [{ name: "alpha__echo.md", type: "file" }] },
+		});
+
+		await commands.get("task").handler("run runner-artifact-tool-name", ctx);
+
+		assert.equal(confirmCalled, false);
+		assert.deepEqual(receivedEnv, {});
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);

@@ -4,11 +4,10 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path";
 import {
 	extractArtifactsFromToolInput,
-	extractRequirementsSpec,
-	formatRequirementsSpec,
 	isSafeCommand,
 	summarizeToolArgs,
-} from "../judge/judge-utils.ts";
+} from "./task-utils.ts";
+import { extractRequirementsSpec, formatRequirementsSpec } from "./task-spec.ts";
 import {
 	abortTask,
 	createTaskState,
@@ -290,10 +289,14 @@ function contractToolNames(contract: unknown): string[] {
 	return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
 }
 
+function mentionsTool(text: string, tool: string): boolean {
+	const escaped = tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`).test(text);
+}
+
 function resolveProtectedTaskTools(loaded: LoadedTaskbook, activeTools: string[]): { chromeCdp: boolean; mcpTools: string[] } {
-	const text = `${loaded.skill}\n${JSON.stringify(loaded.contract)}`;
 	const declared = new Set(contractToolNames(loaded.contract));
-	const uses = (tool: string) => declared.has(tool) || text.includes(tool);
+	const uses = (tool: string) => declared.has(tool) || mentionsTool(loaded.skill, tool);
 	return {
 		chromeCdp: activeTools.includes("chrome_cdp") && uses("chrome_cdp"),
 		mcpTools: activeTools.filter((tool) => tool.includes("__") && uses(tool)),
@@ -835,21 +838,30 @@ export function registerTask(pi: ExtensionAPI): void {
 		await withTempVerify(cwdOf(ctx), state.reviewResult.verify, async (verifyPath, tempDir) => {
 			const emptyOutputDir = path.join(tempDir, "empty-output");
 			await mkdir(emptyOutputDir, { recursive: true });
-			const negativeResult = await runVerify({ verifyPath, outputDir: emptyOutputDir, input: runtimeInput });
-			if (!negativeResult.passed && malformedVerifyFailureOutput(negativeResult)) {
+			const runNegativeCheck = async (): Promise<boolean> => {
+				const negativeResult = await runVerify({ verifyPath, outputDir: emptyOutputDir, input: runtimeInput });
+				if (!negativeResult.passed && malformedVerifyFailureOutput(negativeResult)) {
+					ctx.ui.notify(`verify 失败输出格式错误,拒绝保存。失败时 stdout 必须是 VerifyFailure[] JSON:\n${negativeResult.stdout.trim() || JSON.stringify(negativeResult.failures, null, 2)}`, "warning");
+					return false;
+				}
+				if (negativeResult.passed && artifactNames(state.reviewResult?.contract).length > 0) {
+					ctx.ui.notify("verify 负例自检失败: 空 outputDir 也通过了,拒绝保存。", "warning");
+					return false;
+				}
+				return true;
+			};
+			if (!await runNegativeCheck()) {
 				blocked = true;
-				ctx.ui.notify(`verify 失败输出格式错误,拒绝保存。失败时 stdout 必须是 VerifyFailure[] JSON:\n${negativeResult.stdout.trim() || JSON.stringify(negativeResult.failures, null, 2)}`, "warning");
-				return;
-			}
-			if (negativeResult.passed && artifactNames(state.reviewResult?.contract).length > 0) {
-				blocked = true;
-				ctx.ui.notify("verify 负例自检失败: 空 outputDir 也通过了,拒绝保存。", "warning");
 				return;
 			}
 			if (!outputDir?.trim()) return;
 			positiveVerifyResult = await runVerify({ verifyPath, outputDir, input: runtimeInput });
 			if (!positiveVerifyResult.passed && runtimeFields(state.reviewResult?.contract).length > 0) {
 				runtimeInput = await askSelfCheckInput(ctx, state.reviewResult?.contract);
+				if (!await runNegativeCheck()) {
+					blocked = true;
+					return;
+				}
 				positiveVerifyResult = await runVerify({ verifyPath, outputDir, input: runtimeInput });
 			}
 		});

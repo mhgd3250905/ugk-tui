@@ -2,7 +2,9 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { RequirementsSpec } from "../judge/judge-state.ts";
+import { isRequirementsSpec, type RequirementsSpec } from "./task-spec.ts";
+
+export { isRequirementsSpec } from "./task-spec.ts";
 
 export interface VerifyFailure {
 	assertion: string;
@@ -58,18 +60,6 @@ export function isValidTaskbookName(name: string): boolean {
 
 function isStringArray(value: unknown): value is string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-export function isRequirementsSpec(value: unknown): value is RequirementsSpec {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	const record = value as Record<string, unknown>;
-	return (
-		typeof record.goal === "string" &&
-		isStringArray(record.hardConstraints) &&
-		isStringArray(record.acceptance) &&
-		isStringArray(record.forbidden) &&
-		typeof record.context === "string"
-	);
 }
 
 function isVerifyFailure(value: unknown): value is VerifyFailure {

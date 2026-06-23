@@ -11,6 +11,7 @@ import {
 	normalizeAgentModelForCli,
 	truncateParallelOutput,
 } from "../extensions/subagent-runtime.ts";
+import { buildSubagentChildEnv } from "../extensions/subagent.ts";
 
 test("formats token and usage summaries for subagent results", () => {
 	assert.equal(formatTokens(999), "999");
@@ -38,6 +39,25 @@ test("normalizes UGK DeepSeek agent model ids for CLI subagents", () => {
 	assert.equal(normalizeAgentModelForCli("deepseek-v4-pro"), "deepseek/deepseek-v4-pro");
 	assert.equal(normalizeAgentModelForCli("deepseek-v4-flash"), "deepseek/deepseek-v4-flash");
 	assert.equal(normalizeAgentModelForCli("openai/gpt-5.4"), "openai/gpt-5.4");
+});
+
+test("subagent child env strips task-local tool authorization unless explicitly passed", () => {
+	const baseEnv = {
+		PI_CODING_AGENT_DIR: "E:/agents",
+		UGK_TASK_ALLOW_CHROME_CDP: "1",
+		UGK_TASK_ALLOW_MCP_TOOLS: "alpha__echo",
+		KEEP_ME: "yes",
+	};
+
+	const normal = buildSubagentChildEnv({}, baseEnv);
+	assert.equal(normal.KEEP_ME, "yes");
+	assert.equal(normal.PI_CODING_AGENT_DIR, "E:/agents");
+	assert.equal(normal.UGK_TASK_ALLOW_CHROME_CDP, undefined);
+	assert.equal(normal.UGK_TASK_ALLOW_MCP_TOOLS, undefined);
+
+	const explicit = buildSubagentChildEnv({ UGK_TASK_ALLOW_CHROME_CDP: "1" }, baseEnv);
+	assert.equal(explicit.UGK_TASK_ALLOW_CHROME_CDP, "1");
+	assert.equal(explicit.UGK_TASK_ALLOW_MCP_TOOLS, undefined);
 });
 
 test("extracts final output and display items from subagent messages", () => {

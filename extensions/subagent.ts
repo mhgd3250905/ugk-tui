@@ -70,6 +70,18 @@ export function getPiInvocation(args: string[]): { command: string; args: string
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
+export function buildSubagentChildEnv(
+	extraEnv: Record<string, string | undefined> = {},
+	baseEnv: Record<string, string | undefined> = process.env,
+): NodeJS.ProcessEnv {
+	const env = { ...baseEnv };
+	delete env.UGK_TASK_ALLOW_CHROME_CDP;
+	delete env.UGK_TASK_ALLOW_MCP_TOOLS;
+	Object.assign(env, extraEnv);
+	env.PI_CODING_AGENT_DIR = baseEnv.PI_CODING_AGENT_DIR || getAgentDir();
+	return env as NodeJS.ProcessEnv;
+}
+
 export async function runSingleAgent(
 	defaultCwd: string,
 	agents: AgentConfig[],
@@ -142,7 +154,7 @@ export async function runSingleAgent(
 			const invocation = getPiInvocation(args);
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
-				env: { ...process.env, ...extraEnv, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR || getAgentDir() },
+				env: buildSubagentChildEnv(extraEnv),
 				shell: invocation.useShell,
 				stdio: ["ignore", "pipe", "pipe"],
 			});

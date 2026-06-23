@@ -5,7 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs } from "../extensions/task/task.ts";
-import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
+import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, setTaskReviewResult, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
 import { appendRunToTaskbook, loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
@@ -221,6 +221,24 @@ test("/task new enters planning, injects prompt, filters stale context, and pars
 
 	assert.deepEqual((entries.at(-1)?.data as any).spec, spec);
 	assert.match(notifications.at(-1)?.message ?? "", /Spec 已对齐/);
+});
+
+test("/task planning parse failure asks the planner to re-output RequirementsSpec JSON", async () => {
+	const { pi, commands, handlers, userMessages } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx);
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: "需求已经很清楚，我直接开始做。" }],
+		}],
+	}, ctx);
+
+	assert.match(notifications.at(-1)?.message ?? "", /Task planning did not find/);
+	assert.match(userMessages.at(-1)?.text ?? "", /重新输出/);
+	assert.match(userMessages.at(-1)?.text ?? "", /RequirementsSpec/);
 });
 
 test("task pending transition opens the next-step menu in TUI", async () => {
@@ -551,8 +569,31 @@ echo hi
 	assert.match(userMessages.at(-1)?.text ?? "", /不要输出 markdown 代码块/);
 });
 
+test("/task save without review questionnaire asks reviewer to run the design gates", async () => {
+	const { pi, commands, handlers, userMessages } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	const reviewing = enterReviewing(startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)), "run-dir"), "done");
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: setTaskReviewResult(reviewing, {
+			description: "x",
+			skill: "# Skill",
+			verify: "process.exit(0)",
+			contract: { artifacts: [] },
+		}),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+	await commands.get("task").handler("save no-gate", ctx);
+
+	assert.match(notifications.at(-1)?.message ?? "", /review 未用 questionnaire/);
+	assert.match(userMessages.at(-1)?.text ?? "", /questionnaire/);
+	assert.match(userMessages.at(-1)?.text ?? "", /skill\/verify/);
+});
+
 test("/task save runs verify self-check before landed", async () => {
-	const { pi, commands, handlers, entries } = makePi();
+	const { pi, commands, handlers, entries, userMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
 
@@ -579,9 +620,13 @@ test("/task save runs verify self-check before landed", async () => {
 			}],
 		}, ctx);
 
+		const beforeSaveMessages = userMessages.length;
 		await commands.get("task").handler("save bad --project", ctx);
 
 		assert.match(notifications.at(-1)?.message ?? "", /verify 自证失败/);
+		assert.ok(userMessages.length > beforeSaveMessages);
+		assert.match(userMessages.at(-1)?.text ?? "", /verify 自证失败/);
+		assert.match(userMessages.at(-1)?.text ?? "", /修正 taskbook/);
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -589,7 +634,7 @@ test("/task save runs verify self-check before landed", async () => {
 });
 
 test("/task save rejects malformed verify failure output before writing taskbook", async () => {
-	const { pi, commands, handlers, entries } = makePi();
+	const { pi, commands, handlers, entries, userMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
 
@@ -622,9 +667,12 @@ test("/task save rejects malformed verify failure output before writing taskbook
 			}],
 		}, ctx);
 
+		const beforeSaveMessages = userMessages.length;
 		await commands.get("task").handler("save malformed --project", ctx);
 
 		assert.match(notifications.at(-1)?.message ?? "", /verify 失败输出格式错误/);
+		assert.ok(userMessages.length > beforeSaveMessages);
+		assert.match(userMessages.at(-1)?.text ?? "", /VerifyFailure\[\]/);
 		assert.equal(await loadTaskbook(cwd, "malformed"), null);
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
 	} finally {
@@ -633,7 +681,7 @@ test("/task save rejects malformed verify failure output before writing taskbook
 });
 
 test("/task save reruns empty-output negative check after asking runtime input", async () => {
-	const { pi, commands, handlers, entries } = makePi();
+	const { pi, commands, handlers, entries, userMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	ctx.ui.input = () => "ok";
 	registerTask(pi as any);
@@ -667,9 +715,13 @@ test("/task save reruns empty-output negative check after asking runtime input",
 			}],
 		}, ctx);
 
+		const beforeSaveMessages = userMessages.length;
 		await commands.get("task").handler("save runtime-negative --project", ctx);
 
 		assert.match(notifications.at(-1)?.message ?? "", /空 outputDir 也通过/);
+		assert.ok(userMessages.length > beforeSaveMessages);
+		assert.match(userMessages.at(-1)?.text ?? "", /空 outputDir/);
+		assert.match(userMessages.at(-1)?.text ?? "", /修正 verify/);
 		assert.equal(await loadTaskbook(cwd, "runtime-negative"), null);
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
 	} finally {

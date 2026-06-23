@@ -830,6 +830,7 @@ export function registerTask(pi: ExtensionAPI): void {
 		}
 		if (!state.reviewQuestionnaireUsed) {
 			ctx.ui.notify("review 未用 questionnaire 核对,拒绝保存。", "warning");
+			pi.sendUserMessage?.("review 阶段还没有用 questionnaire 核对 skill/verify/contract 设计。请先用 questionnaire 确认 worker 路径和 verify 设计,然后重新输出 taskbook JSON。", { deliverAs: "followUp" });
 			return;
 		}
 		const finalName = name ?? state.taskbookName ?? await ctx.ui?.input?.("taskbook 名字", "my-task");
@@ -849,10 +850,12 @@ export function registerTask(pi: ExtensionAPI): void {
 				const negativeResult = await runVerify({ verifyPath, outputDir: emptyOutputDir, input: runtimeInput });
 				if (!negativeResult.passed && malformedVerifyFailureOutput(negativeResult)) {
 					ctx.ui.notify(`verify 失败输出格式错误,拒绝保存。失败时 stdout 必须是 VerifyFailure[] JSON:\n${negativeResult.stdout.trim() || JSON.stringify(negativeResult.failures, null, 2)}`, "warning");
+					pi.sendUserMessage?.(`verify 失败输出格式错误。请修正 verify.mjs: 失败时 stdout 必须只输出 VerifyFailure[] JSON 数组,不要输出 {"failures":[...]} 或普通文本。\n\n当前输出:\n${negativeResult.stdout.trim() || JSON.stringify(negativeResult.failures, null, 2)}`, { deliverAs: "followUp" });
 					return false;
 				}
 				if (negativeResult.passed && artifactNames(state.reviewResult?.contract).length > 0) {
 					ctx.ui.notify("verify 负例自检失败: 空 outputDir 也通过了,拒绝保存。", "warning");
+					pi.sendUserMessage?.("verify 负例自检失败: 空 outputDir 也通过了。请修正 verify.mjs,必须检查 contract.artifacts 声明的产物真实存在,空目录应返回 VerifyFailure[] 并非 0 退出。", { deliverAs: "followUp" });
 					return false;
 				}
 				return true;
@@ -896,6 +899,7 @@ export function registerTask(pi: ExtensionAPI): void {
 		const verifyResult = positiveVerifyResult;
 		if (!verifyResult.passed) {
 			ctx.ui.notify(`verify 自证失败,未进入 landed:\n${JSON.stringify(verifyResult.failures, null, 2)}`, "warning");
+			pi.sendUserMessage?.(`verify 自证失败。请根据失败断言修正 taskbook 的 skill、contract 或 verify,然后重新输出完整 taskbook JSON。\n\n失败断言:\n${JSON.stringify(verifyResult.failures, null, 2)}`, { deliverAs: "followUp" });
 			return;
 		}
 		await saveTaskbook(scope, cwdOf(ctx), finalName.trim(), {
@@ -1161,6 +1165,7 @@ export function registerTask(pi: ExtensionAPI): void {
 		const spec = extractRequirementsSpec(getTextContent(lastAssistant));
 		if (!spec) {
 			ctx.ui.notify("Task planning did not find a complete RequirementsSpec yet.", "warning");
+			pi.sendUserMessage?.("你刚才没有输出可解析的 RequirementsSpec JSON。请先用 questionnaire 核对用户假设,然后重新输出完整 RequirementsSpec JSON,包含 goal、hardConstraints、acceptance。", { deliverAs: "followUp" });
 			return;
 		}
 		state = setPendingTransition(setTaskSpec(state, spec), "execute");

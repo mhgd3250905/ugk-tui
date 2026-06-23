@@ -37,6 +37,8 @@ const TASK_PLAN_CONTEXT_TYPE = "task-plan-context";
 const TASK_REVIEW_CONTEXT_TYPE = "task-review-context";
 const TASK_PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const TASK_NORMAL_TOOLS = ["read", "bash", "edit", "write", "subagent"];
+const PREVIEW_TEXT_EXTENSIONS = new Set([".md", ".txt", ".json", ".csv", ".tsv", ".html", ".htm"]);
+const MAX_ARTIFACT_PREVIEW_CHARS = 12000;
 
 const taskCompleteTool = defineTool({
 	name: "task_complete",
@@ -299,14 +301,18 @@ async function formatArtifact(outputDir: string, name: string): Promise<string[]
 	const filePath = path.resolve(outputDir, name);
 	try {
 		const info = await stat(filePath);
-		const lines = [`  ${filePath} (${info.size} bytes)`];
-		if (name.endsWith(".json")) {
-			const json = JSON.parse(await readFile(filePath, "utf8"));
-			lines.push(`  内容: ${JSON.stringify(json)}`);
+		const lines = [`- ${name} (${info.size} bytes)`, `  路径: ${filePath}`];
+		const extension = path.extname(name).toLowerCase();
+		if (PREVIEW_TEXT_EXTENSIONS.has(extension)) {
+			const content = await readFile(filePath, "utf8");
+			const preview = content.length > MAX_ARTIFACT_PREVIEW_CHARS
+				? `${content.slice(0, MAX_ARTIFACT_PREVIEW_CHARS)}\n\n...内容过长,已截断;完整内容见文件。`
+				: content;
+			lines.push("", `### ${name}`, preview.trimEnd());
 		}
 		return lines;
 	} catch (error) {
-		return [`  ${filePath} (missing: ${(error as Error).message})`];
+		return [`- ${name} (missing: ${(error as Error).message})`, `  路径: ${filePath}`];
 	}
 }
 
@@ -315,9 +321,15 @@ async function formatArtifacts(contract: unknown, outputDir: string): Promise<st
 	const actualNames = names.length > 0
 		? names
 		: (await readdir(outputDir).catch(() => []));
-	const lines = ["产出:"];
+	const lines = ["## 产物"];
 	for (const name of actualNames) lines.push(...await formatArtifact(outputDir, name));
 	return lines;
+}
+
+function formatWorkerSummary(summary: string | undefined): string {
+	const text = summary?.trim();
+	if (!text) return "无";
+	return text.split(/\r?\n/).map((line) => line ? `> ${line}` : ">").join("\n");
 }
 
 async function formatRunResult(
@@ -331,25 +343,37 @@ async function formatRunResult(
 ): Promise<string> {
 	if (passed) {
 		return [
-			`✅ taskbook "${loaded.taskbook.name}" PASS(尝试 ${attempts} 次, ${durationSeconds.toFixed(1)}s)`,
+			"## 任务结果",
+			`✅ taskbook "${loaded.taskbook.name}" PASS`,
+			`任务: ${loaded.taskbook.description}`,
+			`尝试: ${attempts} 次`,
+			`耗时: ${durationSeconds.toFixed(1)}s`,
 			"",
 			...await formatArtifacts(loaded.contract, outputDir),
 			"",
-			"verify: 全过",
-			workerResult?.summary ? `worker 摘要:\n  ${workerResult.summary}` : "",
+			"## 验证",
+			"verify 自证: 全过",
+			"",
+			"## 执行摘要",
+			formatWorkerSummary(workerResult?.summary),
 		].filter(Boolean).join("\n");
 	}
 	const failures = verifyResult?.failures ?? [];
 	return [
-		`❌ taskbook "${loaded.taskbook.name}" FAIL(尝试 ${attempts} 次, ${durationSeconds.toFixed(1)}s)`,
+		"## 任务结果",
+		`❌ taskbook "${loaded.taskbook.name}" FAIL`,
+		`任务: ${loaded.taskbook.description}`,
+		`尝试: ${attempts} 次`,
+		`耗时: ${durationSeconds.toFixed(1)}s`,
 		"",
+		"## 验证",
 		"失败断言:",
 		...(failures.length > 0
 			? failures.map((failure) => `  - ${failure.assertion}: 预期 ${failure.expected}, 实际 ${failure.actual}`)
 			: ["  - verify 未返回结构化失败"]),
 		"",
-		"worker 摘要:",
-		`  ${workerResult?.summary || "无"}`,
+		"## 执行摘要",
+		formatWorkerSummary(workerResult?.summary),
 	].join("\n");
 }
 

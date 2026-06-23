@@ -257,8 +257,8 @@ if (!summary?.trim()) {
 
 5. **run 完成**(PASS/FAIL):
    - 已有 `formatRunResult`,保留并加强:
-     - PASS: 产出 + 内容 + verify + worker 摘要 + "用 `/task run <name>` 再跑一次"
-     - FAIL: 失败断言 + worker 摘要 + "已重试 N 次,自动放弃。可手动检查 <outputDir>"
+     - PASS:结构化显示任务、产物路径/大小、常见文本产物内容、verify 自证、引用块形式的 worker 摘要
+     - FAIL:结构化显示任务、失败断言、引用块形式的 worker 摘要、可手动检查 outputDir
 
 **实现提示**:"按 Enter 继续"这个交互需要 TUI 层支持。如果 pi-tui 没有现成的"等待 Enter"机制,可以:
 - 方案 A:弹一个 questionnaire,只有一个选项 `["继续", "Exit"]`,用户选"继续"等于按 Enter
@@ -460,7 +460,7 @@ dogfood 时发现 execute 阶段(创造流程的 task-creator)报"只有 bash/re
 
 ### 验证
 
-`npm test` 420/420 pass(基线 416 + 新增 4 个测试,覆盖 execute 保留 chrome_cdp/MCP 风格工具、记录环境工具调用、block subagent、session resume 到 executing 时仍保留环境工具、executing 菜单可进入复盘,以及 pending review 状态下菜单可直接进入 review)。3 处 execute 工具集断言同步更新。
+`npm test` 421/421 pass(基线 416 + 新增 5 个测试,覆盖 execute 保留 chrome_cdp/MCP 风格工具、记录环境工具调用、block subagent、session resume 到 executing 时仍保留环境工具、executing 菜单可进入复盘、pending review 状态下菜单可直接进入 review,以及 PASS 报告内展示小型 Markdown 产物内容)。3 处 execute 工具集断言同步更新。
 
 ### 追加 UX 修复:executing 菜单暴露进入复盘(2026-06-23)
 

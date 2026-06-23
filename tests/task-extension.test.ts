@@ -671,11 +671,53 @@ test("/task run preserves natural language input with spaces and shows pass arti
 
 		const message = notifications.at(-1)?.message ?? "";
 		assert.match(message, /PASS/);
+		assert.match(message, /任务: runner file/);
 		assert.match(message, /count\.json/);
 		assert.match(message, /\{"count":11\}/);
-		assert.match(message, /verify: 全过/);
+		assert.match(message, /## 任务结果/);
+		assert.match(message, /## 产物/);
+		assert.match(message, /## 验证/);
+		assert.match(message, /verify 自证: 全过/);
+		assert.match(message, /## 执行摘要/);
 		assert.ok(widgetCalls.some((call) => call.lines?.some((line) => /worker 执行中/.test(line))));
 		assert.equal(widgetCalls.at(-1)?.lines, undefined);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task run displays small markdown artifact content in the PASS report", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => ({
+		agent: "worker",
+		agentSource: "user",
+		task: "task",
+		exitCode: 0,
+		messages: [{ role: "assistant", content: [{ type: "text", text: "写好了 markdown" }] }],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+	}) as any);
+	setTaskDispatcherForTests(async () => ({}));
+	try {
+		await saveTaskbook("project", cwd, "runner-md", {
+			description: "runner md",
+			spec,
+			skill: "# Skill",
+			verify: "import {writeFile} from 'node:fs/promises'; await writeFile(`${process.env.TASK_OUTPUT_DIR}/report.md`, '| Name | Desc |\\n|---|---|\\n| Kane CLI | Browser automation |\\n', 'utf8'); process.exit(0);\n",
+			contract: { artifacts: [{ name: "report.md", type: "file", required: true }] },
+		});
+
+		await commands.get("task").handler("run runner-md", ctx);
+
+		const message = notifications.at(-1)?.message ?? "";
+		assert.match(message, /任务: runner md/);
+		assert.match(message, /### report\.md/);
+		assert.match(message, /\| Kane CLI \| Browser automation \|/);
+		assert.match(message, /## 执行摘要\n> 写好了 markdown/);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
@@ -754,8 +796,9 @@ test("/task run sends verify failures to checker and records fail on abort", asy
 
 		assert.ok(notifications.some((item) => /checker 判 abort/.test(item.message)));
 		assert.match(notifications.at(-1)?.message ?? "", /FAIL/);
+		assert.match(notifications.at(-1)?.message ?? "", /任务: runner fail/);
 		assert.match(notifications.at(-1)?.message ?? "", /失败断言/);
-		assert.match(notifications.at(-1)?.message ?? "", /worker 摘要:\n\s+done/);
+		assert.match(notifications.at(-1)?.message ?? "", /## 执行摘要\n> done/);
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "fail");
 		assert.equal(loaded?.taskbook.runs.at(-1)?.verifyFailures[0].assertion, "a");
 	} finally {

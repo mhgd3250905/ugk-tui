@@ -11,7 +11,7 @@
 
 | 验证项 | 方式 | 结果 |
 |---|---|---|
-| 测试基线 | `npm test` | ✅ **420/420 pass** |
+| 测试基线 | `npm test` | ✅ **421/421 pass** |
 | 场景 B 复用流程(dispatcher 真跑) | `npm run smoke:task` | ✅ **PASS,16s** |
 | dispatcher 不走 fallback | smoke `hasTaskInputFallback` | ✅ **absent**(核心承诺兑现) |
 | worker→verify→PASS 全链路 | smoke + taskbook runs | ✅ run status=pass |
@@ -147,7 +147,7 @@ export DEEPSEEK_API_KEY="$KEY"
 
 ## 附:本会话执行的命令记录
 
-- `npm test` → 420/420 pass
+- `npm test` → 421/421 pass
 - `npm run smoke:task`(注入有效 key)→ PASS 16s,report 在 `.tmp/smoke-task/latest/report.md`
 - 静态审查:全读 `extensions/task/*.ts`(1772 行)+ 2 个测试文件 + 2 个 taskbook
 - RPC 探针(已清理):验证 dispatcher 不 fallback,但 PASS 检测逻辑有缺陷导致 TIMEOUT,非 task bug

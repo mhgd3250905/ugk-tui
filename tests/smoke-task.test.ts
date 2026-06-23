@@ -20,7 +20,7 @@ test("package exposes task smoke script", async () => {
 
 test("task smoke report requires PASS evidence", () => {
 	const events = [
-		{ msg: { type: "extension_ui_request", method: "notify", message: "✅ taskbook \"smoke_name_count\" PASS(尝试 1 次, 1.0s)\nverify: 全过" } },
+		{ msg: { type: "extension_ui_request", method: "notify", message: "## 任务结果\n✅ taskbook \"smoke_name_count\" PASS\n任务: smoke\n尝试: 1 次\n耗时: 1.0s\n\n## 验证\nverify 自证: 全过" } },
 	];
 	const report = buildTaskReport({
 		exitCode: 0,

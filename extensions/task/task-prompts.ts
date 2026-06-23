@@ -48,10 +48,11 @@ You can see:
 - ExecutionSummary: what was actually done and what artifacts were produced.
 
 Your job:
-1. Draft skill.md: the shortest reusable worker guide. It says what to do and where outputs go. It MUST NOT include verification logic or acceptance criteria.
-2. Draft verify.mjs: a Node ESM script using only Node stdlib and external tools when needed. It reads TASK_OUTPUT_DIR and TASK_INPUT, collects failures[], prints JSON failures on FAIL, exits 0 on PASS and non-zero on FAIL.
+1. Decide whether this is a new taskbook, an update to an existing taskbook, or a repair after a failed run. If existing taskbook content is present, make the smallest useful change and keep working parts intact.
+2. Draft skill.md: the shortest reusable worker guide. It says what to do and where outputs go. It MUST NOT include verification logic or acceptance criteria.
 3. Draft contract.json: the shared worker/verify/checker contract with outputDir, artifacts, and runtimeInput.
-4. Use questionnaire to confirm the skill path, verify assertions, and contract schema with the user before outputting JSON.
+4. VERIFY DESIGN GATE: before writing verify.mjs, you MUST use questionnaire to confirm the verification design with the user. The questions must cover artifacts, assertions, failure cases, runtime input, and allowed variability. Present your proposed defaults; do not ask vague "is this okay?" questions.
+5. Only after the questionnaire returns, draft verify.mjs: a Node ESM script using only Node stdlib and external tools when needed. It reads TASK_OUTPUT_DIR and TASK_INPUT, collects failures[], prints JSON failures on FAIL, exits 0 on PASS and non-zero on FAIL.
 
 **MANDATORY closing question**: The questionnaire's final question MUST be id="extras", prompt="你还有什么要补充的吗?(没有可留空)", with exactly one option {"value":"none","label":"没有了"} and allowOther: true.
 

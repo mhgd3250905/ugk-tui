@@ -3,7 +3,7 @@
 > **提交对象**:code review
 > **改动日期**:2026-06-23
 > **改动范围**:4 个代码/设计文件,+119/-26 行(净增 93 行)
-> **测试**:`npm test` 422/422 pass(基线 416 + 新增 6)
+> **测试**:原 review `npm test` 422/422 pass; 最新回归 424/424 pass
 > **风险等级**:低(纯 bug fix,改动面小,有完整测试覆盖)
 
 ---
@@ -155,7 +155,7 @@ if (state.phase === "executing") {
 
 | 验证项 | 命令 | 结果 |
 |---|---|---|
-| 单元测试 | `npm test` | ✅ 422/422 pass(基线 416 + 新增 6) |
+| 单元测试 | `npm test` | ✅ 原 review 422/422 pass; 最新回归 424/424 pass |
 | 新增测试 | `node --test tests/task-extension.test.ts` | ✅ 含新测试全过 |
 | 无残留引用 | `grep TASK_EXECUTING_TOOLS extensions/task/task.ts` | ✅ 空(常量已删,引用全换) |
 | planning 回归 | planning/reviewing 工具集断言 | ✅ 仍 pass |

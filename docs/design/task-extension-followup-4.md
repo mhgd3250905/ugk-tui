@@ -460,7 +460,7 @@ dogfood 时发现 execute 阶段(创造流程的 task-creator)报"只有 bash/re
 
 ### 验证
 
-`npm test` 422/422 pass(基线 416 + 新增 6 个测试,覆盖 execute 保留 chrome_cdp/MCP 风格工具、记录环境工具调用、block subagent、session resume 到 executing 时仍保留环境工具、executing 菜单可进入复盘、pending review 状态下菜单可直接进入 review、PASS 报告内展示小型 Markdown 产物内容,以及 worker 运行中进展展示)。3 处 execute 工具集断言同步更新。
+`npm test` 424/424 pass(基线 416 + 新增 8 个测试,覆盖 execute 保留 chrome_cdp/MCP 风格工具、记录环境工具调用、block subagent、session resume 到 executing 时仍保留环境工具、executing 菜单可进入复盘、pending review 状态下菜单可直接进入 review、PASS 报告内展示小型 Markdown 产物内容、worker 运行中进展展示、run 失败后可选修正 taskbook,以及 edit 增量更新 taskbook)。3 处 execute 工具集断言同步更新。
 
 ### 追加 UX 修复:executing 菜单暴露进入复盘(2026-06-23)
 

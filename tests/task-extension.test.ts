@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs } from "../extensions/task/task.ts";
 import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
-import { loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
+import { appendRunToTaskbook, loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT, TASK_REVIEW_PROMPT } from "../extensions/task/task-prompts.ts";
@@ -292,6 +292,12 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.match(prompt, /RequirementsSpec/);
 	assert.match(prompt, /ExecutionSummary/);
 	assert.match(TASK_REVIEW_PROMPT, /id="extras"/);
+	assert.match(TASK_REVIEW_PROMPT, /VERIFY DESIGN GATE/);
+	assert.match(TASK_REVIEW_PROMPT, /artifacts/);
+	assert.match(TASK_REVIEW_PROMPT, /assertions/);
+	assert.match(TASK_REVIEW_PROMPT, /failure cases/);
+	assert.match(TASK_REVIEW_PROMPT, /runtime input/);
+	assert.match(TASK_REVIEW_PROMPT, /allowed variability/);
 
 	const parsed = extractTaskReviewResult(`\`\`\`json
 {
@@ -506,7 +512,7 @@ test("/task save runs verify self-check before landed", async () => {
 	}
 });
 
-test("/task edit loads an existing taskbook into planning", async () => {
+test("/task edit loads an existing taskbook into update review", async () => {
 	const { pi, commands, entries, userMessages, activeTools } = makePi();
 	const { cwd, ctx } = makeCtx();
 	registerTask(pi as any);
@@ -521,10 +527,59 @@ test("/task edit loads an existing taskbook into planning", async () => {
 		});
 		await commands.get("task").handler("edit editable", ctx);
 
-		assert.equal((entries.at(-1)?.data as any).phase, "planning");
+		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
 		assert.deepEqual((entries.at(-1)?.data as any).spec, spec);
+		assert.equal((entries.at(-1)?.data as any).taskbookName, "editable");
+		assert.equal((entries.at(-1)?.data as any).taskbookScope, "project");
 		assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
-		assert.match(userMessages.at(-1)?.text ?? "", /重新核对/);
+		assert.match(userMessages.at(-1)?.text ?? "", /更新已有 taskbook/);
+		assert.match(userMessages.at(-1)?.text ?? "", /现有 skill\.md/);
+		assert.match(userMessages.at(-1)?.text ?? "", /现有 verify\.mjs/);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task edit save overwrites the existing taskbook scope and preserves runs", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	try {
+		await saveTaskbook("project", cwd, "editable-save", {
+			description: "old",
+			spec,
+			skill: "# Old",
+			verify: "process.exit(0)",
+			contract: { artifacts: [] },
+		});
+		await appendRunToTaskbook("project", cwd, "editable-save", {
+			timestamp: new Date().toISOString(),
+			status: "pass",
+			input: {},
+			exitCode: 0,
+			verifyFailures: [],
+			duration: 1,
+		});
+
+		await commands.get("task").handler("edit editable-save", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+		await handlers.get("agent_end")![0]({
+			messages: [{
+				role: "assistant",
+				content: [{ type: "text", text: `\`\`\`json
+{"description":"new","skill":"# New","verify":"process.exit(0)","contract":{"artifacts":[]}}
+\`\`\`` }],
+			}],
+		}, ctx);
+		await commands.get("task").handler("save", ctx);
+
+		const loaded = await loadTaskbook(cwd, "editable-save");
+		assert.equal(loaded?.scope, "project");
+		assert.equal(loaded?.taskbook.description, "new");
+		assert.equal(loaded?.skill, "# New");
+		assert.equal(loaded?.taskbook.runs.length, 1);
+		assert.match(notifications.at(-1)?.message ?? "", /已更新/);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}
@@ -845,6 +900,58 @@ test("/task run sends verify failures to checker and records fail on abort", asy
 		assert.match(notifications.at(-1)?.message ?? "", /## 执行摘要\n> done/);
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "fail");
 		assert.equal(loaded?.taskbook.runs.at(-1)?.verifyFailures[0].assertion, "a");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskCheckerRunnerForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task run failure offers optional taskbook repair", async () => {
+	const { pi, commands, entries, userMessages } = makePi();
+	const { cwd, ctx, notifications, selections } = makeCtx();
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => ({
+		agent: "worker",
+		agentSource: "user",
+		task: "task",
+		exitCode: 0,
+		messages: [{ role: "assistant", content: [{ type: "text", text: "wrote bad links" }] }],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+	}) as any);
+	setTaskCheckerRunnerForTests(async () => ({
+		agent: "checker",
+		agentSource: "user",
+		task: "task",
+		exitCode: 0,
+		messages: [{ role: "assistant", content: [{ type: "text", text: "```json\n{\"hint\":\"修 verify\",\"verdict\":\"abort\",\"reason\":\"verify 太严\"}\n```" }] }],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+	}) as any);
+	try {
+		await saveTaskbook("project", cwd, "runner-repair", {
+			description: "runner repair",
+			spec,
+			skill: "# Skill",
+			verify: "console.log(JSON.stringify([{assertion:'link',expected:'toolify link',actual:'bad'}])); process.exit(1);\n",
+			contract: { artifacts: [] },
+		});
+
+		await commands.get("task").handler("run runner-repair", ctx);
+		assert.match(notifications.at(-1)?.message ?? "", /按 Enter 修正 taskbook/);
+
+		ctx.ui.select = (title: string, options: string[]) => {
+			selections.push({ title, options });
+			return "修正本 taskbook";
+		};
+		await commands.get("task").handler("", ctx);
+
+		assert.deepEqual(selections.at(-1)?.options, ["修正本 taskbook", "重新运行", "查看 taskbook 详情", "放弃", "Exit"]);
+		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
+		assert.match(userMessages.at(-1)?.text ?? "", /修正已有 taskbook/);
+		assert.match(userMessages.at(-1)?.text ?? "", /失败断言/);
+		assert.match(userMessages.at(-1)?.text ?? "", /link/);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskCheckerRunnerForTests(undefined);

@@ -25,7 +25,7 @@ import {
 	type TaskPhase,
 	type TaskState,
 } from "./task-state.ts";
-import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, saveTaskbook, taskDir } from "./task-book.ts";
+import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, saveTaskbook, taskDir, type LoadedTaskbook } from "./task-book.ts";
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
@@ -39,6 +39,14 @@ const TASK_PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnair
 const TASK_NORMAL_TOOLS = ["read", "bash", "edit", "write", "subagent"];
 const PREVIEW_TEXT_EXTENSIONS = new Set([".md", ".txt", ".json", ".csv", ".tsv", ".html", ".htm"]);
 const MAX_ARTIFACT_PREVIEW_CHARS = 12000;
+
+type TaskRunFailure = {
+	taskbookName: string;
+	taskbookScope: LoadedTaskbook["scope"];
+	spec: LoadedTaskbook["spec"];
+	runDir: string;
+	summary: string;
+};
 
 const taskCompleteTool = defineTool({
 	name: "task_complete",
@@ -72,6 +80,8 @@ const MENU_TO_ACTION = new Map<string, string | undefined>([
 	["删除 taskbook", "delete"],
 	["进入复盘", "continue-review"],
 	["继续复盘", "continue-review"],
+	["修正本 taskbook", "repair"],
+	["重新运行", "rerun"],
 	["放弃", "abort"],
 	["停止本次执行", "stop"],
 	["退出 Task", "exit"],
@@ -94,6 +104,7 @@ function applyExecuteTools(pi: ExtensionAPI): void {
 }
 
 export function getTaskCommandMenuOptions(state: TaskState): string[] {
+	if (state.pendingTransition === "repair") return ["修正本 taskbook", "重新运行", "查看 taskbook 详情", "放弃", "Exit"];
 	if (state.phase === "planning") {
 		return state.spec
 			? ["开始执行", "继续对齐", "修改当前 Spec", "退出 Task", "Exit"]
@@ -176,6 +187,7 @@ function restoreTaskState(data: unknown): TaskState | undefined {
 		...createTaskState(),
 		...record,
 		spec: record.spec ?? null,
+		taskbookScope: record.taskbookScope === "user" || record.taskbookScope === "project" ? record.taskbookScope : undefined,
 		summary: typeof record.summary === "string" ? record.summary : "",
 		retryCount: typeof record.retryCount === "number" ? record.retryCount : 0,
 		maxRetry: typeof record.maxRetry === "number" ? record.maxRetry : 3,
@@ -183,7 +195,7 @@ function restoreTaskState(data: unknown): TaskState | undefined {
 		reviewQuestionnaireUsed: record.reviewQuestionnaireUsed === true,
 		executeRunDir: typeof record.executeRunDir === "string" ? record.executeRunDir : undefined,
 		executeProcessLog: Array.isArray(record.executeProcessLog) ? record.executeProcessLog as TaskState["executeProcessLog"] : [],
-		pendingTransition: record.pendingTransition === "execute" || record.pendingTransition === "review" || record.pendingTransition === "save"
+		pendingTransition: record.pendingTransition === "execute" || record.pendingTransition === "review" || record.pendingTransition === "save" || record.pendingTransition === "repair"
 			? record.pendingTransition
 			: undefined,
 	};
@@ -248,6 +260,12 @@ async function handleTaskShow(ctx: any, name: string | undefined): Promise<void>
 
 function scopeFromTokens(tokens: string[]): "user" | "project" {
 	return tokens.includes("--project") ? "project" : "user";
+}
+
+function explicitScopeFromTokens(tokens: string[]): "user" | "project" | undefined {
+	if (tokens.includes("--project")) return "project";
+	if (tokens.includes("--user")) return "user";
+	return undefined;
 }
 
 function parseTaskCommand(resolvedArgs: string): { action: string; name?: string; tokens: string[]; rawInput: string } {
@@ -333,7 +351,7 @@ function formatWorkerSummary(summary: string | undefined): string {
 }
 
 async function formatRunResult(
-	loaded: Awaited<ReturnType<typeof loadTaskbook>> & {},
+	loaded: LoadedTaskbook,
 	outputDir: string,
 	workerResult: TaskWorkerResult | undefined,
 	verifyResult: Awaited<ReturnType<typeof runVerify>> | undefined,
@@ -374,6 +392,72 @@ async function formatRunResult(
 		"",
 		"## 执行摘要",
 		formatWorkerSummary(workerResult?.summary),
+	].join("\n");
+}
+
+async function formatRepairSummary(
+	loaded: LoadedTaskbook,
+	outputDir: string,
+	workerResult: TaskWorkerResult | undefined,
+	verifyResult: Awaited<ReturnType<typeof runVerify>> | undefined,
+): Promise<string> {
+	const failures = verifyResult?.failures ?? [];
+	return [
+		"[TASKBOOK REPAIR CONTEXT]",
+		"修正已有 taskbook。请基于本次失败,用 questionnaire 逐项核对要改 skill、verify 还是 contract,最后输出完整 taskbook JSON。",
+		"",
+		`Taskbook: ${loaded.taskbook.name}`,
+		`Description: ${loaded.taskbook.description}`,
+		`OutputDir: ${outputDir}`,
+		"",
+		"失败断言:",
+		...(failures.length > 0
+			? failures.map((failure) => `- ${failure.assertion}: 预期 ${failure.expected}, 实际 ${failure.actual}`)
+			: ["- verify 未返回结构化失败"]),
+		"",
+		"WorkerSummary:",
+		workerResult?.summary?.trim() || "(none)",
+		"",
+		"现有 skill.md:",
+		"```md",
+		loaded.skill.trim(),
+		"```",
+		"",
+		"现有 verify.mjs:",
+		"```js",
+		loaded.verify.trim(),
+		"```",
+		"",
+		"现有 contract.json:",
+		"```json",
+		JSON.stringify(loaded.contract, null, "\t"),
+		"```",
+	].join("\n");
+}
+
+function formatTaskbookUpdateSummary(loaded: LoadedTaskbook): string {
+	return [
+		"[TASKBOOK UPDATE CONTEXT]",
+		"更新已有 taskbook。请基于现有 spec/skill/verify/contract,用 questionnaire 逐项确认要调整哪些细节;不要把它当成新建任务从头重做。",
+		"",
+		`Taskbook: ${loaded.taskbook.name}`,
+		`Scope: ${loaded.scope}`,
+		`Description: ${loaded.taskbook.description}`,
+		"",
+		"现有 skill.md:",
+		"```md",
+		loaded.skill.trim(),
+		"```",
+		"",
+		"现有 verify.mjs:",
+		"```js",
+		loaded.verify.trim(),
+		"```",
+		"",
+		"现有 contract.json:",
+		"```json",
+		JSON.stringify(loaded.contract, null, "\t"),
+		"```",
 	].join("\n");
 }
 
@@ -419,7 +503,12 @@ function taskCompleteSummaryFromEvent(event: any): string {
 	return candidates.find((value) => typeof value === "string") ?? "";
 }
 
-async function handleTaskRun(ctx: any, name: string | undefined, rawInput: string): Promise<void> {
+async function handleTaskRun(
+	ctx: any,
+	name: string | undefined,
+	rawInput: string,
+	onFail?: (failure: TaskRunFailure) => void,
+): Promise<void> {
 	const finalName = await chooseTaskbookName(ctx, name);
 	if (!finalName) return;
 	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
@@ -517,7 +606,15 @@ async function handleTaskRun(ctx: any, name: string | undefined, rawInput: strin
 		duration: (Date.now() - startedAt) / 1000,
 	});
 	const duration = (Date.now() - startedAt) / 1000;
-	ctx.ui.notify(await formatRunResult(loaded, outputDir, lastWorkerResult, lastVerifyResult, false, maxRetry + 1, duration), "error");
+	const report = await formatRunResult(loaded, outputDir, lastWorkerResult, lastVerifyResult, false, maxRetry + 1, duration);
+	onFail?.({
+		taskbookName: finalName,
+		taskbookScope: loaded.scope,
+		spec: loaded.spec,
+		runDir,
+		summary: await formatRepairSummary(loaded, outputDir, lastWorkerResult, lastVerifyResult),
+	});
+	ctx.ui.notify(`${report}\n\n下一步: 按 Enter 修正 taskbook,或输入修改意见。也可以用 /task 选择重新运行/查看/放弃。`, "error");
 	} finally {
 		setTaskRunWidget(ctx, undefined);
 	}
@@ -623,6 +720,18 @@ export function registerTask(pi: ExtensionAPI): void {
 		pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary), { deliverAs: "followUp" });
 	}
 
+	async function enterRepairFromPending(ctx: any, note = ""): Promise<void> {
+		if (state.pendingTransition !== "repair" || !state.spec) return;
+		const summary = note.trim()
+			? `${state.summary}\n\n用户补充修正意见:\n${note.trim()}`
+			: state.summary;
+		state = enterReviewing({ ...state, summary }, summary);
+		pi.setActiveTools?.(TASK_PLANNING_TOOLS);
+		persistState();
+		setTaskStatus(ctx, "📋 reviewing");
+		pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary), { deliverAs: "followUp" });
+	}
+
 	async function saveCurrentTask(ctx: any, name: string | undefined, tokens: string[]): Promise<void> {
 		if (!state.spec || !state.reviewResult) {
 			ctx.ui.notify("没有 review 产出,先复盘。", "warning");
@@ -637,7 +746,7 @@ export function registerTask(pi: ExtensionAPI): void {
 			ctx.ui.notify("缺少 taskbook 名字。", "warning");
 			return;
 		}
-		const scope = scopeFromTokens(tokens);
+		const scope = explicitScopeFromTokens(tokens) ?? state.taskbookScope ?? scopeFromTokens(tokens);
 		await saveTaskbook(scope, cwdOf(ctx), finalName.trim(), {
 			description: state.reviewResult.description,
 			spec: state.spec,
@@ -648,6 +757,14 @@ export function registerTask(pi: ExtensionAPI): void {
 		});
 		const outputDir = state.executeRunDir ? path.join(state.executeRunDir, "output") : undefined;
 		if (!outputDir?.trim()) {
+			if (state.taskbookName) {
+				state = landTask(state);
+				persistState();
+				restoreActiveTools();
+				setTaskStatus(ctx, undefined);
+				ctx.ui.notify(`taskbook "${finalName.trim()}" 已更新。建议用 \`/task run ${finalName.trim()} <一句话>\` 重新验证。`, "info");
+				return;
+			}
 			ctx.ui.notify("缺少首次成功产出的 outputDir,拒绝 landed。", "warning");
 			return;
 		}
@@ -698,12 +815,16 @@ export function registerTask(pi: ExtensionAPI): void {
 					return;
 				}
 				restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
-				state = setTaskSpec(enterPlanning(state), loaded.spec);
-				state = { ...state, taskbookName: finalName };
+				state = enterReviewing({
+					...state,
+					spec: loaded.spec,
+					taskbookName: finalName,
+					taskbookScope: loaded.scope,
+				}, formatTaskbookUpdateSummary(loaded));
 				pi.setActiveTools?.(TASK_PLANNING_TOOLS);
 				persistState();
-				setTaskStatus(ctx, "📋 task");
-				pi.sendUserMessage?.(`请用 questionnaire 重新核对并修订这个 taskbook 的 Spec:\n\n${formatRequirementsSpec(loaded.spec)}`, { deliverAs: "followUp" });
+				setTaskStatus(ctx, "📋 reviewing");
+				pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary), { deliverAs: "followUp" });
 				return;
 			}
 			if (action === "execute") {
@@ -725,6 +846,10 @@ export function registerTask(pi: ExtensionAPI): void {
 				await prepareReviewFromExecute(ctx, completionSummary ?? "");
 				return;
 			}
+			if (action === "repair") {
+				await enterRepairFromPending(ctx);
+				return;
+			}
 			if (action === "save") {
 				await saveCurrentTask(ctx, name, tokens);
 				return;
@@ -743,8 +868,22 @@ export function registerTask(pi: ExtensionAPI): void {
 				return;
 			}
 			if (action === "list") return await handleTaskList(ctx, tokens);
-			if (action === "show") return await handleTaskShow(ctx, name);
-			if (action === "run") return await handleTaskRun(ctx, name, rawInput);
+			if (action === "show") return await handleTaskShow(ctx, name ?? (state.pendingTransition === "repair" ? state.taskbookName : undefined));
+			if (action === "run" || action === "rerun") return await handleTaskRun(ctx, name ?? (action === "rerun" ? state.taskbookName : undefined), rawInput, (failure) => {
+				state = setPendingTransition({
+					...state,
+					phase: "aborted",
+					spec: failure.spec,
+					taskbookName: failure.taskbookName,
+					taskbookScope: failure.taskbookScope,
+					summary: failure.summary,
+					executeRunDir: failure.runDir,
+					reviewResult: undefined,
+					reviewQuestionnaireUsed: false,
+				}, "repair");
+				persistState();
+				setTaskStatus(ctx, "📋 task");
+			});
 			if (action === "delete") return await handleTaskDelete(ctx, name, tokens);
 			if (action === "stop" || action === "exit" || action === "toggle" || action === "abort") {
 				state = abortTask(state);
@@ -765,7 +904,7 @@ export function registerTask(pi: ExtensionAPI): void {
 			const restored = restoreTaskState(entry.data);
 			if (!restored) break;
 			state = restored;
-			if (isActivePhase(state.phase)) {
+			if (isActivePhase(state.phase) || state.pendingTransition === "repair") {
 				restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
 				if (state.phase === "planning") pi.setActiveTools?.(TASK_PLANNING_TOOLS);
 				if (state.phase === "executing") applyExecuteTools(pi);
@@ -855,6 +994,10 @@ export function registerTask(pi: ExtensionAPI): void {
 		if (!state.pendingTransition) return;
 		if (event.source !== "interactive" && event.source !== "rpc") return;
 		const text = typeof event.text === "string" ? event.text.trim() : "";
+		if (state.pendingTransition === "repair") {
+			await enterRepairFromPending(ctx, text);
+			return { handled: true };
+		}
 		if (text) {
 			state = setPendingTransition(state, undefined);
 			persistState();

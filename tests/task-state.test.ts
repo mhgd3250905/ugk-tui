@@ -27,6 +27,7 @@ test("task state starts inactive with retry defaults", () => {
 	assert.deepEqual(createTaskState(), {
 		phase: "aborted",
 		spec: null,
+		taskbookScope: undefined,
 		summary: "",
 		retryCount: 0,
 		maxRetry: 3,

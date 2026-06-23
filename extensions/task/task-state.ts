@@ -1,7 +1,7 @@
 import type { RequirementsSpec } from "../judge/judge-state.ts";
 
 export type TaskPhase = "planning" | "executing" | "reviewing" | "landed" | "aborted" | "done";
-export type TaskPendingTransition = "execute" | "review" | "save";
+export type TaskPendingTransition = "execute" | "review" | "save" | "repair";
 
 export interface TaskReviewResult {
 	description: string;
@@ -23,6 +23,7 @@ export interface TaskState {
 	phase: TaskPhase;
 	spec: RequirementsSpec | null;
 	taskbookName?: string;
+	taskbookScope?: "user" | "project";
 	summary: string;
 	retryCount: number;
 	maxRetry: number;
@@ -38,6 +39,7 @@ export function createTaskState(): TaskState {
 	return {
 		phase: "aborted",
 		spec: null,
+		taskbookScope: undefined,
 		summary: "",
 		retryCount: 0,
 		maxRetry: 3,
@@ -54,6 +56,8 @@ export function enterPlanning(state: TaskState): TaskState {
 		...state,
 		phase: "planning",
 		spec: null,
+		taskbookName: undefined,
+		taskbookScope: undefined,
 		summary: "",
 		retryCount: 0,
 		planQuestionnaireUsed: false,
@@ -132,6 +136,8 @@ export function abortTask(state: TaskState): TaskState {
 		planQuestionnaireUsed: false,
 		reviewQuestionnaireUsed: false,
 		executeRunDir: undefined,
+		taskbookName: undefined,
+		taskbookScope: undefined,
 		executeProcessLog: [],
 		pendingTransition: undefined,
 	};
@@ -145,6 +151,8 @@ export function completeTask(state: TaskState): TaskState {
 		planQuestionnaireUsed: false,
 		reviewQuestionnaireUsed: false,
 		executeRunDir: undefined,
+		taskbookName: undefined,
+		taskbookScope: undefined,
 		executeProcessLog: [],
 		pendingTransition: undefined,
 	};

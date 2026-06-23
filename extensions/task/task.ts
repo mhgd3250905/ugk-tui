@@ -36,7 +36,6 @@ const TASK_STATE_TYPE = "task-state";
 const TASK_PLAN_CONTEXT_TYPE = "task-plan-context";
 const TASK_REVIEW_CONTEXT_TYPE = "task-review-context";
 const TASK_PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
-const TASK_EXECUTING_TOOLS = ["read", "write", "edit", "bash", "task_complete"];
 const TASK_NORMAL_TOOLS = ["read", "bash", "edit", "write", "subagent"];
 
 const taskCompleteTool = defineTool({
@@ -77,6 +76,17 @@ const MENU_TO_ACTION = new Map<string, string | undefined>([
 
 function isActivePhase(phase: TaskPhase): boolean {
 	return phase === "planning" || phase === "executing" || phase === "reviewing";
+}
+
+// execute 阶段的 task-creator 继承 main session 全部工具(含 chrome_cdp/mcp 等环境工具),
+// 只排除 subagent(spec 4.2:task-creator 必须亲手做),并补 task_complete 信号工具。
+// 用 active snapshot/current active set,不用 getAllTools 全量注册表,避免打开从未启用的注册工具。
+function applyExecuteTools(pi: ExtensionAPI): void {
+	const blocked = new Set(["subagent"]);
+	const next = (typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS)
+		.filter((tool) => !blocked.has(tool));
+	if (!next.includes("task_complete")) next.push("task_complete");
+	pi.setActiveTools?.(next);
 }
 
 export function getTaskCommandMenuOptions(state: TaskState): string[] {
@@ -534,7 +544,10 @@ export function registerTask(pi: ExtensionAPI): void {
 		await mkdir(path.join(executeRunDir, "output"), { recursive: true });
 		state = startExecuting(state, executeRunDir);
 		restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
-		pi.setActiveTools?.(TASK_EXECUTING_TOOLS);
+		// execute 阶段放开所有环境工具(含 chrome_cdp/mcp),只排除 subagent。
+		// planning 阶段曾把工具窄化成只读集,先恢复进入 task 前的全集再减 subagent。
+		if (restoreToolsSnapshot) pi.setActiveTools?.(restoreToolsSnapshot);
+		applyExecuteTools(pi);
 		persistState();
 		setTaskStatus(ctx, "🔧 executing");
 		pi.sendUserMessage?.([
@@ -707,7 +720,7 @@ export function registerTask(pi: ExtensionAPI): void {
 			if (isActivePhase(state.phase)) {
 				restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
 				if (state.phase === "planning") pi.setActiveTools?.(TASK_PLANNING_TOOLS);
-				if (state.phase === "executing") pi.setActiveTools?.(TASK_EXECUTING_TOOLS);
+				if (state.phase === "executing") applyExecuteTools(pi);
 				if (state.phase === "reviewing") pi.setActiveTools?.(TASK_PLANNING_TOOLS);
 				setTaskStatus(ctx, state.phase === "executing" ? "🔧 executing" : "📋 task");
 			}
@@ -751,22 +764,29 @@ export function registerTask(pi: ExtensionAPI): void {
 			persistState();
 		}
 		if (state.phase === "executing") {
-			if (["bash", "write", "edit", "chrome_cdp", "task_complete"].includes(event.toolName)) {
+			// spec 4.2 硬约束:task-creator 禁止派 subagent(必须亲手做)。
+			// 工具集已放开环境工具,subagent 不再靠 setActiveTools 隐式排除,
+			// 这里显式 block 作为双保险(仿 planning 的 bash block)。
+			if (event.toolName === "subagent") {
+				return {
+					block: true,
+					reason: "Task executing 阶段禁止调用 subagent(task-creator 必须亲手做)。",
+				};
+			}
+			state = recordExecuteProcessEntry(state, {
+				kind: "tool_call",
+				toolName: event.toolName,
+				argsSummary: summarizeToolArgs(event.input),
+				timestamp: new Date().toISOString(),
+			});
+			for (const artifact of extractArtifactsFromToolInput(event.toolName, event.input)) {
 				state = recordExecuteProcessEntry(state, {
-					kind: "tool_call",
-					toolName: event.toolName,
-					argsSummary: summarizeToolArgs(event.input),
+					kind: "artifact",
+					artifactPath: artifact.path,
 					timestamp: new Date().toISOString(),
 				});
-				for (const artifact of extractArtifactsFromToolInput(event.toolName, event.input)) {
-					state = recordExecuteProcessEntry(state, {
-						kind: "artifact",
-						artifactPath: artifact.path,
-						timestamp: new Date().toISOString(),
-					});
-				}
-				persistState();
 			}
+			persistState();
 			return undefined;
 		}
 		if (state.phase !== "planning" || event.toolName !== "bash") return undefined;

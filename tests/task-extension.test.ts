@@ -29,13 +29,13 @@ const spec = {
 	context: "",
 };
 
-function makePi() {
+function makePi(initialActiveTools = ["read", "bash", "edit", "write", "subagent"]) {
 	const commands = new Map<string, any>();
 	const tools: any[] = [];
 	const handlers = new Map<string, Function[]>();
 	const entries: Array<{ customType: string; data: unknown }> = [];
 	const activeTools: string[][] = [];
-	let currentActiveTools = ["read", "bash", "edit", "write", "subagent"];
+	let currentActiveTools = [...initialActiveTools];
 	const userMessages: Array<{ text: string; options?: any }> = [];
 	return {
 		commands,
@@ -258,7 +258,7 @@ test("/task execute enforces C-2 and switches to non-subagent tools", async () =
 
 	await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
 	await commands.get("task").handler("execute", ctx);
-	assert.deepEqual(activeTools.at(-1), ["read", "write", "edit", "bash", "task_complete"]);
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "task_complete"]);
 	assert.equal((entries.at(-1)?.data as any).phase, "executing");
 	assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "🔧 executing" });
 	assert.match(userMessages.at(-1)?.text ?? "", /不要调用 subagent/);
@@ -280,7 +280,7 @@ test("RPC input can advance an Enter-gated task transition", async () => {
 
 	await handlers.get("input")![0]({ source: "rpc", text: "" }, ctx);
 
-	assert.deepEqual(activeTools.at(-1), ["read", "write", "edit", "bash", "task_complete"]);
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "task_complete"]);
 	assert.equal((entries.at(-1)?.data as any).phase, "executing");
 });
 
@@ -310,6 +310,50 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.equal(extractTaskReviewResult("{}"), undefined);
 });
 
+test("/task execute keeps environment tools, logs them, and blocks subagent via tool_call", async () => {
+	// 模拟 main session 装了 chrome_cdp(环境工具),验证 execute 阶段保留它、只排除 subagent
+	const { pi, commands, handlers, activeTools, entries } = makePi(["read", "bash", "edit", "write", "subagent", "chrome_cdp", "alpha__echo"]);
+	const { ctx } = makeCtx();
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx);
+	await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(spec)}\n\`\`\`` }],
+		}],
+	}, ctx);
+	await commands.get("task").handler("execute", ctx);
+
+	// execute 工具集保留 chrome_cdp,排除 subagent,末尾补 task_complete
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "chrome_cdp", "alpha__echo", "task_complete"]);
+	await handlers.get("tool_call")![0]({ toolName: "alpha__echo", input: { query: "ping" } }, ctx);
+	assert.match((entries.at(-1)?.data as any).executeProcessLog.at(-1).toolName, /alpha__echo/);
+
+	// subagent 调用被 tool_call 硬 block(双保险,spec 4.2)
+	const blocked = await handlers.get("tool_call")![0]({ toolName: "subagent", input: {} }, ctx);
+	assert.deepEqual(blocked, {
+		block: true,
+		reason: "Task executing 阶段禁止调用 subagent(task-creator 必须亲手做)。",
+	});
+});
+
+test("/task session restore keeps environment tools during executing", async () => {
+	const { pi, handlers, activeTools } = makePi(["read", "bash", "edit", "write", "subagent", "chrome_cdp", "alpha__echo"]);
+	const { ctx, statusCalls } = makeCtx();
+	registerTask(pi as any);
+
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)), "run-dir"),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "chrome_cdp", "alpha__echo", "task_complete"]);
+	assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "🔧 executing" });
+});
+
 test("task_complete records process log and Enter gates review/save transitions", async () => {
 	const { pi, commands, handlers, entries, activeTools, tools, userMessages } = makePi();
 	const { cwd, ctx, notifications, statusCalls } = makeCtx();
@@ -330,7 +374,7 @@ test("task_complete records process log and Enter gates review/save transitions"
 		await handlers.get("tool_call")![0]({ toolName: "write", input: { path: path.join(cwd, "report.json") } }, ctx);
 		await handlers.get("tool_call")![0]({ toolName: "task_complete", input: { summary: "已生成 report.json" } }, ctx);
 
-		assert.deepEqual(activeTools.at(-1), ["read", "write", "edit", "bash", "task_complete"]);
+		assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "task_complete"]);
 		assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "🔧 executing" });
 		assert.equal((entries.at(-1)?.data as any).phase, "executing");
 		assert.ok((entries.at(-1)?.data as any).executeProcessLog.length >= 2);

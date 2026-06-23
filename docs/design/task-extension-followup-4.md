@@ -1,6 +1,6 @@
 # `/task` 交互层重构(v2)
 
-> **状态:已完成(2026-06-23)。** 6 个改动全部落地,`npm test` 406/406 pass。核心承诺(用户零命令记忆、自然语言 input)由执行 agent + 审核 subagent 共同保证。当前实现以 `extensions/task/` 代码为准。详见本文末尾"实际修复结果"。
+> **状态:已完成(2026-06-23)。** 6 个改动全部落地,当时基线 `npm test` 406/406 pass。核心承诺(用户零命令记忆、自然语言 input)由执行 agent + 审核 subagent 共同保证。当前实现以 `extensions/task/` 代码为准。详见本文末尾"实际修复结果"。
 >
 > **原始用途**:给执行 agent 的交接文档,执行交互层重构。本文自包含,包含完整 UGK `/task` 背景。
 >
@@ -424,11 +424,11 @@ if (!summary?.trim()) {
 
 ## 实际修复结果(2026-06-23 完成)
 
-执行 agent 完成了 6 个改动,`npm test` 406/406 pass。执行 agent 还主动让一个 subagent 做了审核,审核发现了 4 个真实 bug 并修复了(这是 Actor+Supervisor 模式的实际运用)。
+执行 agent 完成了 6 个改动,当时基线 `npm test` 406/406 pass。执行 agent 还主动让一个 subagent 做了审核,审核发现了 4 个真实 bug 并修复了(这是 Actor+Supervisor 模式的实际运用)。
 
 | # | 改动 | 落地 |
 |---|---|---|
-| 1 | execute 自动收集 | `state.executeProcessLog` 字段;executing 阶段订阅 tool_call 记录 bash/write/edit/chrome_cdp/task_complete + artifact 路径;review summary 自动生成 |
+| 1 | execute 自动收集 | `state.executeProcessLog` 字段;executing 阶段订阅 tool_call 记录实际工具调用 + artifact 路径;review summary 自动生成 |
 | 2 | 阶段过渡 + Enter 确认 | `pendingTransition` 状态字段 + `task_complete` 工具 + `tool_execution_end` 触发 + input 事件检测 Enter/反馈 |
 | 3 | save 参数自动化 | 删 `--output-dir`/`--input`/`--input-file`/`--input-json`;save 默认用 `executeRunDir/output`;verify 失败且有 runtime fields 时才交互式问 |
 | 4 | run input 走 agent | 新增 `extensions/task/task-dispatcher.ts`,用 `deepseek-v4-flash`;失败 fallback 到 questionnaire |
@@ -442,3 +442,22 @@ if (!summary?.trim()) {
 4. 菜单 action 只返回 bare action 导致 Usage 问题 → UX 细节修复
 
 **已知遗留**:未跑真实 TUI dogfood(非交互环境跑真实 worker 会触发模型调用,自动化测试已覆盖关键路径)。
+
+---
+
+## 追加修复:execute 工具集放开环境工具(2026-06-23)
+
+### 问题
+
+dogfood 时发现 execute 阶段(创造流程的 task-creator)报"只有 bash/read/write/edit 四个工具",用不了 chrome_cdp。根因:`TASK_EXECUTING_TOOLS` 写死成白名单,把 chrome_cdp/mcp 物理屏蔽。`setActiveTools` 是纯 allowlist(pi runtime 确认),不在列表的工具一律丢失。
+
+### 修正(对齐 worker.md "删 tools 字段继承全部"的做法)
+
+- 删 `TASK_EXECUTING_TOOLS` 常量,新增 `applyExecuteTools(pi)`:从 task 进入前的 active snapshot 或当前 active set 减 subagent,再加 task_complete(不用 `getAllTools`,避免打开从未在 main session 启用过的注册工具)。
+- `startTaskExecute` 进 execute 前**先恢复** `restoreToolsSnapshot`(进入 task 前的全集),再 `applyExecuteTools`——否则会继承 planning 阶段的只读窄集。
+- subagent 禁止升级为**双保险**:`applyExecuteTools` 不放它进 active 集 + `tool_call` 事件显式 `block: true`(spec 4.2 硬约束的可靠实现)。
+- planning/reviewing 的只读工具集**不动**(有意为之)。
+
+### 验证
+
+`npm test` 418/418 pass(基线 416 + 新增 2 个测试,覆盖 execute 保留 chrome_cdp/MCP 风格工具、记录环境工具调用、block subagent,以及 session resume 到 executing 时仍保留环境工具)。3 处 execute 工具集断言同步更新。

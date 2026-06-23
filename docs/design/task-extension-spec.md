@@ -423,7 +423,7 @@ function getTaskCommandMenuOptions(): string[] {
   }
   // reviewing 阶段:复盘产 skill+verify
   if (state.phase === "reviewing") {
-    return ["保存为 taskbook", "继续复盘", "放弃", "退出 Task", "Exit"];
+    return ["自动保存并自证", "继续复盘", "放弃", "退出 Task", "Exit"];
   }
   // landed 或未启用:主菜单
   return ["新建任务", "运行 taskbook", "编辑 taskbook", "列出 taskbook", "Exit"];
@@ -441,6 +441,7 @@ function getTaskCommandMenuOptions(): string[] {
 "编辑 taskbook"      → "edit"
 "列出 taskbook"      → "list"
 "保存为 taskbook"    → "save"
+"自动保存并自证"     → "save"
 "进入复盘"           → "continue-review"
 "继续复盘"           → "continue-review"
 "放弃"               → "abort"

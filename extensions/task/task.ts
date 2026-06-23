@@ -65,6 +65,7 @@ const MENU_TO_ACTION = new Map<string, string | undefined>([
 	["编辑 taskbook", "edit"],
 	["列出 taskbook", "list"],
 	["保存为 taskbook", "save"],
+	["自动保存并自证", "save"],
 	["自动保存 taskbook", "save"],
 	["删除 taskbook", "delete"],
 	["进入复盘", "continue-review"],
@@ -97,7 +98,7 @@ export function getTaskCommandMenuOptions(state: TaskState): string[] {
 			: ["继续对齐", "退出 Task", "Exit"];
 	}
 	if (state.phase === "executing") return ["进入复盘", "停止本次执行", "Exit"];
-	if (state.phase === "reviewing") return ["自动保存 taskbook", "继续复盘", "放弃", "退出 Task", "Exit"];
+	if (state.phase === "reviewing") return ["自动保存并自证", "继续复盘", "放弃", "退出 Task", "Exit"];
 	return ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "删除 taskbook", "Exit"];
 }
 

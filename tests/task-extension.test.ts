@@ -122,7 +122,7 @@ test("task menu changes by phase and maps selection to action", async () => {
 	assert.deepEqual(getTaskCommandMenuOptions(enterPlanning(createTaskState())), ["继续对齐", "退出 Task", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(planning), ["开始执行", "继续对齐", "修改当前 Spec", "退出 Task", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(executing), ["进入复盘", "停止本次执行", "Exit"]);
-	assert.deepEqual(getTaskCommandMenuOptions(reviewing), ["自动保存 taskbook", "继续复盘", "放弃", "退出 Task", "Exit"]);
+	assert.deepEqual(getTaskCommandMenuOptions(reviewing), ["自动保存并自证", "继续复盘", "放弃", "退出 Task", "Exit"]);
 
 	const { ctx } = makeCtx();
 	ctx.ui.select = () => "列出 taskbook";

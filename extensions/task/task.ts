@@ -381,6 +381,16 @@ function setTaskRunWidget(ctx: any, lines: string[] | undefined): void {
 	ctx.ui?.setWidget?.("task-run-view", lines, { placement: "aboveEditor" });
 }
 
+function formatProgressLines(text: string): string[] {
+	if (text.trim() === "(running...)") return [];
+	return text
+		.split(/\r?\n/)
+		.map((line) => line.replace(/^#{1,6}\s*/, "").replace(/^[-*]\s*/, "").trim())
+		.filter(Boolean)
+		.slice(-5)
+		.map((line, index) => `${index + 1}. ${line.length > 120 ? `${line.slice(0, 117)}...` : line}`);
+}
+
 function formatExecuteSummary(state: TaskState, completionSummary = ""): string {
 	const lines = [
 		"[TASK EXECUTE SUMMARY]",
@@ -433,18 +443,27 @@ async function handleTaskRun(ctx: any, name: string | undefined, rawInput: strin
 
 	try {
 	for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
-		setTaskRunWidget(ctx, [
+		const widgetBase = (status: string) => [
 			`⏳ taskbook "${finalName}" 运行中...`,
 			`尝试 ${attempt + 1}/${maxRetry + 1}`,
-			"worker 执行中...",
-		]);
+			status,
+		];
+		setTaskRunWidget(ctx, widgetBase("worker 执行中..."));
 		const workerResult = await dispatchWorker({
 			skill: loaded.skill,
 			contract: loaded.contract,
 			runtimeInput,
 			outputDir,
 			feedback,
-		}, { cwd: cwdOf(ctx) });
+		}, {
+			cwd: cwdOf(ctx),
+			onUpdate: (text) => {
+				const progress = formatProgressLines(text);
+				if (progress.length > 0) {
+					setTaskRunWidget(ctx, [...widgetBase("worker 执行中..."), "", "最近进展:", ...progress]);
+				}
+			},
+		});
 		lastWorkerResult = workerResult;
 
 		if (!workerResult.ok) {
@@ -452,11 +471,7 @@ async function handleTaskRun(ctx: any, name: string | undefined, rawInput: strin
 			break;
 		}
 
-		setTaskRunWidget(ctx, [
-			`⏳ taskbook "${finalName}" 运行中...`,
-			`尝试 ${attempt + 1}/${maxRetry + 1}`,
-			"verify 执行中...",
-		]);
+		setTaskRunWidget(ctx, widgetBase("verify 执行中..."));
 		lastVerifyResult = await runVerify({
 			verifyPath: path.join(loaded.dir, "verify.mjs"),
 			outputDir,

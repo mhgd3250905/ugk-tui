@@ -57,7 +57,7 @@ export function buildTaskWorkerPrompt(input: TaskWorkerInput): string {
 
 export async function dispatchWorker(
 	input: TaskWorkerInput,
-	opts: { cwd: string; signal?: AbortSignal },
+	opts: { cwd: string; signal?: AbortSignal; onUpdate?: (text: string) => void },
 ): Promise<TaskWorkerResult> {
 	const discovery = discoverAgents(opts.cwd, "both");
 	const runner = workerRunnerForTests ?? runSingleAgent;
@@ -69,7 +69,12 @@ export async function dispatchWorker(
 		opts.cwd,
 		undefined,
 		opts.signal,
-		undefined,
+		opts.onUpdate
+			? (partial) => {
+				const text = partial.content.find((part) => part.type === "text")?.text;
+				if (typeof text === "string") opts.onUpdate?.(text);
+			}
+			: undefined,
 		(results) => ({
 			mode: "single",
 			agentScope: "both",

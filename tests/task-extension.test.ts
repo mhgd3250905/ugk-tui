@@ -688,6 +688,50 @@ test("/task run preserves natural language input with spaces and shows pass arti
 	}
 });
 
+test("/task run shows worker progress updates in the widget", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, widgetCalls } = makeCtx();
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		const onUpdate = args[7];
+		onUpdate?.({
+			content: [{ type: "text", text: "打开 Today 页面\n解析工具列表" }],
+			details: { mode: "single", agentScope: "both", projectAgentsDir: null, results: [] },
+		});
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "写好了" }] }],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	setTaskDispatcherForTests(async () => ({}));
+	try {
+		await saveTaskbook("project", cwd, "runner-progress", {
+			description: "runner progress",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { artifacts: [] },
+		});
+
+		await commands.get("task").handler("run runner-progress", ctx);
+
+		const progress = widgetCalls
+			.map((call) => call.lines?.join("\n") ?? "")
+			.find((text) => text.includes("最近进展"));
+		assert.match(progress ?? "", /1\. 打开 Today 页面/);
+		assert.match(progress ?? "", /2\. 解析工具列表/);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("/task run displays small markdown artifact content in the PASS report", async () => {
 	const { pi, commands } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();

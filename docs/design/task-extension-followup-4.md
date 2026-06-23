@@ -460,4 +460,8 @@ dogfood 时发现 execute 阶段(创造流程的 task-creator)报"只有 bash/re
 
 ### 验证
 
-`npm test` 418/418 pass(基线 416 + 新增 2 个测试,覆盖 execute 保留 chrome_cdp/MCP 风格工具、记录环境工具调用、block subagent,以及 session resume 到 executing 时仍保留环境工具)。3 处 execute 工具集断言同步更新。
+`npm test` 420/420 pass(基线 416 + 新增 4 个测试,覆盖 execute 保留 chrome_cdp/MCP 风格工具、记录环境工具调用、block subagent、session resume 到 executing 时仍保留环境工具、executing 菜单可进入复盘,以及 pending review 状态下菜单可直接进入 review)。3 处 execute 工具集断言同步更新。
+
+### 追加 UX 修复:executing 菜单暴露进入复盘(2026-06-23)
+
+用户不需要记 `/task continue-review <摘要>`。executing 阶段 `/task` 菜单新增 `进入复盘`,映射到 `continue-review`;选择后弹 `确认执行结果(可留空)` 输入框,再进入原有 Enter 确认停顿。若已经处于"按 Enter 进 review"的 pending 状态,再次从 `/task` 选 `进入复盘` 会直接进入 review。

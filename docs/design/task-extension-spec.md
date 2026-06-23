@@ -417,9 +417,9 @@ function getTaskCommandMenuOptions(): string[] {
       ? ["开始执行", "继续对齐", "修改当前 Spec", "退出 Task", "Exit"]
       : ["继续对齐", "退出 Task", "Exit"];
   }
-  // executing 阶段:main 正在亲手跑,只能停
+  // executing 阶段:main 正在亲手跑,可确认完成后进 review
   if (state.phase === "executing") {
-    return ["停止本次执行", "Exit"];
+    return ["进入复盘", "停止本次执行", "Exit"];
   }
   // reviewing 阶段:复盘产 skill+verify
   if (state.phase === "reviewing") {
@@ -441,6 +441,7 @@ function getTaskCommandMenuOptions(): string[] {
 "编辑 taskbook"      → "edit"
 "列出 taskbook"      → "list"
 "保存为 taskbook"    → "save"
+"进入复盘"           → "continue-review"
 "继续复盘"           → "continue-review"
 "放弃"               → "abort"
 "停止本次执行"       → "stop"

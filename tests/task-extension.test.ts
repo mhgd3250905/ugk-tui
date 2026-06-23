@@ -121,7 +121,7 @@ test("task menu changes by phase and maps selection to action", async () => {
 	assert.deepEqual(getTaskCommandMenuOptions(createTaskState()), ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "删除 taskbook", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(enterPlanning(createTaskState())), ["继续对齐", "退出 Task", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(planning), ["开始执行", "继续对齐", "修改当前 Spec", "退出 Task", "Exit"]);
-	assert.deepEqual(getTaskCommandMenuOptions(executing), ["停止本次执行", "Exit"]);
+	assert.deepEqual(getTaskCommandMenuOptions(executing), ["进入复盘", "停止本次执行", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(reviewing), ["自动保存 taskbook", "继续复盘", "放弃", "退出 Task", "Exit"]);
 
 	const { ctx } = makeCtx();
@@ -129,6 +129,8 @@ test("task menu changes by phase and maps selection to action", async () => {
 	assert.equal(await resolveTaskCommandArgs("", ctx, createTaskState()), "list");
 	ctx.ui.select = () => "运行 taskbook(复用)";
 	assert.equal(await resolveTaskCommandArgs("", ctx, createTaskState()), "run");
+	ctx.ui.select = () => "进入复盘";
+	assert.equal(await resolveTaskCommandArgs("", ctx, executing), "continue-review");
 	ctx.ui.select = () => "Exit";
 	assert.equal(await resolveTaskCommandArgs("", ctx, createTaskState()), undefined);
 	assert.equal(await resolveTaskCommandArgs("show foo", ctx, createTaskState()), "show foo");
@@ -352,6 +354,56 @@ test("/task session restore keeps environment tools during executing", async () 
 
 	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "chrome_cdp", "alpha__echo", "task_complete"]);
 	assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "🔧 executing" });
+});
+
+test("/task menu lets user enter review from executing with a completion summary", async () => {
+	const { pi, commands, handlers, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx);
+	await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(spec)}\n\`\`\`` }],
+		}],
+	}, ctx);
+	await commands.get("task").handler("execute", ctx);
+
+	ctx.ui.select = () => "进入复盘";
+	ctx.ui.input = () => "已完成报告抓取";
+	await commands.get("task").handler("", ctx);
+
+	const latestState = entries.at(-1)?.data as any;
+	assert.equal(latestState.pendingTransition, "review");
+	assert.match(latestState.summary, /AgentSummary: 已完成报告抓取/);
+	assert.match(notifications.at(-1)?.message ?? "", /按 Enter 进 review/);
+});
+
+test("/task menu enters review when execute completion is already pending", async () => {
+	const { pi, commands, handlers, entries, activeTools, userMessages } = makePi();
+	const { ctx, statusCalls } = makeCtx();
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx);
+	await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(spec)}\n\`\`\`` }],
+		}],
+	}, ctx);
+	await commands.get("task").handler("execute", ctx);
+	await commands.get("task").handler("continue-review 已完成报告抓取", ctx);
+
+	ctx.ui.select = () => "进入复盘";
+	await commands.get("task").handler("", ctx);
+
+	assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
+	assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "📋 reviewing" });
+	assert.match(userMessages.at(-1)?.text ?? "", /TASK REVIEW MODE/);
 });
 
 test("task_complete records process log and Enter gates review/save transitions", async () => {

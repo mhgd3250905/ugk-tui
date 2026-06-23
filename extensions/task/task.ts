@@ -28,6 +28,7 @@ import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, saveT
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
+import { dispatchTaskRunReviewer } from "./task-run-reviewer.ts";
 import { runVerify } from "./task-verify.ts";
 import { dispatchWorker, type TaskWorkerResult } from "./task-worker.ts";
 
@@ -54,7 +55,13 @@ type ActiveTaskRun = {
 	notes: string[];
 };
 
+type LastTaskRunReview = {
+	taskbookName: string;
+	content: string;
+};
+
 let activeTaskRun: ActiveTaskRun | undefined;
+let lastTaskRunReview: LastTaskRunReview | undefined;
 
 const taskCompleteTool = defineTool({
 	name: "task_complete",
@@ -94,6 +101,7 @@ const MENU_TO_ACTION = new Map<string, string | undefined>([
 	["停止本次执行", "stop"],
 	["停止当前运行", "stop"],
 	["查看运行进展", "run-status"],
+	["复盘上次运行", "review-last-run"],
 	["退出 Task", "exit"],
 	["Exit", undefined],
 ]);
@@ -125,14 +133,17 @@ export function getTaskCommandMenuOptions(state: TaskState): string[] {
 	return ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "删除 taskbook", "Exit"];
 }
 
-export async function resolveTaskCommandArgs(args: string, ctx: any, state: TaskState, runActive = false): Promise<string | undefined> {
+export async function resolveTaskCommandArgs(args: string, ctx: any, state: TaskState, runActive = false, hasLastRunReview = false): Promise<string | undefined> {
 	if (args.trim()) return args;
 	if (runActive && ctx.ui?.select) {
 		const selection = await ctx.ui.select("Task", ["停止当前运行", "查看运行进展", "Exit"]);
 		return selection ? MENU_TO_ACTION.get(selection) : undefined;
 	}
 	if (!ctx.ui?.select) return "list";
-	const selection = await ctx.ui.select("Task", getTaskCommandMenuOptions(state));
+	const options = getTaskCommandMenuOptions(state);
+	const selection = await ctx.ui.select("Task", hasLastRunReview && !isActivePhase(state.phase)
+		? ["复盘上次运行", ...options]
+		: options);
 	return selection ? MENU_TO_ACTION.get(selection) : undefined;
 }
 
@@ -439,6 +450,17 @@ function formatOptionalSection(title: string, lines: string[] | undefined): stri
 	return useful.length > 0 ? ["", `## ${title}`, ...useful.map((line, index) => `${index + 1}. ${line}`)] : [];
 }
 
+function buildTaskRunReviewContext(taskbookName: string, report: string): string {
+	return [
+		"[TASK RUN REVIEW]",
+		"请复盘这次 /task run。重点解释是否发生重试、失败、绕路或早期判断错误;如果需要修改 taskbook,建议用户进入 /task edit。",
+		"",
+		`Taskbook: ${taskbookName}`,
+		"",
+		report,
+	].join("\n");
+}
+
 async function formatRunResult(
 	loaded: LoadedTaskbook,
 	outputDir: string,
@@ -664,7 +686,10 @@ async function handleTaskRun(
 
 		if (!workerResult.ok) {
 			if (abortController.signal.aborted) {
-				ctx.ui.notify(`已停止 taskbook "${finalName}" 运行。`, "info");
+				const duration = (Date.now() - startedAt) / 1000;
+				const report = await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, false, attempt + 1, duration, activeTaskRun?.progress, activeTaskRun?.notes);
+				lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
+				ctx.ui.notify(`已停止 taskbook "${finalName}" 运行。下一步可用 /task 选择"复盘上次运行"。`, "info");
 				return;
 			}
 			ctx.ui.notify(`worker 执行失败: ${workerResult.errorMessage}`, "error");
@@ -688,7 +713,9 @@ async function handleTaskRun(
 				duration: (Date.now() - startedAt) / 1000,
 			});
 			const duration = (Date.now() - startedAt) / 1000;
-			ctx.ui.notify(await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, true, attempt + 1, duration, activeTaskRun?.progress, activeTaskRun?.notes), "info");
+			const report = await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, true, attempt + 1, duration, activeTaskRun?.progress, activeTaskRun?.notes);
+			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
+			ctx.ui.notify(report, "info");
 			return;
 		}
 
@@ -718,6 +745,7 @@ async function handleTaskRun(
 	});
 	const duration = (Date.now() - startedAt) / 1000;
 	const report = await formatRunResult(loaded, outputDir, lastWorkerResult, lastVerifyResult, false, maxRetry + 1, duration, activeTaskRun?.progress, activeTaskRun?.notes);
+	lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
 	onFail?.({
 		taskbookName: finalName,
 		taskbookScope: loaded.scope,
@@ -955,9 +983,18 @@ export function registerTask(pi: ExtensionAPI): void {
 	pi.registerTool?.(taskCompleteTool);
 
 	async function handleTaskCommand(args: string, ctx: any): Promise<void> {
-			const resolvedArgs = await resolveTaskCommandArgs(args, ctx, state, activeTaskRun !== undefined);
+			const resolvedArgs = await resolveTaskCommandArgs(args, ctx, state, activeTaskRun !== undefined, lastTaskRunReview !== undefined);
 			if (resolvedArgs === undefined) return;
 			const { action, name, tokens, rawInput } = parseTaskCommand(resolvedArgs);
+			if (action === "review-last-run" && lastTaskRunReview) {
+				const userObservation = await ctx.ui?.input?.("你觉得刚刚的运行结果有什么问题吗?", "");
+				const result = await dispatchTaskRunReviewer({
+					runContext: lastTaskRunReview.content,
+					userObservation: userObservation ?? "",
+				}, { cwd: cwdOf(ctx) });
+				ctx.ui.notify(result.summary, result.ok ? "info" : "warning");
+				return;
+			}
 			if (action === "stop" && activeTaskRun) {
 				activeTaskRun.abortController.abort();
 				ctx.ui.notify(`已请求停止 taskbook "${activeTaskRun.taskbookName}"。`, "info");

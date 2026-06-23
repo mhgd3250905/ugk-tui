@@ -10,6 +10,7 @@ import { appendRunToTaskbook, loadTaskbook, saveTaskbook } from "../extensions/t
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT, TASK_REVIEW_PROMPT } from "../extensions/task/task-prompts.ts";
+import { setTaskRunReviewerRunnerForTests } from "../extensions/task/task-run-reviewer.ts";
 import { setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
 
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -1000,9 +1001,10 @@ test("/task run preserves natural language input with spaces and shows pass arti
 	}
 });
 
-test("/task run shows worker progress updates in the widget and PASS report", async () => {
-	const { pi, commands } = makePi();
-	const { cwd, ctx, notifications, widgetCalls } = makeCtx();
+test("/task run shows progress and reviews last run with a clean reviewer", async () => {
+	const { pi, commands, userMessages } = makePi();
+	const { cwd, ctx, notifications, selections, widgetCalls } = makeCtx();
+	let reviewerPrompt = "";
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async (...args: any[]) => {
 		const onUpdate = args[7];
@@ -1016,6 +1018,18 @@ test("/task run shows worker progress updates in the widget and PASS report", as
 			task: "task",
 			exitCode: 0,
 			messages: [{ role: "assistant", content: [{ type: "text", text: "写好了" }] }],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	setTaskRunReviewerRunnerForTests(async (_defaultCwd, _agents, agentName, task) => {
+		reviewerPrompt = task;
+		return {
+			agent: agentName,
+			agentSource: "user",
+			task,
+			exitCode: 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "复盘结论：worker 一开始没有按 CDP 步骤执行。" }] }],
 			stderr: "",
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
 		} as any;
@@ -1039,7 +1053,23 @@ test("/task run shows worker progress updates in the widget and PASS report", as
 		assert.match(progress ?? "", /2\. 解析工具列表/);
 		assert.match(notifications.at(-1)?.message ?? "", /## 最近进展/);
 		assert.match(notifications.at(-1)?.message ?? "", /打开 Today 页面/);
+
+		ctx.ui.select = (title: string, options: string[]) => {
+			selections.push({ title, options });
+			return "复盘上次运行";
+		};
+		ctx.ui.input = () => "一开始没有按 skill 里的 CDP 方法做";
+		await commands.get("task").handler("", ctx);
+
+		assert.ok(selections.at(-1)?.options.includes("复盘上次运行"));
+		assert.equal(userMessages.length, 0);
+		assert.match(reviewerPrompt, /TASK RUN REVIEW/);
+		assert.match(reviewerPrompt, /runner-progress/);
+		assert.match(reviewerPrompt, /打开 Today 页面/);
+		assert.match(reviewerPrompt, /一开始没有按 skill 里的 CDP 方法做/);
+		assert.match(notifications.at(-1)?.message ?? "", /复盘结论/);
 	} finally {
+		setTaskRunReviewerRunnerForTests(undefined);
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
@@ -1048,7 +1078,7 @@ test("/task run shows worker progress updates in the widget and PASS report", as
 
 test("/task run can be stopped and records user notes while worker is running", async () => {
 	const { pi, commands, handlers } = makePi();
-	const { cwd, ctx, notifications } = makeCtx();
+	const { cwd, ctx, notifications, selections } = makeCtx();
 	let workerStarted!: () => void;
 	const started = new Promise<void>((resolve) => {
 		workerStarted = resolve;
@@ -1089,6 +1119,14 @@ test("/task run can be stopped and records user notes while worker is running", 
 		assert.equal(signal?.aborted, true);
 		assert.ok(notifications.some((item) => /已记录/.test(item.message)));
 		assert.ok(notifications.some((item) => /已请求停止/.test(item.message)));
+		assert.ok(notifications.some((item) => /复盘上次运行/.test(item.message)));
+
+		ctx.ui.select = (title: string, options: string[]) => {
+			selections.push({ title, options });
+			return "Exit";
+		};
+		await commands.get("task").handler("", ctx);
+		assert.ok(selections.at(-1)?.options.includes("复盘上次运行"));
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
@@ -1376,7 +1414,7 @@ test("/task run failure offers optional taskbook repair", async () => {
 		};
 		await commands.get("task").handler("", ctx);
 
-		assert.deepEqual(selections.at(-1)?.options, ["修正本 taskbook", "重新运行", "查看 taskbook 详情", "放弃", "Exit"]);
+		assert.deepEqual(selections.at(-1)?.options, ["复盘上次运行", "修正本 taskbook", "重新运行", "查看 taskbook 详情", "放弃", "Exit"]);
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
 		assert.match(userMessages.at(-1)?.text ?? "", /修正已有 taskbook/);
 		assert.match(userMessages.at(-1)?.text ?? "", /失败断言/);

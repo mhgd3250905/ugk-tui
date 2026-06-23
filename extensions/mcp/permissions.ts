@@ -30,6 +30,17 @@ export function createMcpPermissionState(initialMode: McpPermissionMode = "ask")
 	};
 }
 
+export function isTaskMcpToolPreauthorized(
+	registeredName: string,
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	return (env.UGK_TASK_ALLOW_MCP_TOOLS ?? "")
+		.split(",")
+		.map((item) => item.trim())
+		.filter(Boolean)
+		.includes(registeredName);
+}
+
 export function setMcpPermissionMode(state: McpPermissionState, mode: McpPermissionMode): void {
 	state.mode = mode;
 	clearMcpSessionAllow(state);

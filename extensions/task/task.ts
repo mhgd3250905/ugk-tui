@@ -283,6 +283,49 @@ function runtimeFields(contract: unknown): string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : [];
 }
 
+function contractToolNames(contract: unknown): string[] {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return [];
+	const record = contract as Record<string, unknown>;
+	const values = [...(Array.isArray(record.requiredTools) ? record.requiredTools : []), ...(Array.isArray(record.protectedTools) ? record.protectedTools : [])];
+	return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
+function resolveProtectedTaskTools(loaded: LoadedTaskbook, activeTools: string[]): { chromeCdp: boolean; mcpTools: string[] } {
+	const text = `${loaded.skill}\n${JSON.stringify(loaded.contract)}`;
+	const declared = new Set(contractToolNames(loaded.contract));
+	const uses = (tool: string) => declared.has(tool) || text.includes(tool);
+	return {
+		chromeCdp: activeTools.includes("chrome_cdp") && uses("chrome_cdp"),
+		mcpTools: activeTools.filter((tool) => tool.includes("__") && uses(tool)),
+	};
+}
+
+async function resolveTaskWorkerEnv(
+	ctx: any,
+	loaded: LoadedTaskbook,
+	activeTools: string[],
+): Promise<Record<string, string | undefined> | null> {
+	const protectedTools = resolveProtectedTaskTools(loaded, activeTools);
+	const names = [
+		...(protectedTools.chromeCdp ? ["chrome_cdp"] : []),
+		...protectedTools.mcpTools,
+	];
+	if (names.length === 0) return {};
+	const allowed = await ctx.ui?.confirm?.(
+		"允许本次 task 使用受保护工具?",
+		[
+			`taskbook "${loaded.taskbook.name}" 声明会使用: ${names.join(", ")}`,
+			"",
+			"授权只传给本次 worker 子进程,不改变 /cdp 或 /mcp 的全局模式。",
+		].join("\n"),
+	);
+	if (!allowed) return null;
+	return {
+		...(protectedTools.chromeCdp ? { UGK_TASK_ALLOW_CHROME_CDP: "1" } : {}),
+		...(protectedTools.mcpTools.length > 0 ? { UGK_TASK_ALLOW_MCP_TOOLS: protectedTools.mcpTools.join(",") } : {}),
+	};
+}
+
 async function resolveRuntimeInput(ctx: any, skill: string, contract: unknown, rawInput: string): Promise<unknown> {
 	return await resolveRuntimeInputFromText(ctx, skill, contract, rawInput);
 }
@@ -508,6 +551,7 @@ async function handleTaskRun(
 	name: string | undefined,
 	rawInput: string,
 	onFail?: (failure: TaskRunFailure) => void,
+	activeTools: string[] = TASK_NORMAL_TOOLS,
 ): Promise<void> {
 	const finalName = await chooseTaskbookName(ctx, name);
 	if (!finalName) return;
@@ -519,6 +563,11 @@ async function handleTaskRun(
 	const finalRawInput = !name && !rawInput.trim()
 		? await ctx.ui?.input?.("一句话输入", "")
 		: rawInput;
+	const workerEnv = await resolveTaskWorkerEnv(ctx, loaded, activeTools);
+	if (workerEnv === null) {
+		ctx.ui.notify("已取消: 本次 task 未获得受保护工具授权。", "warning");
+		return;
+	}
 
 	const startedAt = Date.now();
 	const runDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${finalName}-${startedAt}`);
@@ -546,6 +595,7 @@ async function handleTaskRun(
 			feedback,
 		}, {
 			cwd: cwdOf(ctx),
+			env: workerEnv,
 			onUpdate: (text) => {
 				const progress = formatProgressLines(text);
 				if (progress.length > 0) {
@@ -883,7 +933,7 @@ export function registerTask(pi: ExtensionAPI): void {
 				}, "repair");
 				persistState();
 				setTaskStatus(ctx, "📋 task");
-			});
+			}, typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS);
 			if (action === "delete") return await handleTaskDelete(ctx, name, tokens);
 			if (action === "stop" || action === "exit" || action === "toggle" || action === "abort") {
 				state = abortTask(state);

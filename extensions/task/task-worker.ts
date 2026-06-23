@@ -57,7 +57,7 @@ export function buildTaskWorkerPrompt(input: TaskWorkerInput): string {
 
 export async function dispatchWorker(
 	input: TaskWorkerInput,
-	opts: { cwd: string; signal?: AbortSignal; onUpdate?: (text: string) => void },
+	opts: { cwd: string; signal?: AbortSignal; onUpdate?: (text: string) => void; env?: Record<string, string | undefined> },
 ): Promise<TaskWorkerResult> {
 	const discovery = discoverAgents(opts.cwd, "both");
 	const runner = workerRunnerForTests ?? runSingleAgent;
@@ -81,6 +81,7 @@ export async function dispatchWorker(
 			projectAgentsDir: discovery.projectAgentsDir,
 			results,
 		}),
+		opts.env,
 	);
 	const summary = getFinalOutput(result.messages);
 	const failed = isFailedResult(result);

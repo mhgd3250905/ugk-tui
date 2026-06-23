@@ -6,6 +6,7 @@ import {
 	clearMcpSessionAllow,
 	createMcpPermissionState,
 	grantMcpSessionAllow,
+	isTaskMcpToolPreauthorized,
 	setMcpPermissionMode,
 } from "../extensions/mcp/permissions.ts";
 
@@ -142,6 +143,14 @@ test("tool policy requires confirmation in ask mode before a server is authorize
 	);
 
 	assert.deepEqual(result, { allowed: true, requiresConfirmation: true });
+});
+
+test("task worker env can preauthorize specific registered MCP tools", () => {
+	const env = { UGK_TASK_ALLOW_MCP_TOOLS: "alpha__echo,beta__search" };
+
+	assert.equal(isTaskMcpToolPreauthorized("alpha__echo", env), true);
+	assert.equal(isTaskMcpToolPreauthorized("beta__search", env), true);
+	assert.equal(isTaskMcpToolPreauthorized("gamma__echo", env), false);
 });
 
 test("tool policy skips confirmation for a granted server in the same session", () => {

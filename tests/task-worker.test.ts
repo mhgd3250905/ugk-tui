@@ -82,6 +82,34 @@ test("dispatchWorker reports failed worker result", async () => {
 	}
 });
 
+test("dispatchWorker passes extra env to the child agent", async () => {
+	let receivedEnv: Record<string, string | undefined> | undefined;
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		receivedEnv = args[9];
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+		} as any;
+	});
+	try {
+		await dispatchWorker({
+			skill: "# Skill",
+			contract: {},
+			runtimeInput: {},
+			outputDir: "E:/out",
+		}, { cwd: process.cwd(), env: { UGK_TASK_ALLOW_CHROME_CDP: "1" } });
+
+		assert.equal(receivedEnv?.UGK_TASK_ALLOW_CHROME_CDP, "1");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+	}
+});
+
 test("worker agent inherits all tools and forbids subagent in prompt", () => {
 	const source = readFileSync(path.resolve("agents/worker.md"), "utf8");
 

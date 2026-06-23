@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `/task edit` update an existing taskbook incrementally, and require explicit verify-design confirmation before writing `verify.mjs`.
+**Goal:** Make `/task edit` update an existing taskbook incrementally, and require explicit skill/verify design confirmation before writing taskbook files.
 
-**Architecture:** Reuse the existing reviewing/save flow. `/task edit <name>` loads the existing taskbook into reviewing with old `spec/skill/verify/contract` in the review context instead of entering planning/executing. `TASK_REVIEW_PROMPT` becomes stricter: questionnaire must confirm the verify design before the agent outputs skill/verify/contract JSON.
+**Architecture:** Reuse the existing reviewing/save flow. `/task edit <name>` loads the existing taskbook into reviewing with old `spec/skill/verify/contract` in the review context instead of entering planning/executing. `TASK_REVIEW_PROMPT` becomes stricter: questionnaire must confirm the reusable skill path and verify design before the agent outputs skill/verify/contract JSON.
+
+**Follow-up:** `/task run` worker is a child `--no-session` process, so protected tools that ask for confirmation (`chrome_cdp`, MCP registered tools) need a parent-side one-run authorization before spawning the worker. The authorization is task-local env only and must not couple `/task` to plan mode.
 
 **Tech Stack:** TypeScript ESM, Node test runner, existing `/task` extension state and taskbook store.
 
@@ -59,7 +61,7 @@ In `saveCurrentTask`, choose scope as explicit token scope when provided, otherw
 Run: `node --test tests\task-extension.test.ts --test-name-pattern "edit save"`
 Expected: PASS.
 
-### Task 3: Verify Design Gate in Review Prompt
+### Task 3: Skill And Verify Design Gates In Review Prompt
 
 **Files:**
 - Modify: `extensions/task/task-prompts.ts`
@@ -67,7 +69,7 @@ Expected: PASS.
 
 - [ ] **Step 1: Write the failing test**
 
-Assert `TASK_REVIEW_PROMPT` requires a questionnaire before writing `verify.mjs`, and names the required verify-design dimensions: artifacts, assertions, failure cases, runtime input, and tolerated variability.
+Assert `TASK_REVIEW_PROMPT` requires a questionnaire before writing `skill.md` and `verify.mjs`, and names the required design dimensions: source/method, required steps, noise to omit, output path and format, artifacts, assertions, failure cases, runtime input, and tolerated variability.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -91,7 +93,7 @@ Expected: PASS.
 
 - [ ] **Step 1: Update task spec**
 
-Document that edit is an update flow, repair is failure-driven update, and review requires verify-design questionnaire before file output.
+Document that edit is an update flow, repair is failure-driven update, and review requires skill/verify design questionnaire before file output.
 
 - [ ] **Step 2: Run targeted tests**
 
@@ -107,3 +109,22 @@ Expected: PASS.
 
 Run: `git diff --check`
 Expected: no output.
+
+### Follow-up Task: Protected Tool Preauthorization For Worker
+
+**Files:**
+- Modify: `extensions/task/task.ts`
+- Modify: `extensions/task/task-worker.ts`
+- Modify: `extensions/subagent.ts`
+- Modify: `extensions/chrome-cdp/config.ts`
+- Modify: `extensions/mcp/permissions.ts`
+- Modify: `extensions/mcp/index.ts`
+- Test: `tests/task-extension.test.ts`
+- Test: `tests/task-worker.test.ts`
+- Test: `tests/chrome-cdp-config.test.ts`
+- Test: `tests/mcp-permissions.test.ts`
+
+- [x] Add focused failing tests for one-run env propagation and denied authorization.
+- [x] Pass task-local env into the worker child process.
+- [x] Let `chrome_cdp` and MCP tools skip only the confirmation step when the matching task env is present.
+- [x] Document `contract.requiredTools` and the `/task run` authorization flow.

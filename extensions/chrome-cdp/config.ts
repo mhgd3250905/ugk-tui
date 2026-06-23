@@ -35,7 +35,7 @@ function parsePort(value: unknown): number | undefined {
 export function createChromeCdpState(env: Record<string, string | undefined> = process.env): ChromeCdpState {
 	return {
 		mode: "ask",
-		sessionAllowed: false,
+		sessionAllowed: env.UGK_TASK_ALLOW_CHROME_CDP === "1",
 		envPort: parsePort(env.UGK_CDP_PORT),
 	};
 }

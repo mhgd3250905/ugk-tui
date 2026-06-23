@@ -80,6 +80,7 @@ export async function runSingleAgent(
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
+	extraEnv: Record<string, string | undefined> = {},
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -141,7 +142,7 @@ export async function runSingleAgent(
 			const invocation = getPiInvocation(args);
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
-				env: { ...process.env, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR || getAgentDir() },
+				env: { ...process.env, ...extraEnv, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR || getAgentDir() },
 				shell: invocation.useShell,
 				stdio: ["ignore", "pipe", "pipe"],
 			});

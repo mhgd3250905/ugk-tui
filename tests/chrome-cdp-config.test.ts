@@ -31,6 +31,18 @@ test("resolveChromeCdpPort respects explicit, runtime, env, then default priorit
 	assert.equal(resolveChromeCdpPort(invalidEnv, {}), 9222);
 });
 
+test("task worker env preauthorizes chrome_cdp for the child process", () => {
+	const state = createChromeCdpState({ UGK_TASK_ALLOW_CHROME_CDP: "1" });
+	const result = checkChromeCdpPolicy(state, {
+		action: "tabs",
+		reason: "Requires logged-in Chrome session",
+		normalAccessAttempted: true,
+	});
+
+	assert.equal(result.allowed, true);
+	assert.equal(result.requiresConfirmation, false);
+});
+
 test("setChromeCdpPort rejects invalid ports", () => {
 	const state = createChromeCdpState({});
 

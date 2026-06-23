@@ -6,6 +6,7 @@ import {
 	checkMcpToolPolicy,
 	createMcpPermissionState,
 	grantMcpSessionAllow,
+	isTaskMcpToolPreauthorized,
 	type McpPermissionState,
 } from "./permissions.ts";
 import { McpConnectionError, McpRegistry, type McpConnection } from "./registry.ts";
@@ -208,6 +209,9 @@ async function resolveToolPolicy(state: McpExtensionState, context: McpToolPolic
 		return { allowed: false, reason: policy.reason };
 	}
 	if (!policy.requiresConfirmation) {
+		return { allowed: true };
+	}
+	if (isTaskMcpToolPreauthorized(context.registeredName)) {
 		return { allowed: true };
 	}
 

@@ -292,6 +292,12 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.match(prompt, /RequirementsSpec/);
 	assert.match(prompt, /ExecutionSummary/);
 	assert.match(TASK_REVIEW_PROMPT, /id="extras"/);
+	assert.match(TASK_REVIEW_PROMPT, /SKILL DESIGN GATE/);
+	assert.match(TASK_REVIEW_PROMPT, /source\/method/);
+	assert.match(TASK_REVIEW_PROMPT, /required steps/);
+	assert.match(TASK_REVIEW_PROMPT, /noise to omit/);
+	assert.match(TASK_REVIEW_PROMPT, /output path and format/);
+	assert.match(TASK_REVIEW_PROMPT, /requiredTools/);
 	assert.match(TASK_REVIEW_PROMPT, /VERIFY DESIGN GATE/);
 	assert.match(TASK_REVIEW_PROMPT, /artifacts/);
 	assert.match(TASK_REVIEW_PROMPT, /assertions/);
@@ -780,6 +786,83 @@ test("/task run shows worker progress updates in the widget", async () => {
 			.find((text) => text.includes("最近进展"));
 		assert.match(progress ?? "", /1\. 打开 Today 页面/);
 		assert.match(progress ?? "", /2\. 解析工具列表/);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task run preauthorizes mentioned protected tools for the worker", async () => {
+	const { pi, commands } = makePi(["read", "bash", "edit", "write", "subagent", "chrome_cdp", "alpha__echo"]);
+	const { cwd, ctx } = makeCtx();
+	const confirmations: Array<{ title: string; body?: string }> = [];
+	let receivedEnv: Record<string, string | undefined> | undefined;
+	ctx.ui.confirm = (title: string, body?: string) => {
+		confirmations.push({ title, body });
+		return true;
+	};
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		receivedEnv = args[9];
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	setTaskDispatcherForTests(async () => ({}));
+	try {
+		await saveTaskbook("project", cwd, "runner-tools", {
+			description: "runner tools",
+			spec,
+			skill: "Use chrome_cdp and alpha__echo to finish.",
+			verify: "process.exit(0);\n",
+			contract: { artifacts: [], requiredTools: ["chrome_cdp", "alpha__echo"] },
+		});
+
+		await commands.get("task").handler("run runner-tools", ctx);
+
+		assert.equal(confirmations.length, 1);
+		assert.match(confirmations[0].body ?? "", /chrome_cdp/);
+		assert.match(confirmations[0].body ?? "", /alpha__echo/);
+		assert.equal(receivedEnv?.UGK_TASK_ALLOW_CHROME_CDP, "1");
+		assert.equal(receivedEnv?.UGK_TASK_ALLOW_MCP_TOOLS, "alpha__echo");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task run does not start worker when protected tool preauthorization is denied", async () => {
+	const { pi, commands } = makePi(["read", "bash", "edit", "write", "subagent", "chrome_cdp"]);
+	const { cwd, ctx, notifications } = makeCtx();
+	let workerStarted = false;
+	ctx.ui.confirm = () => false;
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => {
+		workerStarted = true;
+		throw new Error("should not run");
+	});
+	setTaskDispatcherForTests(async () => ({}));
+	try {
+		await saveTaskbook("project", cwd, "runner-denied", {
+			description: "runner denied",
+			spec,
+			skill: "Use chrome_cdp.",
+			verify: "process.exit(0);\n",
+			contract: { artifacts: [], requiredTools: ["chrome_cdp"] },
+		});
+
+		await commands.get("task").handler("run runner-denied", ctx);
+
+		assert.equal(workerStarted, false);
+		assert.match(notifications.at(-1)?.message ?? "", /已取消/);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);

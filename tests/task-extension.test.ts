@@ -1112,10 +1112,11 @@ test("/task run can be stopped and records user notes while worker is running", 
 		const runPromise = commands.get("task").handler("run runner-stop", ctx);
 		await started;
 		const inputResult = await handlers.get("input")![0]({ source: "interactive", text: "它正在走错路径" }, ctx);
-		await commands.get("task").handler("stop", ctx);
+		const stopResult = await handlers.get("input")![0]({ source: "interactive", text: "/task stop" }, ctx);
 		await runPromise;
 
 		assert.equal(inputResult?.handled, true);
+		assert.equal(stopResult?.handled, true);
 		assert.equal(signal?.aborted, true);
 		assert.ok(notifications.some((item) => /已记录/.test(item.message)));
 		assert.ok(notifications.some((item) => /已请求停止/.test(item.message)));

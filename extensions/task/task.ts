@@ -1205,6 +1205,11 @@ export function registerTask(pi: ExtensionAPI): void {
 		const text = typeof event.text === "string" ? event.text.trim() : "";
 		if (event.source !== "interactive" && event.source !== "rpc") return;
 		if (activeTaskRun && text) {
+			if (text === "/task" || text.startsWith("/task ")) {
+				await handleTaskCommand(text.slice("/task".length).trim(), ctx);
+				return { handled: true };
+			}
+			if (text.startsWith("/")) return undefined;
 			activeTaskRun.notes.push(text);
 			ctx.ui.notify(`已记录本次运行备注。需要中断请用 /task stop。`, "info");
 			return { handled: true };

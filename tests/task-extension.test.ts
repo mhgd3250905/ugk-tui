@@ -215,6 +215,26 @@ test("/task new enters planning, injects prompt, filters stale context, and pars
 	assert.match(notifications.at(-1)?.message ?? "", /Spec 已对齐/);
 });
 
+test("task pending transition opens the next-step menu in TUI", async () => {
+	const { pi, commands, handlers, activeTools, entries } = makePi();
+	const { ctx } = makeCtx();
+	(ctx as any).hasUI = true;
+	ctx.ui.select = () => "开始执行";
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx);
+	await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(spec)}\n\`\`\`` }],
+		}],
+	}, ctx);
+
+	assert.equal((entries.at(-1)?.data as any).phase, "executing");
+	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "task_complete"]);
+});
+
 test("task planning blocks non-readonly bash and removes plan context when inactive", async () => {
 	const { pi, commands, handlers } = makePi();
 	const { ctx } = makeCtx();
@@ -304,6 +324,9 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.match(TASK_REVIEW_PROMPT, /failure cases/);
 	assert.match(TASK_REVIEW_PROMPT, /runtime input/);
 	assert.match(TASK_REVIEW_PROMPT, /allowed variability/);
+	assert.match(TASK_REVIEW_PROMPT, /empty-output negative case/);
+	assert.match(TASK_REVIEW_PROMPT, /VerifyFailure\[\]/);
+	assert.match(TASK_REVIEW_PROMPT, /\{"failures":\[/);
 
 	const parsed = extractTaskReviewResult(`\`\`\`json
 {
@@ -390,7 +413,7 @@ test("/task menu lets user enter review from executing with a completion summary
 	const latestState = entries.at(-1)?.data as any;
 	assert.equal(latestState.pendingTransition, "review");
 	assert.match(latestState.summary, /AgentSummary: 已完成报告抓取/);
-	assert.match(notifications.at(-1)?.message ?? "", /按 Enter 进 review/);
+	assert.match(notifications.at(-1)?.message ?? "", /请选择下一步/);
 });
 
 test("/task menu enters review when execute completion is already pending", async () => {
@@ -446,7 +469,7 @@ test("task_complete records process log and Enter gates review/save transitions"
 		await handlers.get("tool_execution_end")![0]({ toolName: "task_complete", isError: false, result: { details: { summary: "已生成 report.json" } } }, ctx);
 		assert.equal((entries.at(-1)?.data as any).phase, "executing");
 		assert.equal((entries.at(-1)?.data as any).pendingTransition, "review");
-		assert.match(notifications.at(-1)?.message ?? "", /按 Enter 进 review/);
+		assert.match(notifications.at(-1)?.message ?? "", /请选择下一步/);
 
 		await handlers.get("input")![0]({ source: "interactive", text: "" }, ctx);
 		assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
@@ -512,6 +535,50 @@ test("/task save runs verify self-check before landed", async () => {
 		await commands.get("task").handler("save bad --project", ctx);
 
 		assert.match(notifications.at(-1)?.message ?? "", /verify 自证失败/);
+		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task save rejects malformed verify failure output before writing taskbook", async () => {
+	const { pi, commands, handlers, entries } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	try {
+		await commands.get("task").handler("new", ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+		await handlers.get("agent_end")![0]({
+			messages: [{
+				role: "assistant",
+				content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(spec)}\n\`\`\`` }],
+			}],
+		}, ctx);
+		await commands.get("task").handler("execute", ctx);
+		const executeRunDir = (entries.at(-1)?.data as any).executeRunDir;
+		await writeFile(path.join(executeRunDir, "output", "report.md"), "# ok\n", "utf8");
+		await handlers.get("tool_execution_end")![0]({ toolName: "task_complete", isError: false, result: { details: { summary: "已生成 report.md" } } }, ctx);
+		await handlers.get("input")![0]({ source: "interactive", text: "" }, ctx);
+		await handlers.get("tool_call")![0]({ toolName: "questionnaire" }, ctx);
+		await handlers.get("agent_end")![0]({
+			messages: [{
+				role: "assistant",
+				content: [{ type: "text", text: `\`\`\`json
+{
+  "description":"坏失败格式",
+  "skill":"# Skill",
+  "verify":"import {readdir} from 'node:fs/promises'; const files = await readdir(process.env.TASK_OUTPUT_DIR).catch(() => []); if (files.length === 0) { console.log(JSON.stringify({failures:['empty']})); process.exit(1); } process.exit(0);",
+  "contract":{"artifacts":[{"name":"report.md","type":"file"}]}
+}
+\`\`\`` }],
+			}],
+		}, ctx);
+
+		await commands.get("task").handler("save malformed --project", ctx);
+
+		assert.match(notifications.at(-1)?.message ?? "", /verify 失败输出格式错误/);
+		assert.equal(await loadTaskbook(cwd, "malformed"), null);
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -1022,7 +1089,7 @@ test("/task run failure offers optional taskbook repair", async () => {
 		});
 
 		await commands.get("task").handler("run runner-repair", ctx);
-		assert.match(notifications.at(-1)?.message ?? "", /按 Enter 修正 taskbook/);
+		assert.match(notifications.at(-1)?.message ?? "", /用 \/task 选择修正/);
 
 		ctx.ui.select = (title: string, options: string[]) => {
 			selections.push({ title, options });
@@ -1070,7 +1137,7 @@ test("/task save defaults to execute output dir when no output-dir is passed", a
 			messages: [{
 				role: "assistant",
 				content: [{ type: "text", text: `\`\`\`json
-{"description":"生成报告","skill":"# Skill","verify":"import {stat} from 'node:fs/promises'; await stat(process.env.TASK_OUTPUT_DIR + '/report.json'); process.exit(0)","contract":{"artifacts":[{"name":"report.json","type":"file"}]}}
+{"description":"生成报告","skill":"# Skill","verify":"import {stat} from 'node:fs/promises'; try { await stat(process.env.TASK_OUTPUT_DIR + '/report.json'); process.exit(0); } catch { console.log(JSON.stringify([{assertion:'report.json exists',expected:'present',actual:'missing'}])); process.exit(1); }","contract":{"artifacts":[{"name":"report.json","type":"file"}]}}
 \`\`\`` }],
 			}],
 		}, ctx);

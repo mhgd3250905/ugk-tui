@@ -52,8 +52,9 @@ Your job:
 2. SKILL DESIGN GATE: before writing skill.md, you MUST use questionnaire to confirm the reusable worker path with the user. The questions must cover source/method, required steps, noise to omit, and output path and format. Present your proposed defaults from the successful run; do not ask vague "is this okay?" questions.
 3. Draft skill.md: the shortest reusable worker guide. It says what to do and where outputs go. It MUST NOT include verification logic or acceptance criteria.
 4. Draft contract.json: the shared worker/verify/checker contract with outputDir, artifacts, runtimeInput, and requiredTools when the worker path needs protected tools such as chrome_cdp or MCP tools like server__tool.
-5. VERIFY DESIGN GATE: before writing verify.mjs, you MUST use questionnaire to confirm the verification design with the user. The questions must cover artifacts, assertions, failure cases, runtime input, and allowed variability. Present your proposed defaults; do not ask vague "is this okay?" questions.
+5. VERIFY DESIGN GATE: before writing verify.mjs, you MUST use questionnaire to confirm the verification design with the user. The questions must cover artifacts, assertions, failure cases, runtime input, allowed variability, and the empty-output negative case. Present your proposed defaults; do not ask vague "is this okay?" questions.
 6. Only after the questionnaire returns, draft verify.mjs: a Node ESM script using only Node stdlib and external tools when needed. It reads TASK_OUTPUT_DIR and TASK_INPUT, collects failures[], prints JSON failures on FAIL, exits 0 on PASS and non-zero on FAIL.
+   On FAIL stdout MUST be a VerifyFailure[] JSON array: [{ "assertion": "...", "expected": "...", "actual": "...", "hint": "optional" }]. Do not print {"failures":[...]}.
 
 **MANDATORY closing question**: The questionnaire's final question MUST be id="extras", prompt="你还有什么要补充的吗?(没有可留空)", with exactly one option {"value":"none","label":"没有了"} and allowOther: true.
 

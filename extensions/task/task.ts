@@ -1,6 +1,6 @@
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
 	extractArtifactsFromToolInput,
@@ -25,7 +25,7 @@ import {
 	type TaskPhase,
 	type TaskState,
 } from "./task-state.ts";
-import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, saveTaskbook, taskDir, type LoadedTaskbook } from "./task-book.ts";
+import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, saveTaskbook, type LoadedTaskbook } from "./task-book.ts";
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
@@ -358,6 +358,23 @@ function artifactNames(contract: unknown): string[] {
 		.filter((name): name is string => typeof name === "string");
 }
 
+async function withTempVerify(cwd: string, verify: string, fn: (verifyPath: string, tempDir: string) => Promise<void>): Promise<void> {
+	const tempDir = path.join(cwd, ".tasks", "tmp", `verify-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+	await mkdir(tempDir, { recursive: true });
+	try {
+		const verifyPath = path.join(tempDir, "verify.mjs");
+		await writeFile(verifyPath, verify, "utf8");
+		await fn(verifyPath, tempDir);
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
+}
+
+function malformedVerifyFailureOutput(verifyResult: Awaited<ReturnType<typeof runVerify>>): boolean {
+	return verifyResult.failures.length === 0 ||
+		verifyResult.failures.some((failure) => failure.assertion === "verify.mjs 输出结构化失败");
+}
+
 async function formatArtifact(outputDir: string, name: string): Promise<string[]> {
 	const filePath = path.resolve(outputDir, name);
 	try {
@@ -664,7 +681,7 @@ async function handleTaskRun(
 		runDir,
 		summary: await formatRepairSummary(loaded, outputDir, lastWorkerResult, lastVerifyResult),
 	});
-	ctx.ui.notify(`${report}\n\n下一步: 按 Enter 修正 taskbook,或输入修改意见。也可以用 /task 选择重新运行/查看/放弃。`, "error");
+	ctx.ui.notify(`${report}\n\n下一步: 输入修改意见修正 taskbook,或用 /task 选择修正/重新运行/查看/放弃。`, "error");
 	} finally {
 		setTaskRunWidget(ctx, undefined);
 	}
@@ -707,6 +724,19 @@ export function registerTask(pi: ExtensionAPI): void {
 			pi.setActiveTools(restoreToolsSnapshot);
 		}
 		restoreToolsSnapshot = undefined;
+	}
+
+	let promptingTaskMenu = false;
+	async function promptTaskMenu(ctx: any): Promise<void> {
+		if (!ctx.hasUI || !ctx.ui?.select || promptingTaskMenu) return;
+		promptingTaskMenu = true;
+		try {
+			const selection = await ctx.ui.select("Task", getTaskCommandMenuOptions(state));
+			const action = selection ? MENU_TO_ACTION.get(selection) : undefined;
+			if (action) await handleTaskCommand(action, ctx);
+		} finally {
+			promptingTaskMenu = false;
+		}
 	}
 
 	function enableTask(ctx: any): void {
@@ -758,7 +788,8 @@ export function registerTask(pi: ExtensionAPI): void {
 		if (state.phase !== "executing") return;
 		state = setPendingTransition({ ...state, summary: formatExecuteSummary(state, completionSummary) }, "review");
 		persistState();
-		ctx.ui.notify(`execute 完成,产出在 ${state.executeRunDir ? path.join(state.executeRunDir, "output") : "(unknown)"}。按 Enter 进 review 复盘,或输入意见。`, "info");
+		ctx.ui.notify(`execute 完成,产出在 ${state.executeRunDir ? path.join(state.executeRunDir, "output") : "(unknown)"}。请选择下一步,或输入意见。`, "info");
+		await promptTaskMenu(ctx);
 	}
 
 	async function enterReviewFromPending(ctx: any): Promise<void> {
@@ -797,17 +828,42 @@ export function registerTask(pi: ExtensionAPI): void {
 			return;
 		}
 		const scope = explicitScopeFromTokens(tokens) ?? state.taskbookScope ?? scopeFromTokens(tokens);
-		await saveTaskbook(scope, cwdOf(ctx), finalName.trim(), {
-			description: state.reviewResult.description,
-			spec: state.spec,
-			skill: state.reviewResult.skill,
-			verify: state.reviewResult.verify,
-			contract: state.reviewResult.contract,
-			tags: state.reviewResult.tags,
-		});
 		const outputDir = state.executeRunDir ? path.join(state.executeRunDir, "output") : undefined;
+		let runtimeInput = await resolveSelfCheckInput(ctx, state.reviewResult.contract);
+		let positiveVerifyResult: Awaited<ReturnType<typeof runVerify>> | undefined;
+		let blocked = false;
+		await withTempVerify(cwdOf(ctx), state.reviewResult.verify, async (verifyPath, tempDir) => {
+			const emptyOutputDir = path.join(tempDir, "empty-output");
+			await mkdir(emptyOutputDir, { recursive: true });
+			const negativeResult = await runVerify({ verifyPath, outputDir: emptyOutputDir, input: runtimeInput });
+			if (!negativeResult.passed && malformedVerifyFailureOutput(negativeResult)) {
+				blocked = true;
+				ctx.ui.notify(`verify 失败输出格式错误,拒绝保存。失败时 stdout 必须是 VerifyFailure[] JSON:\n${negativeResult.stdout.trim() || JSON.stringify(negativeResult.failures, null, 2)}`, "warning");
+				return;
+			}
+			if (negativeResult.passed && artifactNames(state.reviewResult?.contract).length > 0) {
+				blocked = true;
+				ctx.ui.notify("verify 负例自检失败: 空 outputDir 也通过了,拒绝保存。", "warning");
+				return;
+			}
+			if (!outputDir?.trim()) return;
+			positiveVerifyResult = await runVerify({ verifyPath, outputDir, input: runtimeInput });
+			if (!positiveVerifyResult.passed && runtimeFields(state.reviewResult?.contract).length > 0) {
+				runtimeInput = await askSelfCheckInput(ctx, state.reviewResult?.contract);
+				positiveVerifyResult = await runVerify({ verifyPath, outputDir, input: runtimeInput });
+			}
+		});
+		if (blocked) return;
 		if (!outputDir?.trim()) {
 			if (state.taskbookName) {
+				await saveTaskbook(scope, cwdOf(ctx), finalName.trim(), {
+					description: state.reviewResult.description,
+					spec: state.spec,
+					skill: state.reviewResult.skill,
+					verify: state.reviewResult.verify,
+					contract: state.reviewResult.contract,
+					tags: state.reviewResult.tags,
+				});
 				state = landTask(state);
 				persistState();
 				restoreActiveTools();
@@ -818,24 +874,19 @@ export function registerTask(pi: ExtensionAPI): void {
 			ctx.ui.notify("缺少首次成功产出的 outputDir,拒绝 landed。", "warning");
 			return;
 		}
-		let runtimeInput = await resolveSelfCheckInput(ctx, state.reviewResult.contract);
-		let verifyResult = await runVerify({
-			verifyPath: path.join(taskDir(scope, cwdOf(ctx), finalName.trim()), "verify.mjs"),
-			outputDir,
-			input: runtimeInput,
-		});
-		if (!verifyResult.passed && runtimeFields(state.reviewResult.contract).length > 0) {
-			runtimeInput = await askSelfCheckInput(ctx, state.reviewResult.contract);
-			verifyResult = await runVerify({
-				verifyPath: path.join(taskDir(scope, cwdOf(ctx), finalName.trim()), "verify.mjs"),
-				outputDir,
-				input: runtimeInput,
-			});
-		}
+		const verifyResult = positiveVerifyResult;
 		if (!verifyResult.passed) {
 			ctx.ui.notify(`verify 自证失败,未进入 landed:\n${JSON.stringify(verifyResult.failures, null, 2)}`, "warning");
 			return;
 		}
+		await saveTaskbook(scope, cwdOf(ctx), finalName.trim(), {
+			description: state.reviewResult.description,
+			spec: state.spec,
+			skill: state.reviewResult.skill,
+			verify: state.reviewResult.verify,
+			contract: state.reviewResult.contract,
+			tags: state.reviewResult.tags,
+		});
 		state = landTask(state);
 		persistState();
 		restoreActiveTools();
@@ -845,9 +896,7 @@ export function registerTask(pi: ExtensionAPI): void {
 
 	pi.registerTool?.(taskCompleteTool);
 
-	pi.registerCommand("task", {
-		description: "UGK task delegation system",
-		handler: async (args, ctx) => {
+	async function handleTaskCommand(args: string, ctx: any): Promise<void> {
 			const resolvedArgs = await resolveTaskCommandArgs(args, ctx, state);
 			if (resolvedArgs === undefined) return;
 			const { action, name, tokens, rawInput } = parseTaskCommand(resolvedArgs);
@@ -944,7 +993,11 @@ export function registerTask(pi: ExtensionAPI): void {
 				return;
 			}
 			ctx.ui.notify("Usage: /task list|show|new|run|edit|save|delete|toggle|exit", "warning");
-		},
+	}
+
+	pi.registerCommand("task", {
+		description: "UGK task delegation system",
+		handler: handleTaskCommand,
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -1081,7 +1134,8 @@ export function registerTask(pi: ExtensionAPI): void {
 			state = setTaskReviewResult(state, result);
 			state = setPendingTransition(state, "save");
 			persistState();
-			ctx.ui.notify("复盘完成。按 Enter 自动保存(会跑 verify 自证),或输入修改意见。", "info");
+			ctx.ui.notify("复盘完成。请选择下一步,或输入修改意见。", "info");
+			await promptTaskMenu(ctx);
 			return;
 		}
 		const spec = extractRequirementsSpec(getTextContent(lastAssistant));
@@ -1091,7 +1145,8 @@ export function registerTask(pi: ExtensionAPI): void {
 		}
 		state = setPendingTransition(setTaskSpec(state, spec), "execute");
 		persistState();
-		ctx.ui.notify("Spec 已对齐。按 Enter 进 execute 阶段(我亲手做一遍验证可行性),或输入修改意见。", "info");
+		ctx.ui.notify("Spec 已对齐。请选择下一步,或输入修改意见。", "info");
+		await promptTaskMenu(ctx);
 		return undefined;
 	});
 }

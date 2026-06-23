@@ -333,6 +333,8 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.match(TASK_REVIEW_PROMPT, /runtime input/);
 	assert.match(TASK_REVIEW_PROMPT, /allowed variability/);
 	assert.match(TASK_REVIEW_PROMPT, /empty-output negative case/);
+	assert.match(TASK_REVIEW_PROMPT, /process\.cwd\(\)/);
+	assert.match(TASK_REVIEW_PROMPT, /import\.meta\.url/);
 	assert.match(TASK_REVIEW_PROMPT, /VerifyFailure\[\]/);
 	assert.match(TASK_REVIEW_PROMPT, /\{"failures":\[/);
 

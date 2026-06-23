@@ -12,7 +12,7 @@ function makeQuestionnaireTool() {
 	return tool;
 }
 
-function makeCtx(mode = "tui") {
+function makeCtx(mode = "tui", includeUi = true) {
 	const selections: Array<{ title: string; options: string[] }> = [];
 	const editorCalls: Array<{ title: string; value: string }> = [];
 	return {
@@ -20,7 +20,8 @@ function makeCtx(mode = "tui") {
 		editorCalls,
 		ctx: {
 			mode,
-			ui: {
+			hasUI: includeUi,
+			ui: includeUi ? {
 				select(title: string, options: string[]) {
 					selections.push({ title, options });
 					return options[0];
@@ -29,7 +30,7 @@ function makeCtx(mode = "tui") {
 					editorCalls.push({ title, value });
 					return "custom answer";
 				},
-			},
+			} : undefined,
 		},
 	};
 }
@@ -136,9 +137,31 @@ test("questionnaire allowOther selection uses editor and returns custom answer",
 	assert.deepEqual(editorCalls, [{ title: "Add detail", value: "" }]);
 });
 
-test("questionnaire returns cancelled error outside tui mode", async () => {
+test("questionnaire works in rpc mode when extension UI is available", async () => {
 	const tool = makeQuestionnaireTool();
-	const { ctx } = makeCtx("print");
+	const { ctx } = makeCtx("rpc");
+
+	const result = await tool.execute(
+		"call-1",
+		{ questions: [{ id: "x", prompt: "X", options: [{ value: "x", label: "X" }] }] },
+		undefined,
+		undefined,
+		ctx,
+	);
+
+	assert.equal(result.details.cancelled, false);
+	assert.deepEqual(result.details.answers[0], {
+		id: "x",
+		value: "x",
+		label: "X",
+		wasCustom: false,
+		index: 1,
+	});
+});
+
+test("questionnaire returns cancelled error when UI is unavailable", async () => {
+	const tool = makeQuestionnaireTool();
+	const { ctx } = makeCtx("print", false);
 
 	const result = await tool.execute(
 		"call-1",

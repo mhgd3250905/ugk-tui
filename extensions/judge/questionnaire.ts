@@ -60,7 +60,7 @@ export default function registerQuestionnaire(pi: ExtensionAPI): void {
 		parameters: QuestionnaireParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			if (ctx.mode !== "tui") {
+			if (!ctx.hasUI || !ctx.ui?.select || !ctx.ui?.editor) {
 				return errorResult("Error: UI not available (running in non-interactive mode)");
 			}
 			if (!Array.isArray(params.questions) || params.questions.length === 0) {

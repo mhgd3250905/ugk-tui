@@ -1190,11 +1190,19 @@ export function registerTask(pi: ExtensionAPI): void {
 			const { action, name, tokens, rawInput } = parseTaskCommand(resolvedArgs);
 			if (action === "review-last-run" && lastTaskRunReview) {
 				const userObservation = await ctx.ui?.input?.("你觉得刚刚的运行结果有什么问题吗?", "");
-				const result = await dispatchTaskRunReviewer({
-					runContext: lastTaskRunReview.content,
-					userObservation: userObservation ?? "",
-				}, { cwd: cwdOf(ctx) });
-				ctx.ui.notify(result.summary, result.ok ? "info" : "warning");
+				setTaskRunWidget(ctx, [
+					`📋 正在复盘 taskbook "${lastTaskRunReview.taskbookName}"...`,
+					"reviewer 分析中,请稍候",
+				]);
+				try {
+					const result = await dispatchTaskRunReviewer({
+						runContext: lastTaskRunReview.content,
+						userObservation: userObservation ?? "",
+					}, { cwd: cwdOf(ctx) });
+					ctx.ui.notify(result.summary, result.ok ? "info" : "warning");
+				} finally {
+					setTaskRunWidget(ctx, undefined);
+				}
 				return;
 			}
 			if (action === "stop" && activeTaskRun) {

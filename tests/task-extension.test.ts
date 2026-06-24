@@ -1067,6 +1067,7 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 		await commands.get("task").handler("", ctx);
 
 		assert.ok(selections.at(-1)?.options.includes("复盘上次运行"));
+		assert.ok(widgetCalls.some((call) => (call.lines?.join("\n") ?? "").includes("正在复盘")));
 		assert.equal(userMessages.length, 0);
 		assert.match(reviewerPrompt, /TASK RUN REVIEW/);
 		assert.match(reviewerPrompt, /runner-progress/);

@@ -62,6 +62,11 @@ type LastTaskRunReview = {
 
 let activeTaskRun: ActiveTaskRun | undefined;
 let lastTaskRunReview: LastTaskRunReview | undefined;
+let taskRunPromiseForTests: Promise<void> = Promise.resolve();
+
+export function waitForTaskRunForTests(): Promise<void> {
+	return taskRunPromiseForTests;
+}
 
 const taskCompleteTool = defineTool({
 	name: "task_complete",
@@ -627,6 +632,10 @@ async function handleTaskRun(
 	onFail?: (failure: TaskRunFailure) => void,
 	activeTools: string[] = TASK_NORMAL_TOOLS,
 ): Promise<void> {
+	if (activeTaskRun) {
+		ctx.ui.notify(`taskbook "${activeTaskRun.taskbookName}" 正在运行。可用 /task stop 中断。`, "warning");
+		return;
+	}
 	const finalName = await chooseTaskbookName(ctx, name);
 	if (!finalName) return;
 	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
@@ -654,8 +663,10 @@ async function handleTaskRun(
 	let lastWorkerResult: TaskWorkerResult | undefined;
 	let feedback: unknown;
 	const abortController = new AbortController();
-	activeTaskRun = { taskbookName: finalName, abortController, progress: [], notes: [] };
+	const runState: ActiveTaskRun = { taskbookName: finalName, abortController, progress: [], notes: [] };
+	activeTaskRun = runState;
 
+	const runPromise = (async () => {
 	try {
 	for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
 		const widgetBase = (status: string) => [
@@ -677,7 +688,7 @@ async function handleTaskRun(
 			onUpdate: (text) => {
 				const progress = formatProgressLines(text);
 				if (progress.length > 0) {
-					activeTaskRun?.progress.push(...progress);
+					runState.progress.push(...progress);
 					setTaskRunWidget(ctx, [...widgetBase("worker 执行中..."), "", "最近进展:", ...progress]);
 				}
 			},
@@ -687,7 +698,7 @@ async function handleTaskRun(
 		if (!workerResult.ok) {
 			if (abortController.signal.aborted) {
 				const duration = (Date.now() - startedAt) / 1000;
-				const report = await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, false, attempt + 1, duration, activeTaskRun?.progress, activeTaskRun?.notes);
+				const report = await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, false, attempt + 1, duration, runState.progress, runState.notes);
 				lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
 				ctx.ui.notify(`已停止 taskbook "${finalName}" 运行。下一步可用 /task 选择"复盘上次运行"。`, "info");
 				return;
@@ -713,7 +724,7 @@ async function handleTaskRun(
 				duration: (Date.now() - startedAt) / 1000,
 			});
 			const duration = (Date.now() - startedAt) / 1000;
-			const report = await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, true, attempt + 1, duration, activeTaskRun?.progress, activeTaskRun?.notes);
+			const report = await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, true, attempt + 1, duration, runState.progress, runState.notes);
 			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
 			ctx.ui.notify(report, "info");
 			return;
@@ -744,7 +755,7 @@ async function handleTaskRun(
 		duration: (Date.now() - startedAt) / 1000,
 	});
 	const duration = (Date.now() - startedAt) / 1000;
-	const report = await formatRunResult(loaded, outputDir, lastWorkerResult, lastVerifyResult, false, maxRetry + 1, duration, activeTaskRun?.progress, activeTaskRun?.notes);
+	const report = await formatRunResult(loaded, outputDir, lastWorkerResult, lastVerifyResult, false, maxRetry + 1, duration, runState.progress, runState.notes);
 	lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
 	onFail?.({
 		taskbookName: finalName,
@@ -754,10 +765,14 @@ async function handleTaskRun(
 		summary: await formatRepairSummary(loaded, outputDir, lastWorkerResult, lastVerifyResult),
 	});
 	ctx.ui.notify(`${report}\n\n下一步: 输入修改意见修正 taskbook,或用 /task 选择修正/重新运行/查看/放弃。`, "error");
+	} catch (error) {
+		ctx.ui.notify(`taskbook "${finalName}" 运行异常: ${error instanceof Error ? error.message : String(error)}`, "error");
 	} finally {
-		activeTaskRun = undefined;
+		if (activeTaskRun === runState) activeTaskRun = undefined;
 		setTaskRunWidget(ctx, undefined);
 	}
+	})();
+	taskRunPromiseForTests = runPromise;
 }
 
 async function handleTaskDelete(ctx: any, name: string | undefined, tokens: string[]): Promise<void> {

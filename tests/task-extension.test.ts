@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs } from "../extensions/task/task.ts";
+import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs, waitForTaskRunForTests } from "../extensions/task/task.ts";
 import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, setTaskReviewResult, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
 import { appendRunToTaskbook, loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
@@ -865,6 +865,7 @@ test("/task menu selects taskbook name for show edit delete and run", async () =
 		ctx.ui.select = (title: string) => title === "Task" ? "运行 taskbook(复用)" : "menu-run";
 		ctx.ui.input = () => "一句话";
 		await commands.get("task").handler("", ctx);
+		await waitForTaskRunForTests();
 		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
 		assert.deepEqual((await loadTaskbook(cwd, "menu-run"))?.taskbook.runs.at(-1)?.input, { text: "一句话" });
 
@@ -902,6 +903,7 @@ test("/task run executes worker, verify, and records a pass run", async () => {
 		});
 
 		await commands.get("task").handler("run runner 把这个下下来 https://x", ctx);
+		await waitForTaskRunForTests();
 		const loaded = await loadTaskbook(cwd, "runner");
 
 		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
@@ -943,6 +945,7 @@ test("/task run uses absolute contract outputDir as the final output directory",
 		});
 
 		await commands.get("task").handler("run custom-output https://x", ctx);
+		await waitForTaskRunForTests();
 
 		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
 		assert.match(workerPrompt, new RegExp(finalOutputDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -981,6 +984,7 @@ test("/task run preserves natural language input with spaces and shows pass arti
 		});
 
 		await commands.get("task").handler("run runner-file Hello world", ctx);
+		await waitForTaskRunForTests();
 
 		const message = notifications.at(-1)?.message ?? "";
 		assert.match(message, /PASS/);
@@ -1045,6 +1049,7 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 		});
 
 		await commands.get("task").handler("run runner-progress", ctx);
+		await waitForTaskRunForTests();
 
 		const progress = widgetCalls
 			.map((call) => call.lines?.join("\n") ?? "")
@@ -1111,9 +1116,14 @@ test("/task run can be stopped and records user notes while worker is running", 
 
 		const runPromise = commands.get("task").handler("run runner-stop", ctx);
 		await started;
+		assert.equal(await Promise.race([
+			runPromise.then(() => "resolved"),
+			new Promise((resolve) => setTimeout(() => resolve("timeout"), 5)),
+		]), "resolved");
 		const inputResult = await handlers.get("input")![0]({ source: "interactive", text: "它正在走错路径" }, ctx);
 		const stopResult = await handlers.get("input")![0]({ source: "interactive", text: "/task stop" }, ctx);
 		await runPromise;
+		await waitForTaskRunForTests();
 
 		assert.equal(inputResult?.handled, true);
 		assert.equal(stopResult?.handled, true);
@@ -1168,6 +1178,7 @@ test("/task run preauthorizes mentioned protected tools for the worker", async (
 		});
 
 		await commands.get("task").handler("run runner-tools", ctx);
+		await waitForTaskRunForTests();
 
 		assert.equal(confirmations.length, 1);
 		assert.match(confirmations[0].body ?? "", /chrome_cdp/);
@@ -1214,6 +1225,7 @@ test("/task run does not preauthorize tools mentioned only in contract artifact 
 		});
 
 		await commands.get("task").handler("run runner-artifact-tool-name", ctx);
+		await waitForTaskRunForTests();
 
 		assert.equal(confirmCalled, false);
 		assert.deepEqual(receivedEnv, {});
@@ -1279,6 +1291,7 @@ test("/task run displays small markdown artifact content in the PASS report", as
 		});
 
 		await commands.get("task").handler("run runner-md", ctx);
+		await waitForTaskRunForTests();
 
 		const message = notifications.at(-1)?.message ?? "";
 		assert.match(message, /任务: runner md/);
@@ -1316,6 +1329,7 @@ test("/task run asks for missing input when no raw text is provided", async () =
 		});
 
 		await commands.get("task").handler("run runner-b64", ctx);
+		await waitForTaskRunForTests();
 		const loaded = await loadTaskbook(cwd, "runner-b64");
 
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
@@ -1359,6 +1373,7 @@ test("/task run sends verify failures to checker and records fail on abort", asy
 		});
 
 		await commands.get("task").handler("run runner-fail", ctx);
+		await waitForTaskRunForTests();
 		const loaded = await loadTaskbook(cwd, "runner-fail");
 
 		assert.ok(notifications.some((item) => /checker 判 abort/.test(item.message)));
@@ -1407,6 +1422,7 @@ test("/task run failure offers optional taskbook repair", async () => {
 		});
 
 		await commands.get("task").handler("run runner-repair", ctx);
+		await waitForTaskRunForTests();
 		assert.match(notifications.at(-1)?.message ?? "", /用 \/task 选择修正/);
 
 		ctx.ui.select = (title: string, options: string[]) => {

@@ -4,7 +4,7 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path";
 import {
 	extractArtifactsFromToolInput,
-	isSafeCommand,
+	isPlanningAllowedCommand,
 	summarizeToolArgs,
 } from "./task-utils.ts";
 import { extractRequirementsSpec, formatRequirementsSpec } from "./task-spec.ts";
@@ -1428,10 +1428,10 @@ export function registerTask(pi: ExtensionAPI): void {
 		}
 		if (state.phase !== "planning" || event.toolName !== "bash") return undefined;
 		const command = event.input.command as string;
-		if (isSafeCommand(command)) return undefined;
+		if (isPlanningAllowedCommand(command)) return undefined;
 		return {
 			block: true,
-			reason: `Task planning: command blocked (not read-only). Command: ${command}`,
+			reason: `Task planning: command blocked (destructive or side-effecting). Command: ${command}`,
 		};
 	});
 

@@ -262,7 +262,7 @@ test("task pending transition opens the next-step menu in TUI", async () => {
 	assert.deepEqual(activeTools.at(-1), ["read", "bash", "edit", "write", "task_complete"]);
 });
 
-test("task planning blocks non-readonly bash and removes plan context when inactive", async () => {
+test("task planning blocks side-effecting bash and removes plan context when inactive", async () => {
 	const { pi, commands, handlers } = makePi();
 	const { ctx } = makeCtx();
 	registerTask(pi as any);
@@ -273,7 +273,7 @@ test("task planning blocks non-readonly bash and removes plan context when inact
 	const blocked = await handlers.get("tool_call")![0]({ toolName: "bash", input: { command: "npm install" } }, ctx);
 	assert.deepEqual(blocked, {
 		block: true,
-		reason: "Task planning: command blocked (not read-only). Command: npm install",
+		reason: "Task planning: command blocked (destructive or side-effecting). Command: npm install",
 	});
 
 	await commands.get("task").handler("exit", ctx);
@@ -282,12 +282,30 @@ test("task planning blocks non-readonly bash and removes plan context when inact
 	assert.deepEqual(filtered.messages, []);
 });
 
+test("task planning allows exploratory bash under C-3", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx);
+	for (const cmd of ["node build.js", "npm test", "npm run lint", "python parse.py", "node -e \"console.log(1)\""]) {
+		const result = await handlers.get("tool_call")![0]({ toolName: "bash", input: { command: cmd } }, ctx);
+		assert.equal(result, undefined, `${cmd} should be allowed in planning under C-3`);
+	}
+	for (const cmd of ["npm install", "echo x > out.txt", "git commit -m x"]) {
+		const result = await handlers.get("tool_call")![0]({ toolName: "bash", input: { command: cmd } }, ctx);
+		assert.equal(result?.block, true, `${cmd} should be blocked in planning under C-3`);
+	}
+
+	await commands.get("task").handler("exit", ctx);
+});
+
 test("TASK_ALIGN_PROMPT requires questionnaire extras and machine-checkable acceptance", () => {
 	assert.match(TASK_ALIGN_PROMPT, /questionnaire/);
 	assert.match(TASK_ALIGN_PROMPT, /id="extras"/);
 	assert.match(TASK_ALIGN_PROMPT, /你还有什么要补充的吗\?\(没有可留空\)/);
 	assert.match(TASK_ALIGN_PROMPT, /machine-checkable/);
-	assert.match(TASK_ALIGN_PROMPT, /进入 executing 阶段探路/);
+	assert.match(TASK_ALIGN_PROMPT, /进入 executing 阶段/);
 });
 
 test("/task execute enforces C-2 and switches to non-subagent tools", async () => {

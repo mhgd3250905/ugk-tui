@@ -54,8 +54,8 @@
 
 ### task 固定任务委托系统
 - `/task` 打开 task 菜单(中文,零命令记忆);`/task list|show|new|run|edit|rename|save|delete|toggle|exit`
-- 四阶段创造:`planning`(只读对齐 RequirementsSpec)→ `executing`(task-creator 亲手做一遍,放开环境工具但禁 subagent/run_task)→ `reviewing`(产 skill+verify+contract)→ `landed`(taskbook 就绪)
-- **planning 保持只读是有意为之**(spec 2.1/4.1 节),不放开写权限;planner 若需动手探路判断可行性,prompt 会引导先用 questionnaire 确认进入 executing 阶段(不污染 planning 的对齐 context)。要改成放开全部工具需用户拍板并同步改 spec。
+- 四阶段创造:`planning`(探索性只读对齐 RequirementsSpec)→ `executing`(task-creator 亲手做一遍,放开环境工具但禁 subagent/run_task)→ `reviewing`(产 skill+verify+contract)→ `landed`(taskbook 就绪)
+- **planning 探索性 bash(C-3)**:write/edit 禁用,但 bash 可跑脚本/测试/构建验证方案可行性(`node`/`npm test`/`python` 等),只拦留持久副作用的命令(写盘、`npm install`、git 变更、重定向 `>`)。判定走 `isPlanningAllowedCommand`(`task-utils.ts`),非破坏即放行。planner 若需真正产出/改代码,仍由 prompt 引导先用 questionnaire 确认进入 executing 阶段(不污染 planning 的对齐 context)。reviewing 阶段保持只读不动。要改成放开全部工具(C-2)需用户拍板并同步改 spec 2.1/4.1。
 - `/task rename <old> <new>` 改 taskbook 名(目录 + `taskbook.json:name` 一起搬,保留 `runs[]`/`createdAt`);仅原 scope 内改名,目标名已存在或同名则拒绝。
 - 复用流程:`/task run <name> <自然语言>` → dispatcher 翻译 input(走 `ctx.model`,可选 `contract.dispatcherModel` 覆盖)→ worker 子进程 spawn 执行 → verify.mjs 机器验收 → PASS/FAIL
 - taskbook = `spec.json` + `skill.md` + `verify.mjs` + `contract.json`(artifacts/runtimeInput/requiredTools),user scope 存 `~/.pi/agent/tasks/`,project scope 存 `<cwd>/.tasks/`

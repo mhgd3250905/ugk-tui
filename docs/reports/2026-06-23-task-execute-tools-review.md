@@ -134,7 +134,7 @@ if (state.phase === "executing") {
 
 2. **改动 5 的双保险必要**性:`tool_call` block subagent 是否冗余?(我的判断:不冗余,因为放开工具集后 subagent 可能仍在 active 集;但 reviewer 可能有不同看法)
 
-3. **planning 阶段没动**:`TASK_PLANNING_TOOLS`(只读集)+ bash 命令白名单**保持不变**。这是有意为之(只读探索语义,spec 2.1/4.1 节)。确认这个边界合理。
+3. **planning 阶段当时没动**:`TASK_PLANNING_TOOLS`(只读集)+ bash 命令白名单在本轮保持不变。2026-06-24 已部分调整为探索性 bash(C-3),write/edit 仍禁。
 
 4. **worker 路径没动**:`agents/worker.md`(复用阶段 spawn 的子进程)走独立的 `--tools` CLI flag 机制,不经过 main session 的 setActiveTools。本次不改。确认范围合理。
 
@@ -142,7 +142,7 @@ if (state.phase === "executing") {
 
 ## 五、未做的事(显式声明,避免范围蔓延)
 
-- **没改 planning/reviewing 工具集**(只读探索,有意为之)
+- **planning 已部分调整**:planning 放开探索性 bash(C-3,详见 spec 注记),reviewing 仍只读
 - **没改 `agents/worker.md`**(路径独立,已无 tools 字段)
 - **没改 `restoreToolsSnapshot` 机制**(planning/reviewing 仍需要)
 - **没碰 Judge 代码**、smoke-tui、8 个旧 untracked docs

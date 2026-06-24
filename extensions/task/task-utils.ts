@@ -53,6 +53,53 @@ const DESTRUCTIVE_PATTERNS = [
 	/\bcurl\b.*(^|\s)(-d|--data|--data-raw|--data-binary|-F|--form|-X|--request)(\s|=|$)/i,
 ];
 
+const PLANNING_DESTRUCTIVE_PATTERNS = [
+	/\brm\b/i,
+	/\brmdir\b/i,
+	/\bmv\b/i,
+	/\bcp\b/i,
+	/\bmkdir\b/i,
+	/\btouch\b/i,
+	/\bchmod\b/i,
+	/\bchown\b/i,
+	/\bchgrp\b/i,
+	/\bln\b/i,
+	/\btee\b/i,
+	/\btruncate\b/i,
+	/\bdd\b/i,
+	/\bshred\b/i,
+	/(^|[^<])>(?!>)/,
+	/>>/,
+	/\bunzip\b/i,
+	/\btar\s+.*(-x|--extract)/i,
+	/\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
+	/\byarn\s+(add|remove|install|publish)/i,
+	/\bpnpm\s+(add|remove|install|publish)/i,
+	/\bpip\s*(install|uninstall)/i,
+	/\bpip3\s*(install|uninstall)/i,
+	/\buv\s+(pip\s+)?install/i,
+	/\bapt(-get)?\s+(install|remove|purge|update|upgrade)/i,
+	/\bbrew\s+(install|uninstall|upgrade)/i,
+	/\bcargo\s+(install|publish)/i,
+	/\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|switch|stash|cherry-pick|revert|tag|init|clone|clean|restore)/i,
+	/\bgit\s+branch\s+-[dD]/i,
+	/\bgit\s+worktree\s+(add|remove)/i,
+	/\bsudo\b/i,
+	/\bsu\b/i,
+	/\bkill\b/i,
+	/\bpkill\b/i,
+	/\bkillall\b/i,
+	/\breboot\b/i,
+	/\bshutdown\b/i,
+	/\bpoweroff\b/i,
+	/\bsystemctl\s+(start|stop|restart|enable|disable)/i,
+	/\bservice\s+\S+\s+(start|stop|restart)/i,
+	/\b(vim?|nano|emacs|code|subl)\b/i,
+	/\bcurl\b.*(^|\s)(-o|--output|-O|--remote-name|--upload-file|-T)(\s|=|$)/i,
+	/\bwget\b/i,
+	/\bcurl\b.*(^|\s)(-d|--data|--data-raw|--data-binary|-F|--form|-X|--request)(\s|=|$)/i,
+];
+
 const SAFE_PATTERNS = [
 	/^\s*cat\b/,
 	/^\s*head\b/,
@@ -164,4 +211,8 @@ export function isSafeCommand(command: string): boolean {
 	const isDestructive = DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command));
 	const isSafe = SAFE_PATTERNS.some((pattern) => pattern.test(command));
 	return !isDestructive && isSafe;
+}
+
+export function isPlanningAllowedCommand(command: string): boolean {
+	return !PLANNING_DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command));
 }

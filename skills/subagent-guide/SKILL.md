@@ -1,6 +1,6 @@
 ---
 name: subagent-guide
-description: 子代理(subagent)委派指南。把任务交给隔离 context 的专用 agent 处理,主对话只收摘要。涵盖 @mention 手动触发、single/parallel/chain 三种模式、自定义 agent、安装预设 agent。当用户提到委派、subagent、子代理、并行调查、代码审查、@scout、@reviewer、隔离 context、不改主对话等场景时使用本 skill。
+description: 子代理(subagent)委派指南。把任务交给隔离 context 的专用 agent 处理,主对话只收摘要。涵盖 @mention 手动触发、single/parallel/chain 三种模式、自定义 agent、安装预设 agent。当用户提到委派、subagent、子代理、并行调查、@scout、@reviewer、隔离 context、不改主对话，或明确要求用 reviewer/隔离上下文做代码审查时使用本 skill；普通代码审查不必触发。
 ---
 
 # 子代理(subagent)委派指南
@@ -135,3 +135,4 @@ model: deepseek/deepseek-v4-flash
 5. **@mention 名字要对**:必须匹配已安装的 agent 名(见 `~/.pi/agent/agents/`),否则 @mention 不生效(会当普通文本)。
 6. **未安装提示**:调 subagent 报 "Unknown agent" 或可用列表为空 → 引导用户跑上面的「安装预设 agent」步骤。
 7. **单层**:subagent 不能再开 subagent(业界一致,Claude Code 也是单层)。
+8. **普通 review 不强行委派**:只有用户要求 `@reviewer`、隔离 context、并行审查或不污染主对话时,才用本 skill 处理代码审查。

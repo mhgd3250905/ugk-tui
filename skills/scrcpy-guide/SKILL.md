@@ -1,6 +1,6 @@
 ---
 name: scrcpy-guide
-description: scrcpy 安卓投屏指南。涵盖检测/安装(winget)、启动投屏、录屏、常用参数、多设备选择、停止。环境为 Windows + Git Bash,adb 位于 E:\platform-tools。当用户提到投屏、scrcpy、手机画面、镜像屏幕、录屏手机、显示设备屏幕、scrcpy 安装等场景时使用本 skill。
+description: scrcpy 安卓投屏指南。涵盖检测/安装(winget)、启动投屏、录屏、常用参数、多设备选择、停止。环境为 Windows + Git Bash,adb 位于 E:\platform-tools。当用户提到投屏、scrcpy、手机画面、镜像屏幕、录屏手机、显示设备屏幕、scrcpy 安装等场景时使用本 skill；优先用 scrcpy 工具的 start/stop/status/version，bash 手动命令仅作兜底。
 ---
 
 # scrcpy 安卓投屏指南

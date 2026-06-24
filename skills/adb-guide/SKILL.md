@@ -1,6 +1,6 @@
 ---
 name: adb-guide
-description: Android adb 操作大全。涵盖连接(USB/无线)、应用安装管理、文件传输、输入控制、截屏录屏、shell 命令、设备信息、logcat 日志、端口转发/反向、性能分析、fastboot/root、备份与故障排查。用户在 Windows + Git Bash 环境,adb 位于 E:\platform-tools。当用户提到 adb、连接安卓、安装 APK、抓日志、投屏调试、操控手机、性能分析、fastboot 刷机等任何 Android 设备操作时使用本 skill。
+description: Android adb 操作大全。涵盖连接(USB/无线)、应用安装管理、文件传输、输入控制、截屏/临时录屏、shell 命令、设备信息、logcat 日志、端口转发/反向、性能分析、fastboot/root、备份与故障排查。用户在 Windows + Git Bash 环境,adb 位于 E:\platform-tools。当用户提到 adb、连接安卓、安装 APK、抓日志、操控手机、性能分析、fastboot 刷机等 adb 调试场景时使用本 skill；实时投屏、手机画面镜像、scrcpy 录屏优先使用 scrcpy-guide。
 ---
 
 # Android adb 操作大全
@@ -143,3 +143,4 @@ adb shell netstat -tlnp 2>/dev/null | head    # 监听端口
 4. **长输出截断**:`logcat`、`dumpsys`、`pm list` 输出极长,务必配合 `grep`/`head`/`-d`(logcat 非实时)/定向到文件。
 5. **中文输入**:`adb shell input text` 不支持中文,用 `references/files-input-screen.md` 里的 ADBKeyBoard 或剪贴板方案。
 6. **查不到包名时**:让用户在手机上打开该应用,然后 `adb shell dumpsys activity activities | grep mResumedActivity` 或 `adb shell dumpsys window | grep mCurrentFocus` 拿到当前前台包名。
+7. **投屏让给 scrcpy**:实时投屏、镜像手机画面、长时间录屏优先 `scrcpy-guide` 和 `scrcpy` 工具；adb 截屏/录屏只用于临时诊断。

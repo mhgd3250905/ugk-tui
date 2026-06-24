@@ -1,6 +1,6 @@
 ---
 name: cron-guide
-description: 定时任务(cron)指南。常驻 cron 服务 + ugk 内 cron 工具增删改查。到点自动起 ugk 子进程跑 agent 任务,结果写文件。涵盖服务启动、crontab 表达式、任务管理、开机自启、安全说明。当用户提到定时、cron、定时任务、每天/每小时跑、自动化、计划任务、后台执行等场景时使用本 skill。
+description: 定时任务(cron)指南。常驻 cron 服务 + ugk 内 cron 工具增删改查。到点自动起 ugk 子进程跑 agent 任务,结果写文件。涵盖服务启动、crontab 表达式、任务管理、开机自启、安全说明。当用户提到定时、cron、定时任务、每天/每小时跑、周期执行、计划任务、到点自动运行或 cron 服务时使用本 skill。
 ---
 
 # 定时任务(cron)指南

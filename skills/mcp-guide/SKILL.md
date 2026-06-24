@@ -145,6 +145,7 @@ after restoring the server config.
 ## Troubleshooting
 
 - Server not connected in `ugk --print`: project/local scope is blocked without UI. Move trusted config to user scope or use interactive TUI.
+- Server missing entirely from `/mcp status`: project/local config is loaded from the current workspace cwd. Confirm the UGK session cwd is the directory containing `.mcp.json` or `.mcp.local.json`; use user scope for servers that should work across projects.
 - Env error in `/mcp status`: define the missing environment variable or move local values into `.mcp.local.json`.
 - Tool name is unexpected: check provider-safe normalization and duplicate suffix warnings.
 - Tool call blocked: check `/mcp status`, then choose `/mcp ask`, `/mcp on`, or approve the session prompt.

@@ -188,7 +188,9 @@ UGK_CLEAR_STARTUP=0 ugk
 /ugk-ui status
 ```
 
-随包还提供 `themes/ugk-geek.json`,主色是低刺激荧光绿。首次启动 `ugk` 时会在 `~/.pi/agent/settings.json` 缺少 `theme` 字段时自动补上 `"theme": "ugk-geek"`;如果用户已经显式设置过其他主题,ugk 不会覆盖。也可在 pi `/settings` 里手动选择 `ugk-geek`,或作为独立主题资源接入。
+随包还提供 `themes/` 主题资源。默认主题是 `ugk-geek`(低刺激荧光绿):首次启动 `ugk` 时会在 `~/.pi/agent/settings.json` 缺少 `theme` 字段时自动补上 `"theme": "ugk-geek"`;如果用户已经显式设置过其他主题,ugk 不会覆盖。
+
+此外还内置 16 个社区主题(改编自 [hasit/pi-community-themes](https://github.com/hasit/pi-community-themes),MIT 协议,见 `themes/NOTICE.md`):`atom-one-dark`、`atom-one-light`、`catppuccin-{frappe,latte,macchiato,mocha}`、`dracula`、`gruvbox-{dark,light}-{hard,medium,soft}`、`nord`、`solarized-{dark,light}`。可在 pi `/settings` 里手动选择,或作为独立主题资源接入。
 
 ### slash 命令
 
@@ -352,8 +354,7 @@ ugk-core/
 │   ├── scout.md planner.md reviewer.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
 │   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/skill-creator/docx
-├── themes/
-│   └── ugk-geek.json         # ugk 极客绿主题
+├── themes/                   # ugk-geek(默认)+ 16 个社区主题(atom/catppuccin/dracula/gruvbox/nord/solarized),见 NOTICE.md
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)
 └── tests/                    # Node test runner 逻辑覆盖
 ```

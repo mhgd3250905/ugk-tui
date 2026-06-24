@@ -28,9 +28,11 @@ import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, saveT
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
+import { buildTaskbookPrompt } from "./task-registry.ts";
 import { dispatchTaskRunReviewer } from "./task-run-reviewer.ts";
 import { runVerify } from "./task-verify.ts";
 import { dispatchWorker, type TaskWorkerResult } from "./task-worker.ts";
+import { mapWithConcurrencyLimit } from "../subagent-runtime.ts";
 
 const TASK_STATE_TYPE = "task-state";
 const TASK_PLAN_CONTEXT_TYPE = "task-plan-context";
@@ -39,6 +41,20 @@ const TASK_PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnair
 const TASK_NORMAL_TOOLS = ["read", "bash", "edit", "write", "subagent"];
 const PREVIEW_TEXT_EXTENSIONS = new Set([".md", ".txt", ".json", ".csv", ".tsv", ".html", ".htm"]);
 const MAX_ARTIFACT_PREVIEW_CHARS = 12000;
+const SUBTASK_MAX = 8;
+const SUBTASK_CONCURRENCY = 4;
+
+type SubtaskRequest = { name: string; input: string };
+type SubtaskResult = {
+	name: string;
+	status: "pass" | "fail";
+	outputDir: string;
+	artifacts: string[];
+	verifyFailures: Awaited<ReturnType<typeof runVerify>>["failures"];
+	workerSummary: string;
+	duration: number;
+	attempts: number;
+};
 
 type TaskRunFailure = {
 	taskbookName: string;
@@ -325,18 +341,21 @@ function mentionsTool(text: string, tool: string): boolean {
 	return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`).test(text);
 }
 
-function resolveProtectedTaskTools(loaded: LoadedTaskbook, activeTools: string[]): { chromeCdp: boolean; mcpTools: string[] } {
-	const declared = new Set(contractToolNames(loaded.contract));
-	const uses = (tool: string) => declared.has(tool) || mentionsTool(loaded.skill, tool);
+function resolveProtectedTaskTools(loaded: LoadedTaskbook | LoadedTaskbook[], activeTools: string[]): { chromeCdp: boolean; mcpTools: string[] } {
+	const taskbooks = Array.isArray(loaded) ? loaded : [loaded];
+	const uses = (tool: string) => taskbooks.some((item) => {
+		const declared = new Set(contractToolNames(item.contract));
+		return declared.has(tool) || mentionsTool(item.skill, tool);
+	});
 	return {
 		chromeCdp: activeTools.includes("chrome_cdp") && uses("chrome_cdp"),
 		mcpTools: activeTools.filter((tool) => tool.includes("__") && uses(tool)),
 	};
 }
 
-async function resolveTaskWorkerEnv(
+export async function resolveTaskWorkerEnv(
 	ctx: any,
-	loaded: LoadedTaskbook,
+	loaded: LoadedTaskbook | LoadedTaskbook[],
 	activeTools: string[],
 ): Promise<Record<string, string | undefined> | null> {
 	const protectedTools = resolveProtectedTaskTools(loaded, activeTools);
@@ -345,10 +364,11 @@ async function resolveTaskWorkerEnv(
 		...protectedTools.mcpTools,
 	];
 	if (names.length === 0) return {};
+	const taskbookNames = (Array.isArray(loaded) ? loaded : [loaded]).map((item) => item.taskbook.name).join(", ");
 	const allowed = await ctx.ui?.confirm?.(
 		"允许本次 task 使用受保护工具?",
 		[
-			`taskbook "${loaded.taskbook.name}" 声明会使用: ${names.join(", ")}`,
+			`taskbook "${taskbookNames}" 声明会使用: ${names.join(", ")}`,
 			"",
 			"授权只传给本次 worker 子进程,不改变 /cdp 或 /mcp 的全局模式。",
 		].join("\n"),
@@ -360,8 +380,8 @@ async function resolveTaskWorkerEnv(
 	};
 }
 
-async function resolveRuntimeInput(ctx: any, skill: string, contract: unknown, rawInput: string): Promise<unknown> {
-	return await resolveRuntimeInputFromText(ctx, skill, contract, rawInput);
+async function resolveRuntimeInput(ctx: any, skill: string, contract: unknown, rawInput: string, headless = false): Promise<unknown> {
+	return await resolveRuntimeInputFromText(ctx, skill, contract, rawInput, taskbookModel(contract, "dispatcherModel"), headless);
 }
 
 async function resolveSelfCheckInput(ctx: any, contract: unknown): Promise<unknown> {
@@ -442,6 +462,20 @@ async function formatArtifacts(contract: unknown, outputDir: string): Promise<st
 	const lines = ["## 产物"];
 	for (const name of actualNames) lines.push(...await formatArtifact(outputDir, name));
 	return lines;
+}
+
+async function collectArtifactPaths(contract: unknown, outputDir: string): Promise<string[]> {
+	const names = artifactNames(contract);
+	const actualNames = names.length > 0
+		? names
+		: (await readdir(outputDir).catch(() => []));
+	return actualNames.map((name) => path.resolve(outputDir, name));
+}
+
+function taskbookModel(contract: unknown, field: "dispatcherModel" | "workerModel"): string | undefined {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return undefined;
+	const value = (contract as Record<string, unknown>)[field];
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function formatWorkerSummary(summary: string | undefined): string {
@@ -625,6 +659,115 @@ function taskCompleteSummaryFromEvent(event: any): string {
 	return candidates.find((value) => typeof value === "string") ?? "";
 }
 
+async function loadSubtask(cwd: string, name: string): Promise<LoadedTaskbook> {
+	const loaded = await loadTaskbook(cwd, name);
+	if (loaded) return loaded;
+	const available = (await listTaskbooks(cwd)).map((item) => item.name).join(", ") || "(none)";
+	throw new Error(`taskbook "${name}" 不存在。可用: ${available}`);
+}
+
+async function executeSubtask(
+	ctx: any,
+	request: SubtaskRequest,
+	loaded: LoadedTaskbook,
+	workerEnv: Record<string, string | undefined>,
+	signal?: AbortSignal,
+): Promise<SubtaskResult> {
+	const startedAt = Date.now();
+	const runDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${request.name}-${startedAt}-${Math.random().toString(36).slice(2, 8)}`);
+	const outputDir = path.join(runDir, "output");
+	await mkdir(outputDir, { recursive: true });
+	const runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, request.input, true);
+	let workerResult: TaskWorkerResult;
+	let verifyResult: Awaited<ReturnType<typeof runVerify>>;
+	try {
+		workerResult = await dispatchWorker({
+			skill: loaded.skill,
+			contract: loaded.contract,
+			runtimeInput,
+			outputDir,
+		}, {
+			cwd: cwdOf(ctx),
+			env: workerEnv,
+			signal,
+		});
+		verifyResult = await runVerify({
+			verifyPath: path.join(loaded.dir, "verify.mjs"),
+			outputDir,
+			input: runtimeInput,
+		});
+	} catch (error) {
+		return {
+			name: request.name,
+			status: "fail",
+			outputDir,
+			artifacts: [],
+			verifyFailures: [],
+			workerSummary: `执行异常: ${error instanceof Error ? error.message : String(error)}`,
+			duration: (Date.now() - startedAt) / 1000,
+			attempts: 1,
+		};
+	}
+	const duration = (Date.now() - startedAt) / 1000;
+	const status = workerResult.ok && verifyResult.passed ? "pass" : "fail";
+	await appendRunToTaskbook(loaded.scope, cwdOf(ctx), request.name, {
+		timestamp: new Date().toISOString(),
+		status,
+		input: runtimeInput,
+		exitCode: status === "pass" ? 0 : (verifyResult.exitCode ?? 1),
+		verifyFailures: verifyResult.failures,
+		duration,
+	});
+	return {
+		name: request.name,
+		status,
+		outputDir,
+		artifacts: await collectArtifactPaths(loaded.contract, outputDir),
+		verifyFailures: verifyResult.failures,
+		workerSummary: workerResult.ok ? workerResult.summary : (workerResult.errorMessage ?? "worker failed"),
+		duration,
+		attempts: 1,
+	};
+}
+
+function parseRunTaskParams(params: any): { mode: "single" | "parallel"; tasks: SubtaskRequest[] } {
+	const hasSingle = typeof params?.name === "string" || typeof params?.input === "string";
+	const hasParallel = Array.isArray(params?.tasks);
+	if (hasSingle === hasParallel) throw new Error("run_task 需要提供 {name,input} 或 {tasks:[...]},二选一。");
+	if (hasSingle) {
+		if (typeof params.name !== "string" || !params.name.trim() || typeof params.input !== "string") {
+			throw new Error("single 模式需要 name 和 input。");
+		}
+		return { mode: "single", tasks: [{ name: params.name.trim(), input: params.input }] };
+	}
+	const tasks = params.tasks;
+	if (tasks.length === 0 || tasks.length > SUBTASK_MAX) throw new Error(`parallel 模式 tasks 数量必须是 1-${SUBTASK_MAX}。`);
+	return {
+		mode: "parallel",
+		tasks: tasks.map((task: any) => {
+			if (typeof task?.name !== "string" || !task.name.trim() || typeof task?.input !== "string") {
+				throw new Error("parallel 模式每项都需要 name 和 input。");
+			}
+			return { name: task.name.trim(), input: task.input };
+		}),
+	};
+}
+
+function formatSubtaskToolText(mode: "single" | "parallel", results: SubtaskResult[]): string {
+	const passed = results.filter((result) => result.status === "pass").length;
+	const header = mode === "parallel" ? `${passed}/${results.length} succeeded` : `run_task ${results[0]?.status.toUpperCase() ?? "FAIL"}`;
+	return [
+		header,
+		...results.map((result) => [
+			`- ${result.name}: ${result.status.toUpperCase()}`,
+			`  outputDir: ${result.outputDir}`,
+			result.artifacts.length > 0 ? `  artifacts: ${result.artifacts.join(", ")}` : "",
+			result.verifyFailures.length > 0 ? `  verifyFailures: ${JSON.stringify(result.verifyFailures)}` : "",
+			result.workerSummary ? `  workerSummary: ${result.workerSummary}` : "",
+		].filter(Boolean).join("\n")),
+	].join("\n");
+}
+
 async function handleTaskRun(
 	ctx: any,
 	name: string | undefined,
@@ -798,6 +941,11 @@ async function handleTaskDelete(ctx: any, name: string | undefined, tokens: stri
 export function registerTask(pi: ExtensionAPI): void {
 	let state = createTaskState();
 	let restoreToolsSnapshot: string[] | undefined;
+	let cachedTaskbookPrompt = "";
+
+	function getActiveTaskTools(): string[] {
+		return typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
+	}
 
 	function persistState(): void {
 		pi.appendEntry(TASK_STATE_TYPE, state);
@@ -995,6 +1143,45 @@ export function registerTask(pi: ExtensionAPI): void {
 		ctx.ui.notify(`taskbook "${finalName.trim()}" 已就绪。以后用 \`/task run ${finalName.trim()} <一句话>\` 复用。`, "info");
 	}
 
+	pi.registerTool?.({
+		name: "run_task",
+		label: "Run Task",
+		description: [
+			"复用一个已存在、已通过机器验收的固定任务(taskbook)来执行一件确定性的工作。",
+			"当任务明确匹配 system prompt 可用 task 清单中的某项时使用;需要探索或没有匹配 taskbook 时用 subagent。",
+			"参数: single 模式提供 name 和 input; parallel 模式提供 tasks: [{name,input}]。",
+			"返回每个 task 的 PASS/FAIL(机器验收)、产物路径和 outputDir。整体成败由你判断。",
+		].join("\n"),
+		parameters: Type.Object({
+			name: Type.Optional(Type.String({ description: "taskbook 名(single 模式)" })),
+			input: Type.Optional(Type.String({ description: "一句人话输入(single 模式)" })),
+			tasks: Type.Optional(Type.Array(Type.Object({
+				name: Type.String({ description: "taskbook 名" }),
+				input: Type.String({ description: "一句人话输入" }),
+			}), { description: "parallel 模式任务数组" })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			try {
+				const parsed = parseRunTaskParams(params);
+				const loaded = await Promise.all(parsed.tasks.map((task) => loadSubtask(cwdOf(ctx), task.name)));
+				const workerEnv = await resolveTaskWorkerEnv(ctx, loaded, getActiveTaskTools());
+				if (workerEnv === null) throw new Error("run_task 需要受保护工具授权,但未获授权。");
+				const results = await mapWithConcurrencyLimit(parsed.tasks, SUBTASK_CONCURRENCY, async (task, index) =>
+					await executeSubtask(ctx, task, loaded[index], workerEnv, signal));
+				return {
+					content: [{ type: "text", text: formatSubtaskToolText(parsed.mode, results) }],
+					details: { mode: parsed.mode, results },
+				};
+			} catch (error) {
+				return {
+					content: [{ type: "text", text: (error as Error).message }],
+					details: { mode: "single", results: [] },
+					isError: true,
+				};
+			}
+		},
+	});
+
 	pi.registerTool?.(taskCompleteTool);
 
 	async function handleTaskCommand(args: string, ctx: any): Promise<void> {
@@ -1124,6 +1311,7 @@ export function registerTask(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx));
 		const entries = ctx.sessionManager?.getEntries?.() ?? [];
 		for (const entry of [...entries].reverse()) {
 			if (entry.customType !== TASK_STATE_TYPE) continue;
@@ -1147,23 +1335,22 @@ export function registerTask(pi: ExtensionAPI): void {
 	});
 
 	pi.on("before_agent_start", async () => {
+		const result: any = {};
 		if (state.phase === "reviewing") {
-			return {
-				message: {
-					customType: TASK_REVIEW_CONTEXT_TYPE,
-					content: buildTaskReviewPrompt(state.spec, state.summary),
-					display: false,
-				},
+			result.message = {
+				customType: TASK_REVIEW_CONTEXT_TYPE,
+				content: buildTaskReviewPrompt(state.spec, state.summary),
+				display: false,
 			};
-		}
-		if (state.phase !== "planning") return undefined;
-		return {
-			message: {
+		} else if (state.phase === "planning") {
+			result.message = {
 				customType: TASK_PLAN_CONTEXT_TYPE,
 				content: TASK_ALIGN_PROMPT,
 				display: false,
-			},
-		};
+			};
+		}
+		if (cachedTaskbookPrompt) result.systemPrompt = cachedTaskbookPrompt;
+		return Object.keys(result).length > 0 ? result : undefined;
 	});
 
 	pi.on("context", async (event) => {
@@ -1184,6 +1371,12 @@ export function registerTask(pi: ExtensionAPI): void {
 				return {
 					block: true,
 					reason: "Task executing 阶段禁止调用 subagent(task-creator 必须亲手做)。",
+				};
+			}
+			if (event.toolName === "run_task") {
+				return {
+					block: true,
+					reason: "Task executing 阶段禁止调用 run_task(task 不可嵌套)。",
 				};
 			}
 			state = recordExecuteProcessEntry(state, {

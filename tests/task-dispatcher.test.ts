@@ -72,3 +72,32 @@ test("task dispatcher uses the current session model", async () => {
 		faux.unregister();
 	}
 });
+
+test("task dispatcher uses contract dispatcherModel override when available", async () => {
+	const faux = registerFauxProvider();
+	faux.setResponses([fauxAssistantMessage("```json\n{\"text\":\"override\"}\n```")]);
+	const model = faux.getModel();
+	let findArgs: unknown[] | undefined;
+	let authModel;
+	try {
+		const value = await resolveRuntimeInputFromText({
+			model: { id: "fallback" },
+			modelRegistry: {
+				find(provider: string, modelId: string) {
+					findArgs = [provider, modelId];
+					return model;
+				},
+				async getApiKeyAndHeaders(candidate: unknown) {
+					authModel = candidate;
+					return { ok: true, apiKey: "sk-test", headers: {} };
+				},
+			},
+		}, "# Skill", contract, "Hello 世界", "deepseek-v4-flash");
+
+		assert.deepEqual(findArgs, ["deepseek", "deepseek-v4-flash"]);
+		assert.equal(authModel, model);
+		assert.deepEqual(value, { text: "override" });
+	} finally {
+		faux.unregister();
+	}
+});

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 
 const skillCreatorPath = new URL("../skills/skill-creator/SKILL.md", import.meta.url);
 const skillCreatorLicensePath = new URL("../skills/skill-creator/LICENSE.txt", import.meta.url);
@@ -13,6 +14,7 @@ const docxLicensePath = new URL("../skills/docx/LICENSE.txt", import.meta.url);
 const mcpGuidePath = new URL("../skills/mcp-guide/SKILL.md", import.meta.url);
 const mcpConfigureScriptPath = new URL("../skills/mcp-guide/scripts/configure_mcp.py", import.meta.url);
 const bashGuidePath = new URL("../skills/bash-guide/SKILL.md", import.meta.url);
+const chromeCdpGuidePath = new URL("../skills/chrome-cdp-guide/SKILL.md", import.meta.url);
 
 test("bundles Anthropic skill creator as a preinstalled skill", () => {
 	const skill = fs.readFileSync(skillCreatorPath, "utf8");
@@ -53,6 +55,24 @@ test("bundles Bash guide as a preinstalled skill", () => {
 	assert.match(skill, /\/doctor/);
 	assert.match(skill, /subagent/i);
 	assert.match(skill, /不要.*反复.*which bash|avoid repeated .*which bash/i);
+});
+
+test("bundles Chrome CDP guide with broad tool-first trigger guidance", () => {
+	const skill = fs.readFileSync(chromeCdpGuidePath, "utf8");
+
+	// Run-time frontmatter parse (same parser pi uses to load the skill).
+	// Guards against a bare colon in `description` breaking YAML at load time.
+	const { frontmatter } = parseFrontmatter(skill);
+	assert.equal(frontmatter.name, "chrome-cdp-guide");
+	assert.equal(typeof frontmatter.description, "string");
+	assert.ok((frontmatter.description as string).length > 0);
+	assert.ok((frontmatter.description as string).length < 1024);
+
+	assert.match(skill, /MUST use for almost every CDP-related request/);
+	assert.match(skill, /If the request mentions CDP, load this skill before taking action/);
+	assert.match(skill, /Prefer the chrome_cdp tool/);
+	assert.match(skill, /do not control CDP through bash\/curl\/node scripts/i);
+	assert.match(skill, /Start with `chrome_cdp` `action=status`/);
 });
 
 test("npm package excludes local MCP config files", () => {

@@ -15,7 +15,16 @@ import {
 } from "./ui-brand-utils.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 
-const VERSION = "1.0.0";
+function readUgkVersion(): string {
+	try {
+		const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+		return typeof pkg.version === "string" && pkg.version ? pkg.version : "unknown";
+	} catch {
+		return "unknown";
+	}
+}
+
+const VERSION = readUgkVersion();
 const ENABLED_ENV_VALUES = new Set(["1", "true", "yes", "on"]);
 const DISABLED_ENV_VALUES = new Set(["0", "false", "no", "off"]);
 const UGK_UI_MENU_OPTIONS = ["Show status", "Turn off", "Turn on", "Exit"];

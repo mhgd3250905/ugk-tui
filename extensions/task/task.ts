@@ -1,5 +1,6 @@
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -29,6 +30,7 @@ import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
 import { buildTaskbookPrompt } from "./task-registry.ts";
+import { dispatchTaskGuide } from "./task-guide.ts";
 import { dispatchTaskRunReviewer } from "./task-run-reviewer.ts";
 import { runVerify } from "./task-verify.ts";
 import { dispatchWorker, type TaskWorkerResult } from "./task-worker.ts";
@@ -74,6 +76,12 @@ type ActiveTaskRun = {
 type LastTaskRunReview = {
 	taskbookName: string;
 	content: string;
+};
+
+type TaskProgressDetails = {
+	taskbookName: string;
+	status: "PASS" | "FAIL";
+	lines: string[];
 };
 
 let activeTaskRun: ActiveTaskRun | undefined;
@@ -152,7 +160,7 @@ export function getTaskCommandMenuOptions(state: TaskState): string[] {
 	}
 	if (state.phase === "executing") return ["进入复盘", "停止本次执行", "Exit"];
 	if (state.phase === "reviewing") return ["自动保存并自证", "继续复盘", "放弃", "退出 Task", "Exit"];
-	return ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "重命名 taskbook", "删除 taskbook", "Exit"];
+	return ["新建任务", "运行 taskbook(复用)", "查看 taskbook 详情", "编辑 taskbook", "重命名 taskbook", "删除 taskbook", "Exit"];
 }
 
 export async function resolveTaskCommandArgs(args: string, ctx: any, state: TaskState, runActive = false, hasLastRunReview = false): Promise<string | undefined> {
@@ -182,6 +190,10 @@ function getTextContent(message: any): string {
 		.filter((block: any) => block.type === "text")
 		.map((block: any) => block.text)
 		.join("\n");
+}
+
+function isCancelledAssistantText(text: string): boolean {
+	return /\bOperation aborted\b|User cancelled the questionnaire/i.test(text);
 }
 
 function isTaskPlanContextMessage(message: any): boolean {
@@ -279,15 +291,80 @@ async function chooseTaskbookName(ctx: any, name: string | undefined, tag?: stri
 	return selected || undefined;
 }
 
-async function handleTaskShow(ctx: any, name: string | undefined): Promise<void> {
-	const finalName = await chooseTaskbookName(ctx, name);
-	if (!finalName) return;
-	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
-	if (!loaded) {
-		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
-		return;
+type TaskGuideItem = {
+	id: number;
+	title: string;
+	detail: string;
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function summarizeContractArtifacts(contract: unknown): string {
+	const artifacts = asRecord(contract).artifacts;
+	if (!Array.isArray(artifacts) || artifacts.length === 0) return "未声明固定产物";
+	return artifacts.map((item) => {
+		if (typeof item === "string") return item;
+		const record = asRecord(item);
+		return [record.path, record.description].filter((part) => typeof part === "string" && part).join(" - ");
+	}).filter(Boolean).join("; ") || "未声明固定产物";
+}
+
+function summarizeRuntimeInput(contract: unknown): string {
+	const runtimeInput = asRecord(contract).runtimeInput;
+	return Array.isArray(runtimeInput) && runtimeInput.length > 0
+		? runtimeInput.filter((item) => typeof item === "string").join(", ")
+		: "无额外输入字段";
+}
+
+function summarizeRequiredTools(contract: unknown): string {
+	const requiredTools = asRecord(contract).requiredTools;
+	return Array.isArray(requiredTools) && requiredTools.length > 0
+		? requiredTools.filter((item) => typeof item === "string").join(", ")
+		: "未声明受保护工具";
+}
+
+function buildTaskGuideItems(loaded: LoadedTaskbook): TaskGuideItem[] {
+	const contract = loaded.contract;
+	return [
+		{ id: 1, title: "任务目标", detail: loaded.spec.goal },
+		{ id: 2, title: "硬约束", detail: loaded.spec.hardConstraints.join("; ") || "无" },
+		{ id: 3, title: "验收标准", detail: loaded.spec.acceptance.join("; ") || "无" },
+		{ id: 4, title: "Worker 执行指引", detail: loaded.skill.trim().split(/\r?\n/).slice(0, 8).join(" ").replace(/\s+/g, " ").trim() || "空 skill" },
+		{ id: 5, title: "产物契约", detail: summarizeContractArtifacts(contract) },
+		{ id: 6, title: "运行输入", detail: summarizeRuntimeInput(contract) },
+		{ id: 7, title: "工具要求", detail: summarizeRequiredTools(contract) },
+		{ id: 8, title: "机器验证", detail: loaded.verify.trim().split(/\r?\n/).slice(0, 6).join(" ").replace(/\s+/g, " ").trim() || "空 verify" },
+	];
+}
+
+function formatTaskGuide(loaded: LoadedTaskbook, items: TaskGuideItem[]): string {
+	return [
+		`# task 导览: ${loaded.taskbook.name} [${loaded.scope}]`,
+		loaded.taskbook.description,
+		"",
+		...items.map((item) => `${item.id}. ${item.title}: ${item.detail}`),
+	].join("\n");
+}
+
+async function buildTaskGuideText(ctx: any, loaded: LoadedTaskbook, items: TaskGuideItem[]): Promise<string> {
+	try {
+		const guide = await dispatchTaskGuide(loaded, { cwd: cwdOf(ctx) });
+		return [
+			`# task 导览: ${loaded.taskbook.name} [${loaded.scope}]`,
+			loaded.taskbook.description,
+			"",
+			guide,
+		].join("\n");
+	} catch (error) {
+		ctx.ui.notify(`task 导览 agent 失败,使用本地摘要: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		return formatTaskGuide(loaded, items);
 	}
-	ctx.ui.notify([
+}
+
+function formatTaskbookRawDetails(loaded: LoadedTaskbook): string {
+	return [
 		`# ${loaded.taskbook.name} [${loaded.scope}]`,
 		loaded.taskbook.description,
 		"",
@@ -302,7 +379,49 @@ async function handleTaskShow(ctx: any, name: string | undefined): Promise<void>
 		"",
 		"## Contract",
 		JSON.stringify(loaded.contract, null, 2),
-	].join("\n"), "info");
+	].join("\n");
+}
+
+function buildGuideEditRequest(input: string, items: TaskGuideItem[]): string {
+	const match = input.trim().match(/^(\d+)\s*(.*)$/);
+	if (!match) return input.trim();
+	const id = Number(match[1]);
+	const item = items.find((candidate) => candidate.id === id);
+	if (!item) return input.trim();
+	const note = match[2]?.trim();
+	return [
+		`用户选择导览项 ${item.id}: ${item.title}`,
+		`当前内容: ${item.detail}`,
+		note ? `修改意见: ${note}` : "修改意见: 请围绕该导览项做最小必要调整",
+	].join("\n");
+}
+
+async function handleTaskShow(ctx: any, name: string | undefined, onEdit: (loaded: LoadedTaskbook, request?: string) => Promise<void>): Promise<void> {
+	const finalName = await chooseTaskbookName(ctx, name);
+	if (!finalName) return;
+	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
+	if (!loaded) {
+		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
+		return;
+	}
+	if (!ctx.ui?.select) {
+		ctx.ui.notify(formatTaskbookRawDetails(loaded), "info");
+		return;
+	}
+	const action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, ["task 导览", "task 编辑", "Exit"]);
+	if (!action || action === "Exit") return;
+	if (action === "task 编辑") {
+		await onEdit(loaded);
+		return;
+	}
+	if (action !== "task 导览") return;
+	const items = buildTaskGuideItems(loaded);
+	ctx.ui.notify(await buildTaskGuideText(ctx, loaded, items), "info");
+	const next = await ctx.ui.select("task 导览", ["了解返回", "编辑"]);
+	if (next !== "编辑") return;
+	const request = await ctx.ui?.input?.("输入要编辑的编号和修改意见", "");
+	if (request === undefined || !request.trim()) return;
+	await onEdit(loaded, buildGuideEditRequest(request, items));
 }
 
 function scopeFromTokens(tokens: string[]): "user" | "project" {
@@ -622,6 +741,34 @@ function setTaskRunWidget(ctx: any, lines: string[] | undefined): void {
 	ctx.ui?.setWidget?.("task-run-view", lines, { placement: "aboveEditor" });
 }
 
+function sendTaskMessage(pi: ExtensionAPI, ctx: any, content: string, fallbackLevel: "info" | "warning" | "error" = "info"): void {
+	if (typeof (pi as any).sendMessage === "function") {
+		(pi as any).sendMessage({ customType: "task-message", content, display: true }, { triggerTurn: false });
+		return;
+	}
+	ctx.ui.notify(content, fallbackLevel);
+}
+
+function sendTaskProgressMessage(pi: ExtensionAPI, details: TaskProgressDetails): void {
+	if (details.lines.length === 0 || typeof (pi as any).sendMessage !== "function") return;
+	(pi as any).sendMessage({
+		customType: "task-progress",
+		content: `taskbook "${details.taskbookName}" ${details.status} process (${details.lines.length} updates)`,
+		display: true,
+		details,
+	}, { triggerTurn: false });
+}
+
+function renderTaskProgressMessage(message: any, { expanded }: { expanded: boolean }, theme: any): Text {
+	const details = message.details as TaskProgressDetails | undefined;
+	const lines = details?.lines ?? [];
+	const visible = expanded ? lines : lines.slice(-5);
+	const title = `▸ taskbook "${details?.taskbookName ?? "unknown"}" 运行过程: ${details?.status ?? "DONE"} (${lines.length} 条)`;
+	const body = visible.map((line, index) => `${index + 1}. ${line}`).join("\n");
+	const hint = !expanded && lines.length > visible.length ? `\n${theme.fg("muted", "(Ctrl+O to expand)")}` : "";
+	return new Text([theme.fg("toolTitle", theme.bold(title)), body, hint].filter(Boolean).join("\n"), 0, 0);
+}
+
 function formatProgressLines(text: string): string[] {
 	if (text.trim() === "(running...)") return [];
 	return text
@@ -629,7 +776,19 @@ function formatProgressLines(text: string): string[] {
 		.map((line) => line.replace(/^#{1,6}\s*/, "").replace(/^[-*]\s*/, "").trim())
 		.filter(Boolean)
 		.slice(-5)
-		.map((line, index) => `${index + 1}. ${line.length > 120 ? `${line.slice(0, 117)}...` : line}`);
+		.map((line) => line.length > 120 ? `${line.slice(0, 117)}...` : line);
+}
+
+function appendUniqueProgressLines(existing: string[], incoming: string[]): string[] {
+	const seen = new Set(existing);
+	const added: string[] = [];
+	for (const line of incoming) {
+		if (seen.has(line)) continue;
+		seen.add(line);
+		added.push(line);
+	}
+	existing.push(...added);
+	return added;
 }
 
 function formatExecuteSummary(state: TaskState, completionSummary = ""): string {
@@ -770,6 +929,7 @@ function formatSubtaskToolText(mode: "single" | "parallel", results: SubtaskResu
 }
 
 async function handleTaskRun(
+	pi: ExtensionAPI,
 	ctx: any,
 	name: string | undefined,
 	rawInput: string,
@@ -831,9 +991,14 @@ async function handleTaskRun(
 			signal: abortController.signal,
 			onUpdate: (text) => {
 				const progress = formatProgressLines(text);
-				if (progress.length > 0) {
-					runState.progress.push(...progress);
-					setTaskRunWidget(ctx, [...widgetBase("worker 执行中..."), "", "最近进展:", ...progress]);
+				const added = appendUniqueProgressLines(runState.progress, progress);
+				if (added.length > 0) {
+					setTaskRunWidget(ctx, [
+						...widgetBase("worker 执行中..."),
+						"",
+						"最近进展:",
+						...runState.progress.slice(-5).map((line, index) => `${index + 1}. ${line}`),
+					]);
 				}
 			},
 		});
@@ -870,7 +1035,8 @@ async function handleTaskRun(
 			const duration = (Date.now() - startedAt) / 1000;
 			const report = await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, true, attempt + 1, duration, runState.progress, runState.notes);
 			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
-			ctx.ui.notify(report, "info");
+			sendTaskProgressMessage(pi, { taskbookName: finalName, status: "PASS", lines: runState.progress });
+			sendTaskMessage(pi, ctx, report, "info");
 			return;
 		}
 
@@ -901,6 +1067,7 @@ async function handleTaskRun(
 	const duration = (Date.now() - startedAt) / 1000;
 	const report = await formatRunResult(loaded, outputDir, lastWorkerResult, lastVerifyResult, false, maxRetry + 1, duration, runState.progress, runState.notes);
 	lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
+	sendTaskProgressMessage(pi, { taskbookName: finalName, status: "FAIL", lines: runState.progress });
 	onFail?.({
 		taskbookName: finalName,
 		taskbookScope: loaded.scope,
@@ -908,7 +1075,7 @@ async function handleTaskRun(
 		runDir,
 		summary: await formatRepairSummary(loaded, outputDir, lastWorkerResult, lastVerifyResult),
 	});
-	ctx.ui.notify(`${report}\n\n下一步: 输入修改意见修正 taskbook,或用 /task 选择修正/重新运行/查看/放弃。`, "error");
+	sendTaskMessage(pi, ctx, `${report}\n\n下一步: 输入修改意见修正 taskbook,或用 /task 选择修正/重新运行/查看/放弃。`, "error");
 	} catch (error) {
 		ctx.ui.notify(`taskbook "${finalName}" 运行异常: ${error instanceof Error ? error.message : String(error)}`, "error");
 	} finally {
@@ -961,6 +1128,7 @@ async function handleTaskRename(ctx: any, name: string | undefined, tokens: stri
 }
 
 export function registerTask(pi: ExtensionAPI): void {
+	(pi as any).registerMessageRenderer?.("task-progress", renderTaskProgressMessage);
 	let state = createTaskState();
 	let restoreToolsSnapshot: string[] | undefined;
 	let cachedTaskbookPrompt = "";
@@ -982,6 +1150,20 @@ export function registerTask(pi: ExtensionAPI): void {
 			pi.setActiveTools(restoreToolsSnapshot);
 		}
 		restoreToolsSnapshot = undefined;
+	}
+
+	async function startTaskbookEdit(ctx: any, loaded: LoadedTaskbook, userEditRequest = ""): Promise<void> {
+		restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
+		state = enterReviewing({
+			...state,
+			spec: loaded.spec,
+			taskbookName: loaded.taskbook.name,
+			taskbookScope: loaded.scope,
+		}, formatTaskbookUpdateSummary(loaded));
+		pi.setActiveTools?.(TASK_PLANNING_TOOLS);
+		persistState();
+		setTaskStatus(ctx, "📋 reviewing");
+		pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary, userEditRequest), { deliverAs: "followUp" });
 	}
 
 	let promptingTaskMenu = false;
@@ -1211,7 +1393,10 @@ export function registerTask(pi: ExtensionAPI): void {
 			if (resolvedArgs === undefined) return;
 			const { action, name, tokens, rawInput } = parseTaskCommand(resolvedArgs);
 			if (action === "review-last-run" && lastTaskRunReview) {
-				const userObservation = await ctx.ui?.input?.("你觉得刚刚的运行结果有什么问题吗?", "");
+				const userObservation = ctx.ui?.input
+					? await ctx.ui.input("你觉得刚刚的运行结果有什么问题吗?", "")
+					: "";
+				if (userObservation === undefined) return;
 				setTaskRunWidget(ctx, [
 					`📋 正在复盘 taskbook "${lastTaskRunReview.taskbookName}"...`,
 					"reviewer 分析中,请稍候",
@@ -1219,9 +1404,9 @@ export function registerTask(pi: ExtensionAPI): void {
 				try {
 					const result = await dispatchTaskRunReviewer({
 						runContext: lastTaskRunReview.content,
-						userObservation: userObservation ?? "",
+						userObservation,
 					}, { cwd: cwdOf(ctx) });
-					ctx.ui.notify(result.summary, result.ok ? "info" : "warning");
+					sendTaskMessage(pi, ctx, result.summary, result.ok ? "info" : "warning");
 				} finally {
 					setTaskRunWidget(ctx, undefined);
 				}
@@ -1248,22 +1433,16 @@ export function registerTask(pi: ExtensionAPI): void {
 			if (action === "edit") {
 				const finalName = await chooseTaskbookName(ctx, name);
 				if (!finalName) return;
+				const userEditRequest = ctx.ui?.input
+					? await ctx.ui.input("你想怎么修改这个 taskbook?(可留空)", "")
+					: "";
+				if (userEditRequest === undefined) return;
 				const loaded = await loadTaskbook(cwdOf(ctx), finalName);
 				if (!loaded) {
 					ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
 					return;
 				}
-				restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
-				state = enterReviewing({
-					...state,
-					spec: loaded.spec,
-					taskbookName: finalName,
-					taskbookScope: loaded.scope,
-				}, formatTaskbookUpdateSummary(loaded));
-				pi.setActiveTools?.(TASK_PLANNING_TOOLS);
-				persistState();
-				setTaskStatus(ctx, "📋 reviewing");
-				pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary), { deliverAs: "followUp" });
+				await startTaskbookEdit(ctx, loaded, userEditRequest);
 				return;
 			}
 			if (action === "execute") {
@@ -1307,8 +1486,12 @@ export function registerTask(pi: ExtensionAPI): void {
 				return;
 			}
 			if (action === "list") return await handleTaskList(ctx, tokens);
-			if (action === "show") return await handleTaskShow(ctx, name ?? (state.pendingTransition === "repair" ? state.taskbookName : undefined));
-			if (action === "run" || action === "rerun") return await handleTaskRun(ctx, name ?? (action === "rerun" ? state.taskbookName : undefined), rawInput, (failure) => {
+			if (action === "show") return await handleTaskShow(ctx, name ?? (state.pendingTransition === "repair" ? state.taskbookName : undefined), async (loaded, request) => {
+				const userEditRequest = request ?? (ctx.ui?.input ? await ctx.ui.input("你想怎么修改这个 taskbook?(可留空)", "") : "");
+				if (userEditRequest === undefined) return;
+				await startTaskbookEdit(ctx, loaded, userEditRequest);
+			});
+			if (action === "run" || action === "rerun") return await handleTaskRun(pi, ctx, name ?? (action === "rerun" ? state.taskbookName : undefined), rawInput, (failure) => {
 				state = setPendingTransition({
 					...state,
 					phase: "aborted",
@@ -1483,7 +1666,12 @@ export function registerTask(pi: ExtensionAPI): void {
 		const lastAssistant = [...event.messages].reverse().find(isAssistantMessage);
 		if (!lastAssistant) return;
 		if (state.phase === "reviewing") {
-			const result = extractTaskReviewResult(getTextContent(lastAssistant));
+			const text = getTextContent(lastAssistant);
+			if (isCancelledAssistantText(text)) {
+				ctx.ui.notify("Task review cancelled; reviewing remains active.", "info");
+				return;
+			}
+			const result = extractTaskReviewResult(text);
 			if (!result) {
 				ctx.ui.notify("Task review did not find skill/verify/contract JSON yet.", "warning");
 				pi.sendUserMessage?.("你刚才的 taskbook 结果没有被 /task 解析成合法 JSON。请重新输出一个合法 JSON 对象,包含 description、skill、verify、contract；不要输出 markdown 代码块或改动摘要；skill/verify 里的换行必须作为 JSON 字符串内容正确转义。", { deliverAs: "followUp" });
@@ -1496,7 +1684,12 @@ export function registerTask(pi: ExtensionAPI): void {
 			await promptTaskMenu(ctx);
 			return;
 		}
-		const spec = extractRequirementsSpec(getTextContent(lastAssistant));
+		const text = getTextContent(lastAssistant);
+		if (isCancelledAssistantText(text)) {
+			ctx.ui.notify("Task planning cancelled; planning remains active.", "info");
+			return;
+		}
+		const spec = extractRequirementsSpec(text);
 		if (!spec) {
 			ctx.ui.notify("Task planning did not find a complete RequirementsSpec yet.", "warning");
 			pi.sendUserMessage?.("你刚才没有输出可解析的 RequirementsSpec JSON。请先用 questionnaire 核对用户假设,然后重新输出完整 RequirementsSpec JSON,包含 goal、hardConstraints、acceptance。", { deliverAs: "followUp" });

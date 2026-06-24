@@ -5,6 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import registerUgkBrandUi from "../extensions/ui-brand.ts";
 
+const PACKAGE_VERSION = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+const PACKAGE_VERSION_PATTERN = new RegExp(`ugk v${PACKAGE_VERSION.replaceAll(".", "\\.")}`);
+
 function tempAgentDir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "ugk-ui-brand-"));
 }
@@ -84,7 +87,7 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 
 	const header = headerFactory!(tui, theme);
 	const footer = footerFactory!(tui, theme, footerData);
-	assert.match(header.render(80).join("\n"), /ugk v1\.0\.0/);
+	assert.match(header.render(80).join("\n"), PACKAGE_VERSION_PATTERN);
 	assert.match(footer.render(80).join("\n"), /feature\/ui-optimization/);
 	assert.match(footer.render(80).join("\n"), /第 1 轮完成/);
 	header.dispose?.();
@@ -139,7 +142,7 @@ test("ugk brand header and footer do not read extension ctx during render", asyn
 	const footer = footerFactory!({ requestRender() {} }, theme, footerData);
 	stale = true;
 
-	assert.match(header.render(80).join("\n"), /ugk v1\.0\.0/);
+	assert.match(header.render(80).join("\n"), PACKAGE_VERSION_PATTERN);
 	assert.match(footer.render(80).join("\n"), /ugk /);
 });
 

@@ -1414,6 +1414,8 @@ test("/task run can be stopped and records user notes while worker is running", 
 test("/task run preauthorizes mentioned protected tools for the worker", async () => {
 	const { pi, commands } = makePi(["read", "bash", "edit", "write", "subagent", "chrome_cdp", "alpha__echo"]);
 	const { cwd, ctx } = makeCtx();
+	const prevCdpPort = process.env.UGK_CDP_PORT;
+	process.env.UGK_CDP_PORT = "9666";
 	const confirmations: Array<{ title: string; body?: string }> = [];
 	let receivedEnv: Record<string, string | undefined> | undefined;
 	ctx.ui.confirm = (title: string, body?: string) => {
@@ -1450,8 +1452,11 @@ test("/task run preauthorizes mentioned protected tools for the worker", async (
 		assert.match(confirmations[0].body ?? "", /chrome_cdp/);
 		assert.match(confirmations[0].body ?? "", /alpha__echo/);
 		assert.equal(receivedEnv?.UGK_TASK_ALLOW_CHROME_CDP, "1");
+		assert.equal(receivedEnv?.UGK_CDP_PORT, "9666");
 		assert.equal(receivedEnv?.UGK_TASK_ALLOW_MCP_TOOLS, "alpha__echo");
 	} finally {
+		if (prevCdpPort === undefined) delete process.env.UGK_CDP_PORT;
+		else process.env.UGK_CDP_PORT = prevCdpPort;
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });

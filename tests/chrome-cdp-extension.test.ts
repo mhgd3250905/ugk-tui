@@ -1,8 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { registerChromeCdp } from "../extensions/chrome-cdp/index.ts";
 
+const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+const previousCdpPort = process.env.UGK_CDP_PORT;
+const testAgentDir = mkdtempSync(path.join(os.tmpdir(), "ugk-cdp-extension-agent-"));
+process.env.PI_CODING_AGENT_DIR = testAgentDir;
+process.on("exit", () => {
+	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	if (previousCdpPort === undefined) delete process.env.UGK_CDP_PORT;
+	else process.env.UGK_CDP_PORT = previousCdpPort;
+	rmSync(testAgentDir, { recursive: true, force: true });
+});
+
 function makePi() {
+	delete process.env.UGK_CDP_PORT;
+	rmSync(path.join(testAgentDir, "settings.json"), { force: true });
 	const tools = new Map<string, any>();
 	const commands = new Map<string, any>();
 	return {

@@ -5,34 +5,51 @@ import {
 	clearChromeCdpSessionAllow,
 	createChromeCdpState,
 	grantChromeCdpSessionAllow,
+	persistCdpPort,
+	readPersistedCdpPort,
 	resolveChromeCdpPort,
+	resolveUgkSettingsPath,
 	setChromeCdpMode,
 	setChromeCdpPort,
+	type ChromeCdpPortDeps,
 } from "../extensions/chrome-cdp/config.ts";
 
+const noPersistDeps: ChromeCdpPortDeps = {
+	agentDir: "/fake/agent",
+	exists: () => false,
+	readFile: () => "",
+	writeFile: () => {},
+	mkdir: () => {},
+};
+
 test("createChromeCdpState defaults to ask mode and port 9222", () => {
-	const state = createChromeCdpState({});
+	const state = createChromeCdpState({}, noPersistDeps);
 
 	assert.equal(state.mode, "ask");
 	assert.equal(resolveChromeCdpPort(state, {}), 9222);
 });
 
 test("resolveChromeCdpPort respects explicit, runtime, env, then default priority", () => {
-	const state = createChromeCdpState({ UGK_CDP_PORT: "9333" });
+	const prev = process.env.UGK_CDP_PORT;
+	const state = createChromeCdpState({ UGK_CDP_PORT: "9333" }, noPersistDeps);
+	try {
+		assert.equal(resolveChromeCdpPort(state, { port: 9444 }), 9444);
+		setChromeCdpPort(state, 9555, noPersistDeps);
+		assert.equal(resolveChromeCdpPort(state, {}), 9555);
 
-	assert.equal(resolveChromeCdpPort(state, { port: 9444 }), 9444);
-	setChromeCdpPort(state, 9555);
-	assert.equal(resolveChromeCdpPort(state, {}), 9555);
+		const envOnly = createChromeCdpState({ UGK_CDP_PORT: "9333" }, noPersistDeps);
+		assert.equal(resolveChromeCdpPort(envOnly, {}), 9333);
 
-	const envOnly = createChromeCdpState({ UGK_CDP_PORT: "9333" });
-	assert.equal(resolveChromeCdpPort(envOnly, {}), 9333);
-
-	const invalidEnv = createChromeCdpState({ UGK_CDP_PORT: "nope" });
-	assert.equal(resolveChromeCdpPort(invalidEnv, {}), 9222);
+		const invalidEnv = createChromeCdpState({ UGK_CDP_PORT: "nope" }, noPersistDeps);
+		assert.equal(resolveChromeCdpPort(invalidEnv, {}), 9222);
+	} finally {
+		if (prev === undefined) delete process.env.UGK_CDP_PORT;
+		else process.env.UGK_CDP_PORT = prev;
+	}
 });
 
 test("task worker env preauthorizes chrome_cdp for the child process", () => {
-	const state = createChromeCdpState({ UGK_TASK_ALLOW_CHROME_CDP: "1" });
+	const state = createChromeCdpState({ UGK_TASK_ALLOW_CHROME_CDP: "1" }, noPersistDeps);
 	const result = checkChromeCdpPolicy(state, {
 		action: "tabs",
 		reason: "Requires logged-in Chrome session",
@@ -44,15 +61,15 @@ test("task worker env preauthorizes chrome_cdp for the child process", () => {
 });
 
 test("setChromeCdpPort rejects invalid ports", () => {
-	const state = createChromeCdpState({});
+	const state = createChromeCdpState({}, noPersistDeps);
 
-	assert.throws(() => setChromeCdpPort(state, 0), /Invalid CDP port/);
-	assert.throws(() => setChromeCdpPort(state, 70000), /Invalid CDP port/);
-	assert.throws(() => setChromeCdpPort(state, 1.5), /Invalid CDP port/);
+	assert.throws(() => setChromeCdpPort(state, 0, noPersistDeps), /Invalid CDP port/);
+	assert.throws(() => setChromeCdpPort(state, 70000, noPersistDeps), /Invalid CDP port/);
+	assert.throws(() => setChromeCdpPort(state, 1.5, noPersistDeps), /Invalid CDP port/);
 });
 
 test("checkChromeCdpPolicy blocks execution when mode is off", () => {
-	const state = createChromeCdpState({});
+	const state = createChromeCdpState({}, noPersistDeps);
 	setChromeCdpMode(state, "off");
 
 	const result = checkChromeCdpPolicy(state, {
@@ -67,7 +84,7 @@ test("checkChromeCdpPolicy blocks execution when mode is off", () => {
 });
 
 test("checkChromeCdpPolicy allows status without confirmation", () => {
-	const state = createChromeCdpState({});
+	const state = createChromeCdpState({}, noPersistDeps);
 
 	const result = checkChromeCdpPolicy(state, {
 		action: "status",
@@ -80,7 +97,7 @@ test("checkChromeCdpPolicy allows status without confirmation", () => {
 });
 
 test("checkChromeCdpPolicy blocks non-status actions when normal access was not attempted", () => {
-	const state = createChromeCdpState({});
+	const state = createChromeCdpState({}, noPersistDeps);
 
 	const result = checkChromeCdpPolicy(state, {
 		action: "navigate",
@@ -94,7 +111,7 @@ test("checkChromeCdpPolicy blocks non-status actions when normal access was not 
 });
 
 test("checkChromeCdpPolicy requires confirmation in ask mode and allows in on mode", () => {
-	const state = createChromeCdpState({});
+	const state = createChromeCdpState({}, noPersistDeps);
 	const request = {
 		action: "navigate",
 		url: "https://private.example.com",
@@ -115,7 +132,7 @@ test("checkChromeCdpPolicy requires confirmation in ask mode and allows in on mo
 });
 
 test("session allow skips ask confirmation until mode changes clear it", () => {
-	const state = createChromeCdpState({});
+	const state = createChromeCdpState({}, noPersistDeps);
 	const request = {
 		action: "tabs",
 		reason: "Requires logged-in Chrome session",
@@ -137,4 +154,77 @@ test("session allow skips ask confirmation until mode changes clear it", () => {
 	grantChromeCdpSessionAllow(state);
 	setChromeCdpMode(state, "off");
 	assert.equal(state.sessionAllowed, false);
+});
+
+test("persistCdpPort writes and readPersistedCdpPort reads back", () => {
+	const settingsPath = resolveUgkSettingsPath({ agentDir: "/fake/agent" });
+	const files = new Map<string, string>([
+		[settingsPath, JSON.stringify({ shellPath: "bash" })],
+	]);
+	const deps: ChromeCdpPortDeps = {
+		agentDir: "/fake/agent",
+		exists: (p) => files.has(p),
+		readFile: (p) => files.get(p) ?? "",
+		writeFile: (p, c) => files.set(p, c),
+		mkdir: () => {},
+	};
+
+	persistCdpPort(9333, deps);
+
+	assert.equal(readPersistedCdpPort(deps), 9333);
+	const written = JSON.parse(files.get(settingsPath)!);
+	assert.equal(written.shellPath, "bash");
+	assert.equal(written.cdpPort, 9333);
+});
+
+test("readPersistedCdpPort returns undefined when settings missing or invalid", () => {
+	assert.equal(readPersistedCdpPort(noPersistDeps), undefined);
+	assert.equal(readPersistedCdpPort({ ...noPersistDeps, exists: () => true, readFile: () => "not json" }), undefined);
+});
+
+test("setChromeCdpPort persists to settings and syncs process.env", () => {
+	const files = new Map<string, string>();
+	const deps: ChromeCdpPortDeps = {
+		agentDir: "/fake/agent",
+		exists: (p) => files.has(p),
+		readFile: (p) => files.get(p) ?? "",
+		writeFile: (p, c) => files.set(p, c),
+		mkdir: () => {},
+	};
+	const prev = process.env.UGK_CDP_PORT;
+	const state = createChromeCdpState({}, noPersistDeps);
+	try {
+		setChromeCdpPort(state, 9444, deps);
+		assert.equal(process.env.UGK_CDP_PORT, "9444");
+		assert.equal(readPersistedCdpPort(deps), 9444);
+	} finally {
+		if (prev === undefined) delete process.env.UGK_CDP_PORT;
+		else process.env.UGK_CDP_PORT = prev;
+	}
+});
+
+test("createChromeCdpState restores runtimePort from persisted settings", () => {
+	const settingsPath = resolveUgkSettingsPath({ agentDir: "/fake/agent" });
+	const files = new Map<string, string>([[settingsPath, JSON.stringify({ cdpPort: 9555 })]]);
+	const deps: ChromeCdpPortDeps = {
+		agentDir: "/fake/agent",
+		exists: (p) => files.has(p),
+		readFile: (p) => files.get(p) ?? "",
+	};
+	const state = createChromeCdpState({}, deps);
+
+	assert.equal(resolveChromeCdpPort(state, {}), 9555);
+});
+
+test("runtime port from settings takes priority over env port", () => {
+	const settingsPath = resolveUgkSettingsPath({ agentDir: "/fake/agent" });
+	const files = new Map<string, string>([[settingsPath, JSON.stringify({ cdpPort: 9555 })]]);
+	const deps: ChromeCdpPortDeps = {
+		agentDir: "/fake/agent",
+		exists: (p) => files.has(p),
+		readFile: (p) => files.get(p) ?? "",
+	};
+	const state = createChromeCdpState({ UGK_CDP_PORT: "9333" }, deps);
+
+	assert.equal(resolveChromeCdpPort(state, {}), 9555);
 });

@@ -496,6 +496,7 @@ export async function resolveTaskWorkerEnv(
 	if (!allowed) return null;
 	return {
 		...(protectedTools.chromeCdp ? { UGK_TASK_ALLOW_CHROME_CDP: "1" } : {}),
+		...(protectedTools.chromeCdp && process.env.UGK_CDP_PORT ? { UGK_CDP_PORT: process.env.UGK_CDP_PORT } : {}),
 		...(protectedTools.mcpTools.length > 0 ? { UGK_TASK_ALLOW_MCP_TOOLS: protectedTools.mcpTools.join(",") } : {}),
 	};
 }

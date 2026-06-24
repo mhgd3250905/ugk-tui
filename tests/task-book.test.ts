@@ -10,6 +10,7 @@ import {
 	isRequirementsSpec,
 	listTaskbooks,
 	loadTaskbook,
+	renameTaskbook,
 	saveTaskbook,
 	taskDir,
 	tasksRootUser,
@@ -127,6 +128,42 @@ test("appendRunToTaskbook keeps only the newest 10 runs", async () => {
 		assert.equal(loaded?.taskbook.runs.length, 10);
 		assert.equal(loaded?.taskbook.runs[0].timestamp, "2026-06-22T00:00:02.000Z");
 		assert.equal(loaded?.taskbook.runs.at(-1)?.timestamp, "2026-06-22T00:00:11.000Z");
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("renameTaskbook renames the directory and taskbook name without dropping history", async () => {
+	const cwd = tempCwd();
+	try {
+		await saveTaskbook("project", cwd, "old-name", { description: "old", spec, skill: "s", verify: "v", contract });
+		const before = await appendRunToTaskbook("project", cwd, "old-name", run("2026-06-24T00:00:00.000Z"));
+
+		const renamed = await renameTaskbook("project", cwd, "old-name", "new-name");
+
+		assert.equal(existsSync(taskDir("project", cwd, "old-name")), false);
+		assert.equal(existsSync(taskDir("project", cwd, "new-name")), true);
+		assert.equal(renamed.name, "new-name");
+		assert.equal((await loadTaskbook(cwd, "new-name"))?.taskbook.name, "new-name");
+		assert.equal((await loadTaskbook(cwd, "new-name"))?.taskbook.createdAt, before.createdAt);
+		assert.equal((await loadTaskbook(cwd, "new-name"))?.taskbook.runs.length, 1);
+		assert.equal(await loadTaskbook(cwd, "old-name"), null);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("renameTaskbook rejects existing, invalid, and unchanged names", async () => {
+	const cwd = tempCwd();
+	try {
+		await saveTaskbook("project", cwd, "one", { description: "one", spec, skill: "s", verify: "v", contract });
+		await saveTaskbook("project", cwd, "two", { description: "two", spec, skill: "s", verify: "v", contract });
+
+		await assert.rejects(() => renameTaskbook("project", cwd, "one", "two"), /已存在/);
+		await assert.rejects(() => renameTaskbook("project", cwd, "one", "bad/name"), /Invalid taskbook name/);
+		await assert.rejects(() => renameTaskbook("project", cwd, "one", "one"), /相同/);
+		assert.equal((await loadTaskbook(cwd, "one"))?.taskbook.name, "one");
+		assert.equal((await loadTaskbook(cwd, "two"))?.taskbook.name, "two");
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

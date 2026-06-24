@@ -15,6 +15,7 @@ process.env.PI_CODING_AGENT = "true";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { buildUgkCliArgs } from "./ugk-cli-args.js";
+import { installUgkExtensionOverlayPatch } from "./ugk-extension-overlay-patch.js";
 import { installUgkPackageUpdatePatch } from "./ugk-package-update-patch.js";
 import { applyUgkRuntimePolicy } from "./ugk-runtime-policy.js";
 import { installUgkSessionViewPatch } from "./ugk-session-view-patch.js";
@@ -52,6 +53,9 @@ if (!installUgkSessionViewPatch({ InteractiveMode })) {
 }
 if (!installUgkPackageUpdatePatch({ InteractiveMode })) {
 	console.warn("ugk: package-update patch did not apply (pi version drift?). 'Run pi update' notices may reappear.");
+}
+if (!installUgkExtensionOverlayPatch({ InteractiveMode })) {
+	console.warn("ugk: extension-overlay patch did not apply (pi version drift?). Extension inputs may flicker while Working is visible.");
 }
 
 ensureUgkQuietStartupDefault();

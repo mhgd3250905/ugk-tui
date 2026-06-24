@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isRequirementsSpec, type RequirementsSpec } from "./task-spec.ts";
@@ -225,6 +225,26 @@ export async function appendRunToTaskbook(scope: "user" | "project", cwd: string
 		runs: sortAndTrimRuns([...loaded.taskbook.runs, run]),
 	};
 	await writeJson(path.join(loaded.dir, "taskbook.json"), taskbook);
+	return taskbook;
+}
+
+export async function renameTaskbook(scope: "user" | "project", cwd: string, oldName: string, newName: string): Promise<Taskbook> {
+	if (!isValidTaskbookName(oldName)) throw new Error(`Invalid taskbook name: ${oldName}`);
+	if (!isValidTaskbookName(newName)) throw new Error(`Invalid taskbook name: ${newName}`);
+	if (oldName === newName) throw new Error("新名字与旧名字相同");
+	const oldDir = taskDir(scope, cwd, oldName);
+	const newDir = taskDir(scope, cwd, newName);
+	const loaded = await loadFromDir(scope, oldDir);
+	if (!loaded) throw new Error(`Taskbook not found: ${oldName}`);
+	if (await loadFromDir(scope, newDir).catch(() => null)) throw new Error(`名字 "${newName}" 已存在,拒绝覆盖`);
+	await mkdir(path.dirname(newDir), { recursive: true });
+	await rename(oldDir, newDir);
+	const taskbook = {
+		...loaded.taskbook,
+		name: newName,
+		updatedAt: new Date().toISOString(),
+	};
+	await writeJson(path.join(newDir, "taskbook.json"), taskbook);
 	return taskbook;
 }
 

@@ -24,7 +24,7 @@ import {
 	type TaskPhase,
 	type TaskState,
 } from "./task-state.ts";
-import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, saveTaskbook, type LoadedTaskbook } from "./task-book.ts";
+import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, renameTaskbook, saveTaskbook, type LoadedTaskbook } from "./task-book.ts";
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
@@ -109,6 +109,7 @@ const MENU_TO_ACTION = new Map<string, string | undefined>([
 	["运行 taskbook(复用)", "run"],
 	["查看 taskbook 详情", "show"],
 	["编辑 taskbook", "edit"],
+	["重命名 taskbook", "rename"],
 	["列出 taskbook", "list"],
 	["保存为 taskbook", "save"],
 	["自动保存并自证", "save"],
@@ -151,7 +152,7 @@ export function getTaskCommandMenuOptions(state: TaskState): string[] {
 	}
 	if (state.phase === "executing") return ["进入复盘", "停止本次执行", "Exit"];
 	if (state.phase === "reviewing") return ["自动保存并自证", "继续复盘", "放弃", "退出 Task", "Exit"];
-	return ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "删除 taskbook", "Exit"];
+	return ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "重命名 taskbook", "删除 taskbook", "Exit"];
 }
 
 export async function resolveTaskCommandArgs(args: string, ctx: any, state: TaskState, runActive = false, hasLastRunReview = false): Promise<string | undefined> {
@@ -938,6 +939,27 @@ async function handleTaskDelete(ctx: any, name: string | undefined, tokens: stri
 	ctx.ui.notify(`taskbook "${finalName}" 已删除。`, "info");
 }
 
+async function handleTaskRename(ctx: any, name: string | undefined, tokens: string[]): Promise<void> {
+	const oldName = await chooseTaskbookName(ctx, name);
+	if (!oldName) return;
+	const loaded = await loadTaskbook(cwdOf(ctx), oldName);
+	if (!loaded) {
+		ctx.ui.notify(`taskbook "${oldName}" 不存在`, "warning");
+		return;
+	}
+	const newName = tokens[2]?.trim() || await ctx.ui?.input?.(`重命名 "${oldName}" 为`, oldName);
+	if (!newName?.trim() || newName.trim() === oldName) {
+		ctx.ui.notify("已取消重命名。", "info");
+		return;
+	}
+	try {
+		await renameTaskbook(loaded.scope, cwdOf(ctx), oldName, newName.trim());
+		ctx.ui.notify(`taskbook "${oldName}" 已重命名为 "${newName.trim()}"。`, "info");
+	} catch (error) {
+		ctx.ui.notify(`重命名失败: ${error instanceof Error ? error.message : String(error)}`, "error");
+	}
+}
+
 export function registerTask(pi: ExtensionAPI): void {
 	let state = createTaskState();
 	let restoreToolsSnapshot: string[] | undefined;
@@ -1302,6 +1324,7 @@ export function registerTask(pi: ExtensionAPI): void {
 				setTaskStatus(ctx, "📋 task");
 			}, typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS);
 			if (action === "delete") return await handleTaskDelete(ctx, name, tokens);
+			if (action === "rename") return await handleTaskRename(ctx, name, tokens);
 			if (action === "stop" || action === "exit" || action === "toggle" || action === "abort") {
 				state = abortTask(state);
 				persistState();

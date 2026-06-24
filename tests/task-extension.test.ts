@@ -127,7 +127,7 @@ test("task menu changes by phase and maps selection to action", async () => {
 	const executing = startExecuting(markPlanQuestionnaireUsed(planning));
 	const reviewing = enterReviewing(executing, "done");
 
-	assert.deepEqual(getTaskCommandMenuOptions(createTaskState()), ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "删除 taskbook", "Exit"]);
+	assert.deepEqual(getTaskCommandMenuOptions(createTaskState()), ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "重命名 taskbook", "删除 taskbook", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(enterPlanning(createTaskState())), ["继续对齐", "退出 Task", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(planning), ["开始执行", "继续对齐", "修改当前 Spec", "退出 Task", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(executing), ["进入复盘", "停止本次执行", "Exit"]);
@@ -287,6 +287,7 @@ test("TASK_ALIGN_PROMPT requires questionnaire extras and machine-checkable acce
 	assert.match(TASK_ALIGN_PROMPT, /id="extras"/);
 	assert.match(TASK_ALIGN_PROMPT, /你还有什么要补充的吗\?\(没有可留空\)/);
 	assert.match(TASK_ALIGN_PROMPT, /machine-checkable/);
+	assert.match(TASK_ALIGN_PROMPT, /进入 executing 阶段探路/);
 });
 
 test("/task execute enforces C-2 and switches to non-subagent tools", async () => {
@@ -820,6 +821,40 @@ test("/task delete removes a confirmed taskbook", async () => {
 
 		assert.equal(await loadTaskbook(cwd, "delete-me"), null);
 		assert.match(notifications.at(-1)?.message ?? "", /已删除/);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task rename changes the selected taskbook name", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	try {
+		await saveTaskbook("project", cwd, "rename-me", {
+			description: "rename me",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0)",
+			contract: { artifacts: [] },
+		});
+		await appendRunToTaskbook("project", cwd, "rename-me", {
+			timestamp: new Date().toISOString(),
+			status: "pass",
+			input: {},
+			exitCode: 0,
+			verifyFailures: [],
+			duration: 1,
+		});
+
+		await commands.get("task").handler("rename rename-me renamed", ctx);
+
+		assert.equal(await loadTaskbook(cwd, "rename-me"), null);
+		const loaded = await loadTaskbook(cwd, "renamed");
+		assert.equal(loaded?.taskbook.name, "renamed");
+		assert.equal(loaded?.taskbook.runs.length, 1);
+		assert.match(notifications.at(-1)?.message ?? "", /已重命名/);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

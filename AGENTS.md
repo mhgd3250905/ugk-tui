@@ -53,8 +53,10 @@
 - 详见 `docs/judge.md`。旧 `docs/handoff/` 和早期设计文档只作历史材料,不得覆盖 `docs/judge.md` 的当前事实。
 
 ### task 固定任务委托系统
-- `/task` 打开 task 菜单(中文,零命令记忆);`/task list|show|new|run|edit|save|delete|toggle|exit`
+- `/task` 打开 task 菜单(中文,零命令记忆);`/task list|show|new|run|edit|rename|save|delete|toggle|exit`
 - 四阶段创造:`planning`(只读对齐 RequirementsSpec)→ `executing`(task-creator 亲手做一遍,放开环境工具但禁 subagent/run_task)→ `reviewing`(产 skill+verify+contract)→ `landed`(taskbook 就绪)
+- **planning 保持只读是有意为之**(spec 2.1/4.1 节),不放开写权限;planner 若需动手探路判断可行性,prompt 会引导先用 questionnaire 确认进入 executing 阶段(不污染 planning 的对齐 context)。要改成放开全部工具需用户拍板并同步改 spec。
+- `/task rename <old> <new>` 改 taskbook 名(目录 + `taskbook.json:name` 一起搬,保留 `runs[]`/`createdAt`);仅原 scope 内改名,目标名已存在或同名则拒绝。
 - 复用流程:`/task run <name> <自然语言>` → dispatcher 翻译 input(走 `ctx.model`,可选 `contract.dispatcherModel` 覆盖)→ worker 子进程 spawn 执行 → verify.mjs 机器验收 → PASS/FAIL
 - taskbook = `spec.json` + `skill.md` + `verify.mjs` + `contract.json`(artifacts/runtimeInput/requiredTools),user scope 存 `~/.pi/agent/tasks/`,project scope 存 `<cwd>/.tasks/`
 - `run_task` 工具:LLM 可调,与 `subagent` 平级。**两条铁律:需求驱动(任务确定才匹配 taskbook,不是逛商店);责任归 LLM(dispatcher 工具场景翻译失败直接报错,不弹 UI 兜底,headless 标志)。task 是最小单位,不可嵌套。**
@@ -109,4 +111,5 @@
 - **任务书**:存 `.judge/taskbooks/<name>/`,project scope。Judge+Driver 跑通一次可存为任务书,`/judge run <name>` 跳过 ALIGN 直接开跑但保留完整 Judge 监督。改 Judge/Driver 的 agent 定义或 taskbook schema 必须同步更新 `docs/judge.md` 任务书章节。
 - **taskbook**:`/task` 的固定任务沉淀,存 user scope(`~/.pi/agent/tasks/<name>/`)或 project scope(`<cwd>/.tasks/<name>/`),每个含 `spec.json`+`skill.md`+`verify.mjs`+`contract.json`+`taskbook.json`。`run_task` 工具和 `/task run` 共用同一套复用链路(dispatcher→worker→verify)。改 task 模块的核心函数签名或 task 状态机必须同步更新 `docs/design/subtask-extension-spec.md`。
 - **运行时发行策略**:pi 是 UGK 的内部 runtime,每个 UGK 版本必须固定一个明确的 pi 版本。不要让用户看到或执行 `pi update`;pi 升级只能通过 UGK 项目主动升级依赖、完成兼容验证并发布新的 UGK 版本。
+- **pi runtime patch**(`bin/ugk-*.js`,在 `bin/ugk.js` 启动时安装,仿 `installUgkSessionViewPatch` 的 idempotent 范式:`Symbol.for()` 守卫 + proto 包装 + 返回 false 时 `console.warn`):`installUgkSessionViewPatch`(session 视图/autocomplete)、`installUgkPackageUpdatePatch`(压制 `pi update` 提示)、`installUgkExtensionOverlayPatch`(扩展 overlay 打开时暂停 `Working...` spinner,消除 questionnaire 等输入框的闪烁)。pi 升级后每个 patch 的 descriptor/方法检查可能失效,需回归。
 - **UGK 更新策略**:启动入口在进入 TUI 前检查 GitHub `main` 最新 commit,显示 Codex CLI 风格的 `Update now / Skip / Skip until next version` 菜单。开发仓库内更新走 `git pull --rebase origin main && npm install`,正式 npm 安装场景走 `npm install -g ugk-agent`;成功后提示重启并退出,不继续加载旧 TUI。`/update` 是会话内手动入口。

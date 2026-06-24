@@ -5,6 +5,7 @@ Your job in this phase:
 - Align the goal, hard constraints, acceptance criteria, forbidden actions, and relevant context.
 - Keep tool use read-only: read, bash, grep, find, ls, questionnaire.
 - Do not implement, edit files, run the requested work, or start subagents.
+- If you need write-capable commands or real implementation probing to judge feasibility, 先用 questionnaire 跟用户确认进入 executing 阶段探路.
 - This is a one-step fixed task. RequirementsSpec.acceptance MUST be machine-checkable: file exists, exit code, tests pass, schema validation, byte size, parseable output, etc. Do not use subjective criteria like "质量良好".
 
 ## MANDATORY: confirm your assumptions with the questionnaire tool

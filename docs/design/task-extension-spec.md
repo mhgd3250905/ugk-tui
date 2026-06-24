@@ -405,6 +405,7 @@ verify 失败时,checker 拿到结构化失败 JSON,产出**给 worker 的反馈
 | `/task run <name> [input...]` | 复用 | 加载 taskbook,走 worker→verify→checker 流程 |
 | `/task list [--tag <tag>]` | 只读 | 列出所有 taskbook(name + description + lastRun) |
 | `/task edit <name>` | 更新模式 | 加载现有 taskbook,直接进入增量复盘;基于旧 spec/skill/verify/contract 用 questionnaire 确认要改哪些细节 |
+| `/task rename <old> <new>` | 改名 | 改 taskbook 名(目录 + `taskbook.json:name` 一起搬,保留 `runs[]`/`createdAt`);仅原 scope 内改名,目标名已存在或同名则拒绝 |
 | `/task show <name>` | 只读 | 显示 taskbook 详情(spec + skill + verify + contract) |
 | `/task delete <name>` | 危险 | 删除 taskbook,要确认 |
 | `/task toggle` | 开关 | 开关 `/task` 模式(类似 `/judge toggle`) |
@@ -442,6 +443,7 @@ function getTaskCommandMenuOptions(): string[] {
 "修改当前 Spec"      → "change-spec"
 "运行 taskbook"      → "run"
 "编辑 taskbook"      → "edit"
+"重命名 taskbook"    → "rename"    // → handleTaskRename 改目录 + taskbook.json:name
 "列出 taskbook"      → "list"
 "保存为 taskbook"    → "save"
 "自动保存并自证"     → "save"
@@ -666,6 +668,15 @@ v1 原把 execute 阶段 task-creator 的工具集写死成 `read/write/edit/bas
 subagent 的禁止从"工具集隐式排除"升级为**双保险**:① `applyExecuteTools` 不把它放进 active 集;② `tool_call` 事件显式 `block: true`(spec 4.2 硬约束的可靠实现,取代原来仅靠 prompt 口头要求的脆弱方式)。这跟 worker agent(`agents/worker.md` 删 tools 字段继承全部 + prompt 禁 subagent)的做法对齐。
 
 planning/reviewing 阶段的只读工具集(`TASK_PLANNING_TOOLS` + bash 命令白名单)**不动**,那是"只读探索"语义,有意为之。
+
+### planning 保持只读 + 探路引导(2026-06-24)
+
+planning 阶段不放开写权限(与 executing 区分)。若 planner 需要实际跑写命令/做实现才能判断验收标准是否可行,`TASK_ALIGN_PROMPT`(`task-prompts.ts`)会引导它先用 questionnaire 跟用户确认进入 executing 阶段探路——探路产出可复用,且不污染 planning 的对齐 context。这是 C-1 方案;若改为放开全部工具(C-2)需用户拍板并同步更新本节与 4.1 节。
+
+### `/task rename` 改名(2026-06-24)
+
+新增 `renameTaskbook`(`task-book.ts`):`fs.rename` 原子改目录 + 改 `taskbook.json` 的 `name` 字段,保留 `createdAt`/`runs[]`。`spec.json`/`skill.md`/`verify.mjs`/`contract.json` 内部不存名字,内容文件零修改。接线 `/task rename <old> <new>` 和菜单"重命名 taskbook"。约束:仅原 scope 内改名(不跨 user/project),目标名已存在或新旧同名则拒绝;`/task rename` 不带 `<new>` 时 `ctx.ui.input` 交互询问。`.tasks/runs/task-<name>-<ts>/` 是一次性目录、不按名反查,改名不影响历史 run 目录。
+
 
 ### `/task run` 受保护工具预授权(2026-06-23)
 

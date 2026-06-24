@@ -159,6 +159,7 @@ Release notes: https://github.com/mhgd3250905/ugk-tui/commits/main
 | `cron` | 定时任务管理(status/list/add/remove/history) |
 | `chrome_cdp` | 受保护的本地登录态 Chrome 控制(status/tabs/navigate/evaluate/screenshot) |
 | `mcp` | 外部 MCP stdio server 的 tools 接入,注册为 `server__tool` |
+| `run_task` | subtask 工具:复用已机器验收的 taskbook,返回 PASS/FAIL + 产物路径(single/parallel,确定性区别于 subagent 的灵活探索) |
 
 ### ugk 品牌 UI
 
@@ -204,6 +205,7 @@ UGK_CLEAR_STARTUP=0 ugk
 | `/plan` | 切换 plan-mode 只读探索模式(或 Ctrl+Alt+P) |
 | `/todos` | 查看 plan-mode 计划进度 |
 | `/judge` | 管理 judge 委托验收、live.log 过程终端和 driver 运行状态 |
+| `/task` | 固定任务委托(taskbook 创造/复用/编排) |
 | `/implement` | scout→planner→worker 全链路实现 |
 | `/scout-and-plan` | scout→planner(只到方案) |
 | `/implement-and-review` | worker→reviewer→worker |

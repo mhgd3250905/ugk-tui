@@ -19,6 +19,7 @@
 - `chrome_cdp` — 受保护的本地登录态 Chrome 控制(status/tabs/navigate/evaluate/screenshot,默认 ask-gated)
 - `judge` — 实时监督模式:先对齐 RequirementsSpec,再委派 Driver 执行,由 Judge 在关键节点放行/纠偏/终止/最终验收
 - `mcp` — MCP stdio client:从 install/user/project/local 配置连接外部 MCP server,把 tools 注册为 `server__tool`,含 spawn policy、per-tool ask/on/off、reload stale 处理和 session 清理
+- `run_task` — subtask 工具:让 main agent 像调 subagent 一样复用已机器验收的 taskbook,返回 PASS/FAIL + 产物路径(确定性、可验收,区别于 subagent 的灵活探索)
 
 ### plan-mode 只读探索模式
 - `/plan` 切换只读模式(或 Ctrl+Alt+P)
@@ -51,6 +52,15 @@
 - 过程日志写入 `<cwd>/.judge/<runId>/live.log`;Windows 使用 Git Bash + `cmd start "" ... tail -f`,不做 Windows Terminal 特殊适配。
 - 详见 `docs/judge.md`。旧 `docs/handoff/` 和早期设计文档只作历史材料,不得覆盖 `docs/judge.md` 的当前事实。
 
+### task 固定任务委托系统
+- `/task` 打开 task 菜单(中文,零命令记忆);`/task list|show|new|run|edit|save|delete|toggle|exit`
+- 四阶段创造:`planning`(只读对齐 RequirementsSpec)→ `executing`(task-creator 亲手做一遍,放开环境工具但禁 subagent/run_task)→ `reviewing`(产 skill+verify+contract)→ `landed`(taskbook 就绪)
+- 复用流程:`/task run <name> <自然语言>` → dispatcher 翻译 input(走 `ctx.model`,可选 `contract.dispatcherModel` 覆盖)→ worker 子进程 spawn 执行 → verify.mjs 机器验收 → PASS/FAIL
+- taskbook = `spec.json` + `skill.md` + `verify.mjs` + `contract.json`(artifacts/runtimeInput/requiredTools),user scope 存 `~/.pi/agent/tasks/`,project scope 存 `<cwd>/.tasks/`
+- `run_task` 工具:LLM 可调,与 `subagent` 平级。**两条铁律:需求驱动(任务确定才匹配 taskbook,不是逛商店);责任归 LLM(dispatcher 工具场景翻译失败直接报错,不弹 UI 兜底,headless 标志)。task 是最小单位,不可嵌套。**
+- system prompt 注入 taskbook 清单(name + description),由 `buildTaskbookPrompt`(`task-registry.ts`)解耦生成
+- 详见 `docs/design/task-extension-spec.md`(taskbook 创造+复用)和 `docs/design/subtask-extension-spec.md`(run_task 编排)
+
 ### ugk 品牌 UI
 - `extensions/ui-brand.ts` 通过 pi UI hook 设置 header/footer/title
 - header/footer 组件不得在 render 阶段持有或读取 `ExtensionContext`;必须在 `session_start` 时抽取普通 session 数据,避免 session replacement/reload 后 stale ctx 崩溃
@@ -64,6 +74,7 @@
 - `/update` — 手动检查 GitHub main 并用 UGK 语境提示“现在更新/跳过本次/跳过到下个版本”
 - `/cdp` — 管理本地 Chrome CDP 访问模式、端口、启动和标签页
 - `/mcp` — 管理 MCP server 状态、权限模式、reload、enable/disable
+- `/task` — 固定任务委托(taskbook 创造/复用/编排)
 - `/ugk-ui` — 开关 ugk 品牌 UI
 - `/implement` `/scout-and-plan` `/implement-and-review` — subagent 流水线
 
@@ -96,5 +107,6 @@
 - **subagent 的 agent 定义** 在仓库 `agents/*.md`(版本管理),需复制到 `~/.pi/agent/agents/` 才生效(见 subagent-guide skill)
 - **模型**:全局默认 `deepseek-v4-pro`;`agents/*.md` 的 frontmatter 记录角色意图,但当前 pi 运行时不靠修改这些 frontmatter 来切换 Judge/Driver 的实际模型。需要更换模型时必须改 session 创建/模型选择代码并补测试。
 - **任务书**:存 `.judge/taskbooks/<name>/`,project scope。Judge+Driver 跑通一次可存为任务书,`/judge run <name>` 跳过 ALIGN 直接开跑但保留完整 Judge 监督。改 Judge/Driver 的 agent 定义或 taskbook schema 必须同步更新 `docs/judge.md` 任务书章节。
+- **taskbook**:`/task` 的固定任务沉淀,存 user scope(`~/.pi/agent/tasks/<name>/`)或 project scope(`<cwd>/.tasks/<name>/`),每个含 `spec.json`+`skill.md`+`verify.mjs`+`contract.json`+`taskbook.json`。`run_task` 工具和 `/task run` 共用同一套复用链路(dispatcher→worker→verify)。改 task 模块的核心函数签名或 task 状态机必须同步更新 `docs/design/subtask-extension-spec.md`。
 - **运行时发行策略**:pi 是 UGK 的内部 runtime,每个 UGK 版本必须固定一个明确的 pi 版本。不要让用户看到或执行 `pi update`;pi 升级只能通过 UGK 项目主动升级依赖、完成兼容验证并发布新的 UGK 版本。
 - **UGK 更新策略**:启动入口在进入 TUI 前检查 GitHub `main` 最新 commit,显示 Codex CLI 风格的 `Update now / Skip / Skip until next version` 菜单。开发仓库内更新走 `git pull --rebase origin main && npm install`,正式 npm 安装场景走 `npm install -g ugk-agent`;成功后提示重启并退出,不继续加载旧 TUI。`/update` 是会话内手动入口。

@@ -15,6 +15,7 @@ import type { AutocompleteProvider } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import registerBuiltinToolRenderers from "./builtin-tool-render.ts";
 import { checkEnv } from "./device-env.ts";
 import { scrcpyTool } from "./scrcpy-tool.ts";
 import registerSubagent from "./subagent.ts";
@@ -78,6 +79,9 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 
 export default function (pi: ExtensionAPI) {
 	const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+	// 0) 内置工具精简渲染(必须最先,覆盖默认 bash/edit)
+	registerBuiltinToolRenderers(pi);
 
 	// 1) 自定义工具
 	pi.registerTool(scrcpyTool);

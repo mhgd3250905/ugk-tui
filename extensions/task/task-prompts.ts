@@ -79,9 +79,20 @@ When review is complete, output parseable JSON only:
 
 Keep it boring and minimal. If the task is actually just a deterministic shell script, say that in skill.md and keep verify strict.`;
 
-export function buildTaskReviewPrompt(spec: unknown, summary: string): string {
+export function buildTaskReviewPrompt(spec: unknown, summary: string, userEditRequest = ""): string {
 	return [
 		TASK_REVIEW_PROMPT,
+		...(userEditRequest.trim()
+			? [
+					"",
+					"UserEditRequest:",
+					userEditRequest.trim(),
+					"",
+					"Edit mode rule: UserEditRequest is the primary change request. Keep every existing taskbook detail that the user did not mention.",
+					"Do NOT re-confirm unchanged source/method/runtime/tool choices. Your questionnaire must ask only about the requested change and the mandatory extras question.",
+					"Example: if the user says only md not html, ask about md-only output/artifact/verification; do not ask whether to keep HTTP vs CDP.",
+				]
+			: []),
 		"",
 		"RequirementsSpec:",
 		"```json",

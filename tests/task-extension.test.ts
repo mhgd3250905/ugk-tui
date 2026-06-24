@@ -9,6 +9,7 @@ import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUs
 import { appendRunToTaskbook, loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
+import { setTaskGuideRunnerForTests } from "../extensions/task/task-guide.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT, TASK_REVIEW_PROMPT } from "../extensions/task/task-prompts.ts";
 import { setTaskRunReviewerRunnerForTests } from "../extensions/task/task-run-reviewer.ts";
 import { setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
@@ -43,14 +44,18 @@ function makePi(initialActiveTools = ["read", "bash", "edit", "write", "subagent
 	const tools: any[] = [];
 	const handlers = new Map<string, Function[]>();
 	const entries: Array<{ customType: string; data: unknown }> = [];
+	const renderers = new Map<string, Function>();
 	const activeTools: string[][] = [];
 	let currentActiveTools = [...initialActiveTools];
+	const sentMessages: Array<{ message: any; options?: any }> = [];
 	const userMessages: Array<{ text: string; options?: any }> = [];
 	return {
 		commands,
 		handlers,
 		entries,
+		renderers,
 		activeTools,
+		sentMessages,
 		userMessages,
 		pi: {
 			registerCommand(name: string, options: any) {
@@ -58,6 +63,9 @@ function makePi(initialActiveTools = ["read", "bash", "edit", "write", "subagent
 			},
 			registerTool(tool: any) {
 				tools.push(tool);
+			},
+			registerMessageRenderer(customType: string, renderer: Function) {
+				renderers.set(customType, renderer);
 			},
 			appendEntry(customType: string, data: unknown) {
 				entries.push({ customType, data });
@@ -68,6 +76,9 @@ function makePi(initialActiveTools = ["read", "bash", "edit", "write", "subagent
 			setActiveTools(names: string[]) {
 				currentActiveTools = [...names];
 				activeTools.push(names);
+			},
+			sendMessage(message: any, options?: any) {
+				sentMessages.push({ message, options });
 			},
 			sendUserMessage(text: string, options?: any) {
 				userMessages.push({ text, options });
@@ -122,20 +133,37 @@ function makeCtx(cwd = mkdtempSync(path.join(os.tmpdir(), "ugk-task-extension-")
 	};
 }
 
+function latestTaskMessage(sentMessages: Array<{ message: any; options?: any }>): string {
+	const sent = [...sentMessages].reverse().find((item) => item.message?.customType === "task-message");
+	assert.equal(sent?.message.display, true);
+	assert.deepEqual(sent?.options, { triggerTurn: false });
+	return sent?.message.content ?? "";
+}
+
+function mockTaskGuideRunner(text = "1. 来源方式: 使用现有来源\n2. 产物契约: 保留声明产物") {
+	setTaskGuideRunnerForTests(async (_cwd, _agents, agentName, task) => ({
+		agent: agentName,
+		agentSource: "user",
+		task,
+		exitCode: 0,
+		messages: [{ role: "assistant", content: [{ type: "text", text }] }],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+	}) as any);
+}
+
 test("task menu changes by phase and maps selection to action", async () => {
 	const planning = setTaskSpec(enterPlanning(createTaskState()), spec);
 	const executing = startExecuting(markPlanQuestionnaireUsed(planning));
 	const reviewing = enterReviewing(executing, "done");
 
-	assert.deepEqual(getTaskCommandMenuOptions(createTaskState()), ["新建任务", "运行 taskbook(复用)", "列出 taskbook", "查看 taskbook 详情", "编辑 taskbook", "重命名 taskbook", "删除 taskbook", "Exit"]);
+	assert.deepEqual(getTaskCommandMenuOptions(createTaskState()), ["新建任务", "运行 taskbook(复用)", "查看 taskbook 详情", "编辑 taskbook", "重命名 taskbook", "删除 taskbook", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(enterPlanning(createTaskState())), ["继续对齐", "退出 Task", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(planning), ["开始执行", "继续对齐", "修改当前 Spec", "退出 Task", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(executing), ["进入复盘", "停止本次执行", "Exit"]);
 	assert.deepEqual(getTaskCommandMenuOptions(reviewing), ["自动保存并自证", "继续复盘", "放弃", "退出 Task", "Exit"]);
 
 	const { ctx } = makeCtx();
-	ctx.ui.select = () => "列出 taskbook";
-	assert.equal(await resolveTaskCommandArgs("", ctx, createTaskState()), "list");
 	ctx.ui.select = () => "运行 taskbook(复用)";
 	assert.equal(await resolveTaskCommandArgs("", ctx, createTaskState()), "run");
 	ctx.ui.select = () => "进入复盘";
@@ -149,6 +177,7 @@ test("registerTask registers /task list and show", async () => {
 	const { pi, commands } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
+	mockTaskGuideRunner("1. 任务目标: 生成报告\n5. 产物契约: 未声明固定产物");
 
 	try {
 		await saveTaskbook("project", cwd, "report", {
@@ -164,12 +193,14 @@ test("registerTask registers /task list and show", async () => {
 		assert.match(notifications.at(-1)?.message ?? "", /report \[project\]/);
 
 		await commands.get("task").handler("show report", ctx);
-		assert.match(notifications.at(-1)?.message ?? "", /# report \[project\]/);
-		assert.match(notifications.at(-1)?.message ?? "", /生成报告/);
+		assert.match(notifications.at(-1)?.message ?? "", /# task 导览: report \[project\]/);
+		assert.match(notifications.at(-1)?.message ?? "", /1\. 任务目标/);
+		assert.match(notifications.at(-1)?.message ?? "", /5\. 产物契约/);
 
 		await commands.get("task").handler("show missing", ctx);
 		assert.match(notifications.at(-1)?.message ?? "", /不存在/);
 	} finally {
+		setTaskGuideRunnerForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
@@ -396,6 +427,16 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.equal(extractTaskReviewResult("{}"), undefined);
 });
 
+test("task edit prompt keeps questionnaire focused on the user edit request", () => {
+	const prompt = buildTaskReviewPrompt(spec, "existing taskbook", "md only, no html");
+
+	assert.match(prompt, /UserEditRequest:/);
+	assert.match(prompt, /md only, no html/);
+	assert.match(prompt, /Do NOT re-confirm unchanged source\/method\/runtime\/tool choices/);
+	assert.match(prompt, /ask only about the requested change/);
+	assert.match(prompt, /md-only output\/artifact\/verification/);
+});
+
 test("/task execute keeps environment tools, logs them, and blocks subagent via tool_call", async () => {
 	// 模拟 main session 装了 chrome_cdp(环境工具),验证 execute 阶段保留它、只排除 subagent
 	const { pi, commands, handlers, activeTools, entries } = makePi(["read", "bash", "edit", "write", "subagent", "chrome_cdp", "alpha__echo"]);
@@ -589,6 +630,54 @@ echo hi
 	assert.match(userMessages.at(-1)?.text ?? "", /不要输出 markdown 代码块/);
 });
 
+test("/task review questionnaire cancellation does not trigger JSON retry loop", async () => {
+	const { pi, handlers, userMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterReviewing(startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)), "run-dir"), "done"),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+	const entriesBefore = entries.length;
+
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: "Operation aborted" }],
+		}],
+	}, ctx);
+
+	assert.equal(userMessages.length, 0);
+	assert.equal(entries.length, entriesBefore);
+	assert.match(notifications.at(-1)?.message ?? "", /cancelled/);
+});
+
+test("/task planning questionnaire cancellation does not trigger spec retry loop", async () => {
+	const { pi, handlers, userMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterPlanning(createTaskState()),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+	const entriesBefore = entries.length;
+
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: "User cancelled the questionnaire" }],
+		}],
+	}, ctx);
+
+	assert.equal(userMessages.length, 0);
+	assert.equal(entries.length, entriesBefore);
+	assert.match(notifications.at(-1)?.message ?? "", /cancelled/);
+});
+
 test("/task save without review questionnaire asks reviewer to run the design gates", async () => {
 	const { pi, commands, handlers, userMessages } = makePi();
 	const { ctx, notifications } = makeCtx();
@@ -753,6 +842,7 @@ test("/task edit loads an existing taskbook into update review", async () => {
 	const { pi, commands, entries, userMessages, activeTools } = makePi();
 	const { cwd, ctx } = makeCtx();
 	registerTask(pi as any);
+	ctx.ui.input = () => "结果只要 md 文件不要 html";
 
 	try {
 		await saveTaskbook("project", cwd, "editable", {
@@ -769,10 +859,94 @@ test("/task edit loads an existing taskbook into update review", async () => {
 		assert.equal((entries.at(-1)?.data as any).taskbookName, "editable");
 		assert.equal((entries.at(-1)?.data as any).taskbookScope, "project");
 		assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
+		assert.match(userMessages.at(-1)?.text ?? "", /UserEditRequest:/);
+		assert.match(userMessages.at(-1)?.text ?? "", /结果只要 md 文件不要 html/);
 		assert.match(userMessages.at(-1)?.text ?? "", /更新已有 taskbook/);
 		assert.match(userMessages.at(-1)?.text ?? "", /现有 skill\.md/);
 		assert.match(userMessages.at(-1)?.text ?? "", /现有 verify\.mjs/);
 	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task edit cancels when the first edit request prompt is cancelled", async () => {
+	const { pi, commands, entries, userMessages } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	ctx.ui.input = () => undefined;
+
+	try {
+		await saveTaskbook("project", cwd, "editable-cancel", {
+			description: "editable cancel",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0)",
+			contract: { artifacts: [] },
+		});
+		await commands.get("task").handler("edit editable-cancel", ctx);
+
+		assert.equal(entries.length, 0);
+		assert.equal(userMessages.length, 0);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task show task edit reuses the edit request flow", async () => {
+	const { pi, commands, entries, userMessages } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	ctx.ui.select = (title: string) => title.startsWith("taskbook:") ? "task 编辑" : "Exit";
+	ctx.ui.input = () => "结果只要 md 文件不要 html";
+
+	try {
+		await saveTaskbook("project", cwd, "show-edit", {
+			description: "show edit",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0)",
+			contract: { artifacts: [] },
+		});
+		await commands.get("task").handler("show show-edit", ctx);
+
+		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
+		assert.equal((entries.at(-1)?.data as any).taskbookName, "show-edit");
+		assert.match(userMessages.at(-1)?.text ?? "", /UserEditRequest:/);
+		assert.match(userMessages.at(-1)?.text ?? "", /结果只要 md 文件不要 html/);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task show guide edit passes the selected guide item into edit", async () => {
+	const { pi, commands, entries, userMessages } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+	mockTaskGuideRunner("1. 任务目标: 生成报告\n5. 产物契约: report.md; snapshot.html");
+	ctx.ui.select = (title: string) => {
+		if (title.startsWith("taskbook:")) return "task 导览";
+		if (title === "task 导览") return "编辑";
+		return "Exit";
+	};
+	ctx.ui.input = () => "5 不要保存 html";
+
+	try {
+		await saveTaskbook("project", cwd, "guide-edit", {
+			description: "guide edit",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0)",
+			contract: { artifacts: [{ path: "report.md" }, { path: "snapshot.html" }] },
+		});
+		await commands.get("task").handler("show guide-edit", ctx);
+
+		assert.match(notifications.at(-1)?.message ?? "", /# task 导览: guide-edit \[project\]/);
+		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
+		assert.match(userMessages.at(-1)?.text ?? "", /用户选择导览项 5: 产物契约/);
+		assert.match(userMessages.at(-1)?.text ?? "", /snapshot\.html/);
+		assert.match(userMessages.at(-1)?.text ?? "", /不要保存 html/);
+	} finally {
+		setTaskGuideRunnerForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
@@ -879,9 +1053,10 @@ test("/task rename changes the selected taskbook name", async () => {
 });
 
 test("/task menu selects taskbook name for show edit delete and run", async () => {
-	const { pi, commands, entries } = makePi();
+	const { pi, commands, entries, sentMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
+	mockTaskGuideRunner("1. 任务目标: 生成报告\n5. 产物契约: 未声明固定产物");
 	setTaskWorkerRunnerForTests(async () => ({
 		agent: "worker",
 		agentSource: "user",
@@ -906,9 +1081,15 @@ test("/task menu selects taskbook name for show edit delete and run", async () =
 			});
 		}
 
-		ctx.ui.select = (title: string) => title === "Task" ? "查看 taskbook 详情" : "menu-show";
+		ctx.ui.select = (title: string) => {
+			if (title === "Task") return "查看 taskbook 详情";
+			if (title.startsWith("taskbook:")) return "task 导览";
+			if (title === "task 导览") return "了解返回";
+			return "menu-show";
+		};
 		await commands.get("task").handler("", ctx);
-		assert.match(notifications.at(-1)?.message ?? "", /# menu-show \[project\]/);
+		assert.match(notifications.at(-1)?.message ?? "", /# task 导览: menu-show \[project\]/);
+		assert.match(notifications.at(-1)?.message ?? "", /1\. 任务目标/);
 
 		ctx.ui.select = (title: string) => title === "Task" ? "编辑 taskbook" : "menu-edit";
 		await commands.get("task").handler("", ctx);
@@ -919,13 +1100,14 @@ test("/task menu selects taskbook name for show edit delete and run", async () =
 		ctx.ui.input = () => "一句话";
 		await commands.get("task").handler("", ctx);
 		await waitForTaskRunForTests();
-		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
+		assert.match(latestTaskMessage(sentMessages), /PASS/);
 		assert.deepEqual((await loadTaskbook(cwd, "menu-run"))?.taskbook.runs.at(-1)?.input, { text: "一句话" });
 
 		ctx.ui.select = (title: string) => title === "Task" ? "删除 taskbook" : "menu-delete";
 		await commands.get("task").handler("", ctx);
 		assert.equal(await loadTaskbook(cwd, "menu-delete"), null);
 	} finally {
+		setTaskGuideRunnerForTests(undefined);
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
@@ -933,7 +1115,7 @@ test("/task menu selects taskbook name for show edit delete and run", async () =
 });
 
 test("/task run executes worker, verify, and records a pass run", async () => {
-	const { pi, commands } = makePi();
+	const { pi, commands, sentMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async () => ({
@@ -959,7 +1141,7 @@ test("/task run executes worker, verify, and records a pass run", async () => {
 		await waitForTaskRunForTests();
 		const loaded = await loadTaskbook(cwd, "runner");
 
-		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
+		assert.match(latestTaskMessage(sentMessages), /PASS/);
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
 		assert.deepEqual(loaded?.taskbook.runs.at(-1)?.input, { url: "https://x" });
 	} finally {
@@ -970,7 +1152,7 @@ test("/task run executes worker, verify, and records a pass run", async () => {
 });
 
 test("/task run uses absolute contract outputDir as the final output directory", async () => {
-	const { pi, commands } = makePi();
+	const { pi, commands, sentMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	const finalOutputDir = path.join(cwd, "B站视频下载");
 	let workerPrompt = "";
@@ -1000,7 +1182,7 @@ test("/task run uses absolute contract outputDir as the final output directory",
 		await commands.get("task").handler("run custom-output https://x", ctx);
 		await waitForTaskRunForTests();
 
-		assert.match(notifications.at(-1)?.message ?? "", /PASS/);
+		assert.match(latestTaskMessage(sentMessages), /PASS/);
 		assert.match(workerPrompt, new RegExp(finalOutputDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 		assert.equal(readFileSync(path.join(finalOutputDir, "ok.txt"), "utf8"), "ok");
 	} finally {
@@ -1010,8 +1192,8 @@ test("/task run uses absolute contract outputDir as the final output directory",
 	}
 });
 
-test("/task run preserves natural language input with spaces and shows pass artifacts with widget", async () => {
-	const { pi, commands } = makePi();
+test("/task run preserves natural language input with spaces and sends pass artifacts to transcript", async () => {
+	const { pi, commands, sentMessages } = makePi();
 	const { cwd, ctx, notifications, widgetCalls } = makeCtx();
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async () => {
@@ -1039,7 +1221,11 @@ test("/task run preserves natural language input with spaces and shows pass arti
 		await commands.get("task").handler("run runner-file Hello world", ctx);
 		await waitForTaskRunForTests();
 
-		const message = notifications.at(-1)?.message ?? "";
+		const sent = sentMessages.at(-1);
+		assert.equal(sent?.message.customType, "task-message");
+		assert.equal(sent?.message.display, true);
+		assert.deepEqual(sent?.options, { triggerTurn: false });
+		const message = sent?.message.content ?? "";
 		assert.match(message, /PASS/);
 		assert.match(message, /任务: runner file/);
 		assert.match(message, /count\.json/);
@@ -1050,6 +1236,7 @@ test("/task run preserves natural language input with spaces and shows pass arti
 		assert.match(message, /verify 自证: 全过/);
 		assert.match(message, /## 执行摘要/);
 		assert.ok(widgetCalls.some((call) => call.lines?.some((line) => /worker 执行中/.test(line))));
+		assert.doesNotMatch(notifications.at(-1)?.message ?? "", /## /);
 		assert.equal(widgetCalls.at(-1)?.lines, undefined);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
@@ -1059,14 +1246,19 @@ test("/task run preserves natural language input with spaces and shows pass arti
 });
 
 test("/task run shows progress and reviews last run with a clean reviewer", async () => {
-	const { pi, commands, userMessages } = makePi();
+	const { pi, commands, userMessages, sentMessages, renderers } = makePi();
 	const { cwd, ctx, notifications, selections, widgetCalls } = makeCtx();
 	let reviewerPrompt = "";
 	registerTask(pi as any);
+	assert.equal(typeof renderers.get("task-progress"), "function");
 	setTaskWorkerRunnerForTests(async (...args: any[]) => {
 		const onUpdate = args[7];
 		onUpdate?.({
 			content: [{ type: "text", text: "打开 Today 页面\n解析工具列表" }],
+			details: { mode: "single", agentScope: "both", projectAgentsDir: null, results: [] },
+		});
+		onUpdate?.({
+			content: [{ type: "text", text: "打开 Today 页面\n解析工具列表\n解析工具列表" }],
 			details: { mode: "single", agentScope: "both", projectAgentsDir: null, results: [] },
 		});
 		return {
@@ -1103,19 +1295,34 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 
 		await commands.get("task").handler("run runner-progress", ctx);
 		await waitForTaskRunForTests();
+		const progressMessage = sentMessages.at(-2)?.message;
+		assert.equal(progressMessage?.customType, "task-progress");
+		assert.deepEqual(progressMessage?.details.lines, ["打开 Today 页面", "解析工具列表"]);
+		assert.equal(sentMessages.at(-1)?.message.customType, "task-message");
 
 		const progress = widgetCalls
 			.map((call) => call.lines?.join("\n") ?? "")
 			.find((text) => text.includes("最近进展"));
 		assert.match(progress ?? "", /1\. 打开 Today 页面/);
 		assert.match(progress ?? "", /2\. 解析工具列表/);
-		assert.match(notifications.at(-1)?.message ?? "", /## 最近进展/);
-		assert.match(notifications.at(-1)?.message ?? "", /打开 Today 页面/);
+		const runReport = sentMessages.at(-1)?.message.content ?? "";
+		assert.match(runReport, /## 最近进展/);
+		assert.match(runReport, /打开 Today 页面/);
+		assert.equal((runReport.match(/打开 Today 页面/g) ?? []).length, 1);
+		assert.equal((runReport.match(/解析工具列表/g) ?? []).length, 1);
+		assert.doesNotMatch(runReport, /\d+\.\s+\d+\./);
 
 		ctx.ui.select = (title: string, options: string[]) => {
 			selections.push({ title, options });
 			return "复盘上次运行";
 		};
+		ctx.ui.input = () => undefined;
+		const widgetCountBeforeCancel = widgetCalls.length;
+		await commands.get("task").handler("", ctx);
+
+		assert.equal(reviewerPrompt, "");
+		assert.equal(widgetCalls.length, widgetCountBeforeCancel);
+
 		ctx.ui.input = () => "一开始没有按 skill 里的 CDP 方法做";
 		await commands.get("task").handler("", ctx);
 
@@ -1126,7 +1333,12 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 		assert.match(reviewerPrompt, /runner-progress/);
 		assert.match(reviewerPrompt, /打开 Today 页面/);
 		assert.match(reviewerPrompt, /一开始没有按 skill 里的 CDP 方法做/);
-		assert.match(notifications.at(-1)?.message ?? "", /复盘结论/);
+		const reviewMessage = sentMessages.at(-1);
+		assert.equal(reviewMessage?.message.customType, "task-message");
+		assert.equal(reviewMessage?.message.display, true);
+		assert.deepEqual(reviewMessage?.options, { triggerTurn: false });
+		assert.match(reviewMessage?.message.content ?? "", /复盘结论/);
+		assert.doesNotMatch(notifications.at(-1)?.message ?? "", /复盘结论/);
 	} finally {
 		setTaskRunReviewerRunnerForTests(undefined);
 		setTaskWorkerRunnerForTests(undefined);
@@ -1322,7 +1534,7 @@ test("/task run does not start worker when protected tool preauthorization is de
 });
 
 test("/task run displays small markdown artifact content in the PASS report", async () => {
-	const { pi, commands } = makePi();
+	const { pi, commands, sentMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async () => ({
@@ -1347,7 +1559,7 @@ test("/task run displays small markdown artifact content in the PASS report", as
 		await commands.get("task").handler("run runner-md", ctx);
 		await waitForTaskRunForTests();
 
-		const message = notifications.at(-1)?.message ?? "";
+		const message = latestTaskMessage(sentMessages);
 		assert.match(message, /任务: runner md/);
 		assert.match(message, /### report\.md/);
 		assert.match(message, /\| Kane CLI \| Browser automation \|/);
@@ -1396,7 +1608,7 @@ test("/task run asks for missing input when no raw text is provided", async () =
 });
 
 test("/task run sends verify failures to checker and records fail on abort", async () => {
-	const { pi, commands } = makePi();
+	const { pi, commands, sentMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async () => ({
@@ -1429,12 +1641,13 @@ test("/task run sends verify failures to checker and records fail on abort", asy
 		await commands.get("task").handler("run runner-fail", ctx);
 		await waitForTaskRunForTests();
 		const loaded = await loadTaskbook(cwd, "runner-fail");
+		const message = latestTaskMessage(sentMessages);
 
 		assert.ok(notifications.some((item) => /checker 判 abort/.test(item.message)));
-		assert.match(notifications.at(-1)?.message ?? "", /FAIL/);
-		assert.match(notifications.at(-1)?.message ?? "", /任务: runner fail/);
-		assert.match(notifications.at(-1)?.message ?? "", /失败断言/);
-		assert.match(notifications.at(-1)?.message ?? "", /## 执行摘要\n> done/);
+		assert.match(message, /FAIL/);
+		assert.match(message, /任务: runner fail/);
+		assert.match(message, /失败断言/);
+		assert.match(message, /## 执行摘要\n> done/);
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "fail");
 		assert.equal(loaded?.taskbook.runs.at(-1)?.verifyFailures[0].assertion, "a");
 	} finally {
@@ -1445,7 +1658,7 @@ test("/task run sends verify failures to checker and records fail on abort", asy
 });
 
 test("/task run failure offers optional taskbook repair", async () => {
-	const { pi, commands, entries, userMessages } = makePi();
+	const { pi, commands, entries, userMessages, sentMessages } = makePi();
 	const { cwd, ctx, notifications, selections } = makeCtx();
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async () => ({
@@ -1477,7 +1690,7 @@ test("/task run failure offers optional taskbook repair", async () => {
 
 		await commands.get("task").handler("run runner-repair", ctx);
 		await waitForTaskRunForTests();
-		assert.match(notifications.at(-1)?.message ?? "", /用 \/task 选择修正/);
+		assert.match(latestTaskMessage(sentMessages), /用 \/task 选择修正/);
 
 		ctx.ui.select = (title: string, options: string[]) => {
 			selections.push({ title, options });

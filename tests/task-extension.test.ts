@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs, waitForTaskRunForTests } from "../extensions/task/task.ts";
 import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, setTaskReviewResult, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
-import { appendRunToTaskbook, loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
+import { appendRunToTaskbook, assertValidContract, loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
 import { setTaskGuideRunnerForTests } from "../extensions/task/task-guide.ts";
@@ -426,6 +426,41 @@ test("task review prompt parses skill verify contract output", () => {
 		contract: { artifacts: [] },
 	});
 	assert.equal(extractTaskReviewResult("{}"), undefined);
+});
+
+test("assertValidContract rejects malformed runtimeInput so save never reaches the throw site", () => {
+	const good = extractTaskReviewResult(`\`\`\`json
+{
+  "skill": "# Skill",
+  "verify": "process.exit(0)",
+  "contract": { "runtimeInput": ["topic"], "runtimeInputMeta": { "topic": { "default": "x" } } }
+}
+\`\`\``);
+	assert.ok(good, "well-formed review result must parse");
+	assert.doesNotThrow(() => assertValidContract(good!.contract));
+
+	// ponytail: 修复回归 — LLM 误把 runtimeInput 写成对象时,解析能过但 contract 非法。
+	// 在解析阶段就拦住,不让 reviewResult 进 state 后才在 saveTaskbook 抛错。
+	const badRuntimeInput = extractTaskReviewResult(`\`\`\`json
+{
+  "skill": "# Skill",
+  "verify": "process.exit(0)",
+  "contract": { "runtimeInput": { "topic": "something" } }
+}
+\`\`\``);
+	assert.ok(badRuntimeInput, "malformed-runtimeInput review result still parses at extract layer");
+	assert.throws(() => assertValidContract(badRuntimeInput!.contract), /Invalid contract\.runtimeInput/);
+
+	// runtimeInputMeta 里出现 runtimeInput 未声明的字段,同样拒绝
+	const orphanMeta = extractTaskReviewResult(`\`\`\`json
+{
+  "skill": "# Skill",
+  "verify": "process.exit(0)",
+  "contract": { "runtimeInput": [], "runtimeInputMeta": { "ghost": {} } }
+}
+\`\`\``);
+	assert.ok(orphanMeta);
+	assert.throws(() => assertValidContract(orphanMeta!.contract), /not declared in runtimeInput/);
 });
 
 test("task edit prompt keeps questionnaire focused on the user edit request", () => {

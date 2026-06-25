@@ -108,7 +108,7 @@ function normalizeTaskbook(value: unknown): Taskbook {
 	return value;
 }
 
-function assertValidContract(contract: unknown): void {
+export function assertValidContract(contract: unknown): void {
 	if (!contract || typeof contract !== "object" || Array.isArray(contract)) throw new Error("Invalid contract.json");
 	const record = contract as Record<string, unknown>;
 	if (record.runtimeInput !== undefined && !isStringArray(record.runtimeInput)) throw new Error("Invalid contract.runtimeInput");

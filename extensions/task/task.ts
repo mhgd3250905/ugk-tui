@@ -25,7 +25,7 @@ import {
 	type TaskPhase,
 	type TaskState,
 } from "./task-state.ts";
-import { appendRunToTaskbook, deleteTaskbook, listTaskbooks, loadTaskbook, renameTaskbook, saveTaskbook, type LoadedTaskbook } from "./task-book.ts";
+import { appendRunToTaskbook, assertValidContract, deleteTaskbook, listTaskbooks, loadTaskbook, renameTaskbook, saveTaskbook, type LoadedTaskbook } from "./task-book.ts";
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
@@ -1687,6 +1687,19 @@ export function registerTask(pi: ExtensionAPI): void {
 			if (!result) {
 				ctx.ui.notify("Task review did not find skill/verify/contract JSON yet.", "warning");
 				pi.sendUserMessage?.("你刚才的 taskbook 结果没有被 /task 解析成合法 JSON。请重新输出一个合法 JSON 对象,包含 description、skill、verify、contract；不要输出 markdown 代码块或改动摘要；skill/verify 里的换行必须作为 JSON 字符串内容正确转义。", { deliverAs: "followUp" });
+				return;
+			}
+			// ponytail: 单源校验。解析阶段就拦非法 contract,避免 reviewResult 进 state 后
+			// 在 saveTaskbook 才抛 Invalid contract.runtimeInput —— 那时已误发"复盘完成"。
+			let contractError: string | undefined;
+			try {
+				assertValidContract(result.contract);
+			} catch (error) {
+				contractError = (error as Error).message;
+			}
+			if (contractError) {
+				ctx.ui.notify("复盘产出的 contract.json 不合法,请修正后重新输出。", "warning");
+				pi.sendUserMessage?.(`你刚才的 taskbook JSON 解析成功,但 contract 不合法:${contractError}\n\ncontract 约定:runtimeInput 必须是字符串数组(字段名列表);runtimeInputMeta 是对象,每个 key 必须已在 runtimeInput 中声明。请按此约定修正 contract,重新输出完整 taskbook JSON。`, { deliverAs: "followUp" });
 				return;
 			}
 			state = setTaskReviewResult(state, result);

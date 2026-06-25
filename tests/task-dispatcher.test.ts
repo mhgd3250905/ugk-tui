@@ -69,6 +69,15 @@ test("resolveRuntimeInputFromText parses explicit topN input before dispatcher",
 	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "帮我查询知乎top3", undefined, true), { topN: 3 });
 });
 
+test("resolveRuntimeInputFromText uses complete defaults for empty headless input", async () => {
+	const value = await resolveRuntimeInputFromText({}, "# Skill", {
+		runtimeInput: ["answerCount"],
+		runtimeInputMeta: { answerCount: { default: 20 } },
+	}, "", undefined, true);
+
+	assert.deepEqual(value, { answerCount: 20 });
+});
+
 test("resolveRuntimeInputFromText uses dispatcher result for natural language input", async () => {
 	setTaskDispatcherForTests(async () => ({ url: "https://b23.tv/xxx" }));
 	try {

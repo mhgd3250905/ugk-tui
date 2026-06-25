@@ -143,7 +143,9 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 		if (dispatched) return runtimeInputWithDefaults(contract, dispatched);
 	}
 	if (fields.length === 0) return {};
+	const defaults = runtimeDefaults(contract);
 	if (headless) {
+		if (fields.every((field) => Object.hasOwn(defaults, field))) return defaults;
 		throw new Error(`dispatcher 未能从输入解析出 runtimeInput(字段: ${fields.join(", ")}）。请用更明确、完整的 input 重试,或确认 taskbook 的 runtimeInput 定义。`);
 	}
 	const entries: Array<[string, string]> = [];

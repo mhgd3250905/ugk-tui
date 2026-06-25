@@ -29,7 +29,12 @@ test("judge smoke report requires Judge PASS and taskbook evidence", () => {
 
 test("judge smoke can pass user-level DeepSeek key to child env", () => {
 	assert.deepEqual(addDeepSeekEnvFallback({}, "sk-secret"), { DEEPSEEK_API_KEY: "sk-secret" });
-	assert.deepEqual(addDeepSeekEnvFallback({ DEEPSEEK_API_KEY: "existing" }, "sk-secret"), { DEEPSEEK_API_KEY: "existing" });
+	assert.deepEqual(addDeepSeekEnvFallback({ DEEPSEEK_API_KEY: "sk-existing" }, "sk-secret"), { DEEPSEEK_API_KEY: "sk-existing" });
+});
+
+test("judge smoke replaces malformed process DeepSeek key with user key", () => {
+	assert.deepEqual(addDeepSeekEnvFallback({ DEEPSEEK_API_KEY: "DeepSeek" }, "sk-user"), { DEEPSEEK_API_KEY: "sk-user" });
+	assert.deepEqual(addDeepSeekEnvFallback({ DEEPSEEK_API_KEY: "sk-existing" }, "sk-user"), { DEEPSEEK_API_KEY: "sk-existing" });
 });
 
 test("judge smoke normalizes pasted DeepSeek config text", () => {

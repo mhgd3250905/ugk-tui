@@ -93,7 +93,8 @@ function smokeEnv(runDir) {
 }
 
 export function addDeepSeekEnvFallback(env, userValue) {
-	if (env.DEEPSEEK_API_KEY) return env;
+	const existing = normalizeDeepSeekApiKey(env.DEEPSEEK_API_KEY ?? "");
+	if (existing) return existing === env.DEEPSEEK_API_KEY ? env : { ...env, DEEPSEEK_API_KEY: existing };
 	const key = normalizeDeepSeekApiKey(userValue);
 	return key ? { ...env, DEEPSEEK_API_KEY: key } : env;
 }
@@ -104,7 +105,7 @@ export function normalizeDeepSeekApiKey(value = "") {
 }
 
 function readUserDeepSeekApiKey() {
-	if (process.env.DEEPSEEK_API_KEY || process.platform !== "win32") return "";
+	if (process.platform !== "win32") return "";
 	const result = spawnSync("powershell.exe", [
 		"-NoProfile",
 		"-Command",

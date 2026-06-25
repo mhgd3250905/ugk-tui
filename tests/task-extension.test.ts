@@ -5,7 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs, waitForTaskRunForTests } from "../extensions/task/task.ts";
-import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, setTaskReviewResult, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
+import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, markReviewQuestionnaireUsed, setTaskReviewResult, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
 import { appendRunToTaskbook, assertValidContract, loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
@@ -735,6 +735,36 @@ test("/task save without review questionnaire asks reviewer to run the design ga
 	assert.match(notifications.at(-1)?.message ?? "", /review 未用 questionnaire/);
 	assert.match(userMessages.at(-1)?.text ?? "", /questionnaire/);
 	assert.match(userMessages.at(-1)?.text ?? "", /skill\/verify/);
+});
+
+test("/task save blocks malformed contract without throwing (resumed dirty state)", async () => {
+	// ponytail: 回归 — saveCurrentTask 消费从持久层反序列化回来的 reviewResult.contract。
+	// resumed 旧会话可能带回修复前产生的非法 contract,runtimeInput 是对象 / runtimeInputMeta 有孤儿 key。
+	// 单点防御在 saveCurrentTask 入口拦住,友好反馈,不抛 raw assertValidContract 错误冒泡成 Extension error。
+	const { pi, commands, handlers, userMessages } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	// reviewQuestionnaireUsed=true 绕过第一个 guard,直接命中 contract 校验这条路径
+	const reviewing = markReviewQuestionnaireUsed(enterReviewing(startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)), "run-dir"), "done"));
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: setTaskReviewResult(reviewing, {
+			description: "脏数据",
+			skill: "# Skill",
+			verify: "process.exit(0)",
+			// LLM 常见错误:把 runtimeInput 写成对象而非字符串数组
+			contract: { runtimeInput: { topic: "something" } },
+		}),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+
+	await assert.doesNotReject(() => commands.get("task").handler("save dirty --project", ctx));
+
+	assert.match(notifications.at(-1)?.message ?? "", /contract.*不合法/);
+	assert.match(userMessages.at(-1)?.text ?? "", /Invalid contract\.runtimeInput/);
+	assert.match(userMessages.at(-1)?.text ?? "", /runtimeInput 必须是字符串数组/);
+	assert.equal((ctx.sessionManager.getEntries().at(-1)?.data as any).phase, "reviewing");
 });
 
 test("/task save runs verify self-check before landed", async () => {

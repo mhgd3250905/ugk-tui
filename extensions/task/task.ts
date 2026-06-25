@@ -1275,6 +1275,20 @@ export function registerTask(pi: ExtensionAPI): void {
 			pi.sendUserMessage?.("review 阶段还没有用 questionnaire 核对 skill/verify/contract 设计。请先用 questionnaire 确认 worker 路径和 verify 设计,然后重新输出 taskbook JSON。", { deliverAs: "followUp" });
 			return;
 		}
+		// ponytail: 单点防御 — 覆盖 command:task、agent_end save、resumed 脏 state 三条路径。
+		// 旧会话 resume 会带回修复前产生的非法 reviewResult.contract,agent_end guard 救不了已存数据。
+		// 这里拦住后友好反馈,不让 raw assertValidContract 错误冒泡成 Extension error。
+		let contractError: string | undefined;
+		try {
+			assertValidContract(state.reviewResult.contract);
+		} catch (error) {
+			contractError = (error as Error).message;
+		}
+		if (contractError) {
+			ctx.ui.notify("复盘产出的 contract.json 不合法,拒绝保存。", "warning");
+			pi.sendUserMessage?.(`复盘产出的 contract 不合法:${contractError}\n\ncontract 约定:runtimeInput 必须是字符串数组(字段名列表);runtimeInputMeta 是对象,每个 key 必须已在 runtimeInput 中声明。请按此约定修正 contract,重新输出完整 taskbook JSON。`, { deliverAs: "followUp" });
+			return;
+		}
 		const finalName = name ?? state.taskbookName ?? await ctx.ui?.input?.("taskbook 名字", "my-task");
 		if (!finalName?.trim()) {
 			ctx.ui.notify("缺少 taskbook 名字。", "warning");

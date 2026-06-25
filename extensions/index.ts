@@ -196,9 +196,16 @@ export default function (pi: ExtensionAPI) {
 	//    bin/ugk.js 用 -e 加载本扩展(只管扩展文件),skills/prompts 靠这个事件带上。
 	//    扫描包内的 skills/<name>/SKILL.md 和 prompts/*.md,返回绝对路径。
 	//    模式借自官方 examples/extensions/dynamic-resources。
+	//
+	//    skills = 系统自带(跟包走,更新覆盖);user-skills = 用户手动安装/创建,
+	//    同样在包目录下,跟着 git clone 走(用户在哪运行 ugk 都用同一批)。
+	//    两者用同一个 scanSkillPaths,来源统一、加载机制统一。
 	pi.on("resources_discover", () => {
 		return {
-			skillPaths: scanSkillPaths(path.join(packageRoot, "skills")),
+			skillPaths: [
+				...scanSkillPaths(path.join(packageRoot, "skills")),
+				...scanSkillPaths(path.join(packageRoot, "user-skills")),
+			],
 			promptPaths: scanFilesByExtension(path.join(packageRoot, "prompts"), ".md"),
 			themePaths: scanFilesByExtension(path.join(packageRoot, "themes"), ".json"),
 		};
@@ -206,7 +213,7 @@ export default function (pi: ExtensionAPI) {
 }
 
 /** Scan <dir>/<name>/SKILL.md for each subdirectory; missing dir returns []. */
-function scanSkillPaths(skillsDir: string): string[] {
+export function scanSkillPaths(skillsDir: string): string[] {
 	const paths: string[] = [];
 	try {
 		for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {

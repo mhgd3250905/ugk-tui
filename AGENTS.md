@@ -88,7 +88,12 @@
 
 ### skills
 
-`ugk-guide`、`adb-guide`、`scrcpy-guide`、`subagent-guide`、`cron-guide`、`chrome-cdp-guide`、`mcp-guide`、`skill-creator`、`docx`
+UGK 的 skill 只有两个来源,都在 ugk 安装目录下:
+
+1. **系统自带**(`<ugk>/skills/`):ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/bash-guide/skill-guide/skill-creator/docx 等,跟包走,更新覆盖。
+2. **用户 skill**(`<ugk>/user-skills/`):用户手动安装或创建,跟着 ugk 安装目录走,在任何文件夹运行 ugk 都用同一批。
+
+外部目录(`~/.agents/skills`、`~/.pi/agent/skills`、`<cwd>/.pi/skills` 等)被 ugk 的 `!skills/**` 排除,不会加载。创建/安装新 skill 一律到 `<ugk>/user-skills/<name>/`,来源是多 skill 包仓库时打平安装(只取每个 skill 包本体,丢弃仓库包裹层),详见 skill-guide。
 
 ### 权限门
 

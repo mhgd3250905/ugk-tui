@@ -72,6 +72,7 @@ test("bundles Chrome CDP guide with broad tool-first trigger guidance", () => {
 	assert.match(skill, /If the request mentions CDP, load this skill before taking action/);
 	assert.match(skill, /Prefer the chrome_cdp tool/);
 	assert.match(skill, /do not control CDP through bash\/curl\/node scripts/i);
+	assert.match(skill, /action=launch/);
 	assert.match(skill, /Start with `chrome_cdp` `action=status`/);
 });
 

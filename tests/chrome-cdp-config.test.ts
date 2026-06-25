@@ -96,6 +96,19 @@ test("checkChromeCdpPolicy allows status without confirmation", () => {
 	assert.equal(result.requiresConfirmation, false);
 });
 
+test("checkChromeCdpPolicy allows launch without confirmation in ask mode", () => {
+	const state = createChromeCdpState({}, noPersistDeps);
+
+	const result = checkChromeCdpPolicy(state, {
+		action: "launch",
+		reason: "Need to start the dedicated local Chrome CDP profile",
+		normalAccessAttempted: false,
+	});
+
+	assert.equal(result.allowed, true);
+	assert.equal(result.requiresConfirmation, false);
+});
+
 test("checkChromeCdpPolicy blocks non-status actions when normal access was not attempted", () => {
 	const state = createChromeCdpState({}, noPersistDeps);
 

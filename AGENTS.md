@@ -16,7 +16,7 @@
 - `scrcpy` — 安卓投屏控制(start/stop/status/version,内置 ADB 路径复用避免断连)
 - `subagent` — 子代理委派(single/parallel/chain 三模式,隔离 context 只回摘要)
 - `cron` — 定时任务管理(status/list/add/remove/history,代理常驻 cron 服务)
-- `chrome_cdp` — 受保护的本地登录态 Chrome 控制(status/tabs/navigate/evaluate/screenshot,默认 ask-gated)
+- `chrome_cdp` — 受保护的本地登录态 Chrome 控制(status/launch/tabs/navigate/evaluate/screenshot,默认 ask-gated)
 - `judge` — 实时监督模式:先对齐 RequirementsSpec,再委派 Driver 执行,由 Judge 在关键节点放行/纠偏/终止/最终验收
 - `mcp` — MCP stdio client:从 install/user/project/local 配置连接外部 MCP server,把 tools 注册为 `server__tool`,含 spawn policy、per-tool ask/on/off、reload stale 处理和 session 清理
 - `run_task` — subtask 工具:让 main agent 像调 subagent 一样复用已机器验收的 taskbook,返回 PASS/FAIL + 产物路径(确定性、可验收,区别于 subagent 的灵活探索)

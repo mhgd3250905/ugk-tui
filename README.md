@@ -157,7 +157,7 @@ Release notes: https://github.com/mhgd3250905/ugk-tui/commits/main
 | `scrcpy` | 安卓投屏控制(start/stop/status/version) |
 | `subagent` | 子代理委派(single/parallel/chain 三模式) |
 | `cron` | 定时任务管理(status/list/add/remove/history) |
-| `chrome_cdp` | 受保护的本地登录态 Chrome 控制(status/tabs/navigate/evaluate/screenshot) |
+| `chrome_cdp` | 受保护的本地登录态 Chrome 控制(status/launch/tabs/navigate/evaluate/screenshot) |
 | `mcp` | 外部 MCP stdio server 的 tools 接入,注册为 `server__tool` |
 | `run_task` | subtask 工具:复用已机器验收的 taskbook,返回 PASS/FAIL + 产物路径(single/parallel,确定性区别于 subagent 的灵活探索) |
 

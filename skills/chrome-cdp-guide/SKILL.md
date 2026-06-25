@@ -11,8 +11,9 @@ If the request mentions CDP, load this skill before taking action. The skill dec
 
 ## Tool Rule
 
-- Use the `chrome_cdp` tool for status, tabs, navigation, evaluation, screenshots, and DOM inspection.
+- Use the `chrome_cdp` tool for launch, status, tabs, navigation, evaluation, screenshots, and DOM inspection.
 - Do not use `bash`, `curl`, `node`, or hand-written CDP HTTP/WebSocket scripts to control Chrome when `chrome_cdp` is available.
+- If CDP is not connected, use `chrome_cdp` with `action=launch`; do not start Chrome through `bash`.
 - Use `/cdp` commands only for user-facing configuration (`ask`, `on`, `off`, `port`, `launch`) or when instructing the user how to configure CDP.
 
 ## Use This Skill When

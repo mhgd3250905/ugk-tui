@@ -179,6 +179,30 @@ test("chrome_cdp tool asks for confirmation in ask mode before browser operation
 	assert.match(result.content[0].text, /tab-1/);
 });
 
+test("chrome_cdp tool launches through deps without confirmation", async () => {
+	const { pi, tools } = makePi();
+	const { ctx, selections } = makeCtx(true);
+	let launchedPort = 0;
+	registerChromeCdp(pi as any, {
+		launch: async (port) => {
+			launchedPort = port;
+			return `launched ${port}`;
+		},
+	});
+
+	const result = await tools.get("chrome_cdp").execute(
+		"tool-1",
+		{ action: "launch", reason: "Start local Chrome CDP profile", normalAccessAttempted: false },
+		undefined,
+		undefined,
+		ctx,
+	);
+
+	assert.equal(launchedPort, 9222);
+	assert.equal(selections.length, 0);
+	assert.match(result.content[0].text, /launched 9222/);
+});
+
 test("chrome_cdp tool refuses non-status actions when normal access was not attempted", async () => {
 	const { pi, tools } = makePi();
 	const { ctx } = makeCtx(true);

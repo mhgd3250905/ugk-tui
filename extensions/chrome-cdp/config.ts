@@ -3,7 +3,7 @@ import path from "node:path";
 import { readSettingsJson, updateSettingsJson } from "../shared/settings-io.ts";
 
 export type ChromeCdpMode = "off" | "ask" | "on";
-export type ChromeCdpAction = "status" | "tabs" | "navigate" | "evaluate" | "screenshot";
+export type ChromeCdpAction = "status" | "tabs" | "launch" | "navigate" | "evaluate" | "screenshot";
 
 export interface ChromeCdpState {
 	mode: ChromeCdpMode;
@@ -113,6 +113,10 @@ export function checkChromeCdpPolicy(
 			requiresConfirmation: false,
 			reason: "Chrome CDP is off. Ask the user to run /cdp ask or /cdp on.",
 		};
+	}
+
+	if (request.action === "launch") {
+		return { allowed: true, requiresConfirmation: false };
 	}
 
 	if (!request.normalAccessAttempted && !/local chrome|cdp|devtools|logged-in|logged in/i.test(request.reason)) {

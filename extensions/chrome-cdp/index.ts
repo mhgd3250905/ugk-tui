@@ -20,7 +20,7 @@ import {
 	type ChromeCdpState,
 } from "./config.ts";
 import { formatChromeCdpStatus, formatChromeTabs } from "./formatter.ts";
-import { launchChromeCdp, launchChromeCdpAndWait } from "./launcher.ts";
+import { launchChromeCdpAndWait } from "./launcher.ts";
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
 type ChromeCdpConfirmation = "allow-once" | "allow-session" | "deny";
@@ -125,12 +125,13 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 			action: Type.Union(
 				[
 					Type.Literal("status"),
+					Type.Literal("launch"),
 					Type.Literal("tabs"),
 					Type.Literal("navigate"),
 					Type.Literal("evaluate"),
 					Type.Literal("screenshot"),
 				],
-				{ description: "status, tabs, navigate, evaluate, or screenshot" },
+				{ description: "status, launch, tabs, navigate, evaluate, or screenshot" },
 			),
 			port: Type.Optional(Type.Number({ description: "Local CDP port. Defaults to /cdp port, UGK_CDP_PORT, then 9222." })),
 			target: Type.Optional(Type.String({ description: "Tab id, URL substring, or title substring." })),
@@ -165,6 +166,9 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 			if (action === "status") {
 				const status = await deps.getStatus(port);
 				return textResult(formatChromeCdpStatus(status), status as any);
+			}
+			if (action === "launch") {
+				return textResult(await deps.launch(port), { ok: true, port });
 			}
 			if (action === "tabs") {
 				const tabs = await deps.listTabs(port);

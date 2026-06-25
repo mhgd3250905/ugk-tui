@@ -46,10 +46,11 @@ Supported actions:
 
 ```text
 status
+launch
 tabs
 navigate
 evaluate
 screenshot
 ```
 
-Every non-status call should include a reason and whether ordinary access was attempted.
+`status` and `launch` do not require a reason or confirmation. Every other action should include a reason and whether ordinary access was attempted.

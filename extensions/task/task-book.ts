@@ -188,8 +188,8 @@ export async function loadTaskbook(cwd: string, name: string): Promise<LoadedTas
 	);
 }
 
-export async function listTaskbooks(cwd: string, tag?: string): Promise<Array<{ name: string; scope: "user" | "project"; description: string; tags?: string[]; lastRun?: TaskRun }>> {
-	const byName = new Map<string, { name: string; scope: "user" | "project"; description: string; tags?: string[]; lastRun?: TaskRun }>();
+export async function listTaskbooks(cwd: string, tag?: string): Promise<Array<{ name: string; scope: "user" | "project"; description: string; tags?: string[]; lastRun?: TaskRun; contract: unknown }>> {
+	const byName = new Map<string, { name: string; scope: "user" | "project"; description: string; tags?: string[]; lastRun?: TaskRun; contract: unknown }>();
 	for (const scope of ["user", "project"] as const) {
 		const root = scope === "user" ? tasksRootUser() : tasksRootProject(cwd);
 		let entries: Awaited<ReturnType<typeof readdir>>;
@@ -210,6 +210,7 @@ export async function listTaskbooks(cwd: string, tag?: string): Promise<Array<{ 
 					description: loaded.taskbook.description,
 					tags: loaded.taskbook.tags,
 					lastRun: loaded.taskbook.runs.at(-1),
+					contract: loaded.contract,
 				});
 			} catch {
 				// ponytail: list skips broken taskbooks; show/load reports the actual corruption.

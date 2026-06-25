@@ -169,10 +169,13 @@ taskbook 清单的生成逻辑**独立成纯函数**,不绑死在任何 extensio
 ## 可用 task(确定性、已机器验收的固定任务)
 下列 task 可用 run_task 工具复用。只有当你的任务明确匹配其中某项时才调用:
 
-- bilibili-download — 输入 B 站视频链接,下载视频文件
-- grapheme-count — 输入文本,统计字素(grapheme)数量并输出
+- bilibili-download — 输入 B 站视频链接,下载视频文件 (input: url)
+- v2ex-hot — 抓取 V2EX 技术区块前 N 条 (input: topN)
+- grapheme-count — 输入文本,统计字素(grapheme)数量并输出 (input: text)
 - <name> — <taskbook.description>
 ```
+
+有 `contract.runtimeInput` 时,清单行追加 `(input: field1, field2)`。只暴露字段名,不注入完整 `contract.json`,避免 system prompt 膨胀。
 
 ### 6.3 注入时机
 

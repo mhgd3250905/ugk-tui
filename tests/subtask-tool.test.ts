@@ -110,7 +110,7 @@ async function saveFixtureTask(cwd: string, name: string, verify = "process.exit
 	});
 }
 
-test("buildTaskbookPrompt lists task names and descriptions only", async () => {
+test("buildTaskbookPrompt lists task names, descriptions, and input fields", async () => {
 	const { cwd } = makeCtx();
 	try {
 		await saveFixtureTask(cwd, "alpha");
@@ -121,7 +121,8 @@ test("buildTaskbookPrompt lists task names and descriptions only", async () => {
 		assert.match(prompt, /## 可用 task/);
 		assert.match(prompt, /- alpha — alpha description/);
 		assert.match(prompt, /- beta — beta description/);
-		assert.doesNotMatch(prompt, /runtimeInput/);
+		assert.match(prompt, /input: text/);
+		assert.doesNotMatch(prompt, /contract\.json/);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

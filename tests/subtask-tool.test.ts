@@ -345,6 +345,31 @@ test("run_task parallel returns per-task output directories and aggregate count"
 	}
 });
 
+test("run_task parallel does NOT terminate — lets the agent continue multi-step orchestration", async () => {
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => workerOk("done"));
+	setTaskDispatcherForTests(async (_ctx, _skill, _contract, rawInput) => ({ text: rawInput }));
+	try {
+		await saveFixtureTask(cwd, "ok-task");
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", {
+			tasks: [{ name: "ok-task", input: "one" }],
+		}, undefined, undefined, ctx);
+
+		// parallel 模式不 terminate:组合任务(如"先抓列表再批量下载")需要主 agent
+		// 在 PASS 后自动继续下一步。terminate 会截断组合编排,逼用户手动"继续"。
+		assert.equal(result.isError, undefined);
+		assert.notEqual(result.terminate, true, "parallel 模式不应 terminate,要让 agent 继续编排");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("task executing phase blocks nested run_task", async () => {
 	const { pi, commands, handlers } = makePi();
 	const { ctx } = makeCtx();

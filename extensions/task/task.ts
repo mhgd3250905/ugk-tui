@@ -1543,10 +1543,12 @@ export function registerTask(pi: ExtensionAPI): void {
 				return {
 					content: [{ type: "text", text: formatSubtaskToolText(parsed.mode, results) }],
 					details: { mode: parsed.mode, results },
-					// ponytail: run_task 是一次性确定性任务,PASS/FAIL + 产物路径已在 content 里。
-					// terminate:true 跳过工具后的自动总结轮 —— 那轮若 provider 卡住,Esc 接不住(用户实测过)。
-					// 这既是止血(避开卡死轮次),也是正确语义(确定性任务无需主 agent 再总结)。
-					terminate: true,
+					// ponytail: terminate 策略按模式区分。
+					// single:一次性确定性任务,PASS/FAIL + 产物路径已在 content 里,terminate:true
+					//   跳过工具后的自动总结轮(那轮若 provider 卡住,Esc 接不住)。既是止血也是正确语义。
+					// parallel:往往是多步骤编排的一部分(如"先抓列表再批量下载"),terminate 会截断组合任务,
+					//   让主 agent 没机会自动继续下一步。parallel 不 terminate,把连续决策权交还 agent。
+					terminate: parsed.mode === "single",
 				};
 			} catch (error) {
 				return {

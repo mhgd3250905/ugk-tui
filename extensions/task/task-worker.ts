@@ -61,28 +61,45 @@ export async function dispatchWorker(
 ): Promise<TaskWorkerResult> {
 	const discovery = discoverAgents(opts.cwd, "both");
 	const runner = workerRunnerForTests ?? runSingleAgent;
-	const result: SingleResult = await runner(
-		opts.cwd,
-		discovery.agents,
-		"worker",
-		buildTaskWorkerPrompt(input),
-		opts.cwd,
-		undefined,
-		opts.signal,
-		opts.onUpdate
-			? (partial) => {
-				const text = partial.content.find((part) => part.type === "text")?.text;
-				if (typeof text === "string") opts.onUpdate?.(text);
-			}
-			: undefined,
-		(results) => ({
-			mode: "single",
-			agentScope: "both",
-			projectAgentsDir: discovery.projectAgentsDir,
-			results,
-		}),
-		opts.env,
-	);
+	let result: SingleResult;
+	try {
+		result = await runner(
+			opts.cwd,
+			discovery.agents,
+			"worker",
+			buildTaskWorkerPrompt(input),
+			opts.cwd,
+			undefined,
+			opts.signal,
+			opts.onUpdate
+				? (partial) => {
+					const text = partial.content.find((part) => part.type === "text")?.text;
+					if (typeof text === "string") opts.onUpdate?.(text);
+				}
+				: undefined,
+			(results) => ({
+				mode: "single",
+				agentScope: "both",
+				projectAgentsDir: discovery.projectAgentsDir,
+				results,
+			}),
+			opts.env,
+		);
+	} catch (error) {
+		// ponytail: runSingleAgent 在 signal abort 时 throw "Subagent was aborted"。
+		// 把它转成 {ok:false} 正常返回,让 runTaskWithRetry 的 abort 判定 / handleTaskRun
+		// 的"已停止"分支生效。只在确实 abort 时吞异常,非 abort 异常照常往上抛(不掩盖真 bug)。
+		if (opts.signal?.aborted) {
+			return {
+				ok: false,
+				outputDir: input.outputDir,
+				summary: "",
+				errorMessage: "worker 被中断",
+				usage: { input: 0, output: 0, cost: 0 },
+			};
+		}
+		throw error;
+	}
 	const summary = getFinalOutput(result.messages);
 	const failed = isFailedResult(result);
 	return {

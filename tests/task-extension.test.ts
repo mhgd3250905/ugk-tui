@@ -1500,6 +1500,58 @@ test("/task run can be stopped and records user notes while worker is running", 
 	}
 });
 
+test("/task run user abort (worker throws) reports stopped, not exception", async () => {
+	// ponytail: runSingleAgent 在 signal abort 时 throw "Subagent was aborted"。
+	// dispatchWorker 必须接住转成 {ok:false},让 handleTaskRun 走"已停止"分支而非"运行异常"。
+	const { pi, commands, handlers } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	let workerStarted!: () => void;
+	const started = new Promise<void>((resolve) => {
+		workerStarted = resolve;
+	});
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		const signal = args[6] as AbortSignal | undefined;
+		workerStarted();
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		// 复刻真实 runSingleAgent:abort 时 throw(而非返回 error)
+		if (signal?.aborted) throw new Error("Subagent was aborted");
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }] }],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	setTaskDispatcherForTests(async () => ({}));
+	try {
+		await saveTaskbook("project", cwd, "runner-throw-abort", {
+			description: "runner throw abort",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { artifacts: [] },
+		});
+
+		const runPromise = commands.get("task").handler("run runner-throw-abort", ctx);
+		await started;
+		await handlers.get("input")![0]({ source: "interactive", text: "/task stop" }, ctx);
+		await runPromise;
+		await waitForTaskRunForTests();
+
+		assert.ok(notifications.some((item) => /已请求停止/.test(item.message)), "应发出停止请求通知");
+		assert.ok(notifications.some((item) => /已停止 taskbook/.test(item.message)), "应走已停止分支");
+		assert.ok(!notifications.some((item) => /运行异常/.test(item.message)), "不应报运行异常");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("/task run preauthorizes mentioned protected tools for the worker", async () => {
 	const { pi, commands } = makePi(["read", "bash", "edit", "write", "subagent", "chrome_cdp", "alpha__echo"]);
 	const { cwd, ctx } = makeCtx();

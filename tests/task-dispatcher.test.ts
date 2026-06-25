@@ -51,7 +51,7 @@ test("resolveRuntimeInputFromText merges dispatcher output with defaults", async
 			runtimeInput: ["text", "section"],
 			runtimeInputMeta: {
 				text: { type: "string" },
-				section: { type: "string", default: "技术" },
+				section: { type: "string", default: "技术", required: false },
 			},
 		}, "Hello 世界");
 
@@ -201,12 +201,13 @@ test("required gate: bare URL (local undefined) still routes to dispatcher", asy
 	}
 });
 
-test("required gate: dispatcher unavailable falls back to partial local result (no worse than before)", async () => {
-	// dispatcher 不可用(返回 undefined):local 只抽到 page,缺 url → 用部分结果补 default
-	// 这不比改前差(改前会直接返回 {page:1},verify 仍会报 url 缺失,但至少不崩)
-	const value = await resolveRuntimeInputFromText({}, "# Skill", biliContract, "https://x.com, page=2", undefined, true);
-
-	assert.deepEqual(value, { page: 2 });
+test("required gate: dispatcher unavailable and partial missing required → throws in headless mode", async () => {
+	// dispatcher 不可用、local 只抽到 page 但缺 required 的 url → headless 抛错
+	// 修复前会静默返回 {page:2} 导致下游 worker 拿不到 url 而 hardcode/猜值
+	await assert.rejects(
+		async () => resolveRuntimeInputFromText({}, "# Skill", biliContract, "https://x.com, page=2", undefined, true),
+		/未能从输入解析出必填字段: url/,
+	);
 });
 
 test("required gate: contract without required declarations keeps legacy behavior", async () => {

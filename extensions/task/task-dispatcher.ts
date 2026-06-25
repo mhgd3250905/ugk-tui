@@ -168,9 +168,15 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 		if (local && coversRequired(local)) return runtimeInputWithDefaults(contract, local);
 		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride).catch(() => undefined);
 		if (dispatched && coversRequired(dispatched)) return runtimeInputWithDefaults(contract, dispatched);
-		// dispatcher 也没抽全 required:若 local/dispatched 至少有部分结果,补 default 后用它(不比现状差)。
+		// dispatcher 也没抽全 required。partial 不覆盖 required 则不返回,
+		// 否则下游 worker 拿到不完整的 input 会 hardcode 或猜值,绕开 contract 约束。
+		// headless 时直接抛错让调用方补 input;交互式时落到后面的 UI prompt。
 		const partial = dispatched ?? local;
-		if (partial) return runtimeInputWithDefaults(contract, partial);
+		if (partial && coversRequired(partial)) return runtimeInputWithDefaults(contract, partial);
+		if (partial && headless) {
+			const missing = required.filter((field) => !Object.prototype.hasOwnProperty.call(partial, field));
+			throw new Error(`dispatcher 未能从输入解析出必填字段: ${missing.join(", ")}。请用更明确、完整的 input 重试,或确认 taskbook 的 runtimeInput 定义。`);
+		}
 	}
 	if (fields.length === 0) return {};
 	const defaults = runtimeDefaults(contract);

@@ -402,17 +402,23 @@ test("run_task retries worker after verify fail and passes on the second attempt
 	const { cwd, ctx } = makeCtx();
 	registerTask(pi as any);
 	let workerCalls = 0;
+	// ponytail: worker 第2次产出必须依赖 feedback —— prompt 里有"上一轮失败反馈"才写合法 JSON。
+	// 这样如果 feedback 链路断了(checker→worker),第2次仍写非法,测试会失败,真正守住重试语义。
 	const workerSpy = async (_d: unknown, _a: unknown, _n: string, task: string) => {
 		workerCalls += 1;
 		const { writeFile, mkdir } = await import("node:fs/promises");
 		const dir = outputDirFromTask(task);
 		await mkdir(dir, { recursive: true });
-		// 第1次非法 JSON(模拟你这次的真实失败),第2次合法
-		await writeFile(path.join(dir, "out.json"), workerCalls === 1 ? "{bad json" : '{"ok": true}', "utf8");
-		return workerOk(workerCalls === 1 ? "v1" : "fixed");
+		const hasFeedback = /上一轮失败反馈/.test(task);
+		await writeFile(path.join(dir, "out.json"), hasFeedback ? '{"ok": true}' : "{bad json", "utf8");
+		return workerOk(hasFeedback ? "fixed" : "v1");
 	};
+	let checkerCalls = 0;
 	setTaskWorkerRunnerForTests(workerSpy as any);
-	setTaskCheckerRunnerForTests(checkerRetryMock());
+	setTaskCheckerRunnerForTests(async () => {
+		checkerCalls += 1;
+		return checkerRetryMock()();
+	});
 	setTaskDispatcherForTests(async () => ({ text: "x" }));
 	try {
 		await saveFixtureTask(cwd, "retry-pass", JSON_VERIFY);
@@ -425,6 +431,7 @@ test("run_task retries worker after verify fail and passes on the second attempt
 		assert.equal(result.details.results[0].status, "pass");
 		assert.equal(result.details.results[0].attempts, 2, "worker 应被调 2 次");
 		assert.equal(workerCalls, 2);
+		assert.equal(checkerCalls, 1, "checker 必须被调用以生成 feedback");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskCheckerRunnerForTests(undefined);
@@ -492,6 +499,52 @@ test("run_task stops early when checker judges abort", async () => {
 		assert.equal(result.details.results[0].status, "fail");
 		assert.equal(result.details.results[0].attempts, 1, "checker 判 abort,worker 只跑 1 次");
 		assert.equal(workerCalls, 1);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskCheckerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("run_task reports clean FAIL with empty verifyFailures when worker fails without throwing", async () => {
+	// ponytail: worker 返回 ok:false(非抛错)时,runTaskWithRetry 合成空 verifyResult。
+	// 守住这条路径:verifyFailures 必须是 [](不是 undefined),status=fail,attempts=1,且 worker 不重试。
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	let workerCalls = 0;
+	let checkerCalls = 0;
+	setTaskWorkerRunnerForTests(async () => {
+		workerCalls += 1;
+		// worker 失败但不抛:exitCode 1 + stderr → isFailedResult=true → ok:false
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 1,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "worker crashed" }] }],
+			stderr: "tool not found",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	setTaskCheckerRunnerForTests(async () => {
+		checkerCalls += 1;
+		return checkerRetryMock()();
+	});
+	setTaskDispatcherForTests(async () => ({ text: "x" }));
+	try {
+		await saveFixtureTask(cwd, "worker-fail", JSON_VERIFY);
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", { name: "worker-fail", input: "x" }, undefined, undefined, ctx);
+
+		assert.equal(result.details.results[0].status, "fail");
+		assert.equal(result.details.results[0].attempts, 1, "worker 失败不重试");
+		assert.equal(workerCalls, 1);
+		assert.equal(checkerCalls, 0, "worker 失败不调 checker");
+		assert.deepEqual(result.details.results[0].verifyFailures, [], "未运行 verify,failures 为空数组非 undefined");
+		assert.match(result.details.results[0].workerSummary, /tool not found/);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskCheckerRunnerForTests(undefined);

@@ -845,7 +845,7 @@ interface TaskRetryOutcome {
 	workerResult: TaskWorkerResult;
 	verifyResult: Awaited<ReturnType<typeof runVerify>>;
 	attempts: number; // 实际 worker 尝试次数 (1..maxRetry+1)
-	aborted: boolean; // 是否被 signal 中断(worker 运行中被 abort)
+	aborted: boolean; // worker 被中断(worker.ok===false 且 signal.aborted),区别于普通失败
 	checkerAborted?: boolean; // checker 主动判 abort 提前终止
 }
 
@@ -860,6 +860,7 @@ async function runTaskWithRetry(
 		maxRetry?: number;
 		onWorkerStart?: (attempt: number, feedback: unknown) => void;
 		onWorkerUpdate?: (text: string) => void;
+		onVerifyStart?: (attempt: number) => void;
 	},
 ): Promise<TaskRetryOutcome> {
 	const maxRetry = opts.maxRetry ?? 3;
@@ -869,6 +870,10 @@ async function runTaskWithRetry(
 	let verifyResult: Awaited<ReturnType<typeof runVerify>> | undefined;
 	let attempts = 0;
 	let checkerAborted = false;
+	// ponytail: aborted 收窄为"worker 被中断"——worker.ok===false 且 signal 已 aborted。
+	// 不用 Boolean(signal.aborted):那样 verify/checker 期间被 abort 也会算 aborted,
+	// 而 worker 那轮其实成功了,会被 handleTaskRun 误判进 abort 分支或漏判 FAIL。
+	let workerAborted = false;
 	for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
 		opts.onWorkerStart?.(attempt + 1, feedback);
 		attempts = attempt + 1;
@@ -885,9 +890,13 @@ async function runTaskWithRetry(
 			onUpdate: opts.onWorkerUpdate,
 		});
 
-		// worker 失败不重试(与 /task run 一致);abort 由调用方判断 opts.signal
-		if (!workerResult.ok) break;
+		// worker 失败不重试(与 /task run 一致)。worker 被中断专门标记,区别于普通失败。
+		if (!workerResult.ok) {
+			if (opts.signal?.aborted) workerAborted = true;
+			break;
+		}
 
+		opts.onVerifyStart?.(attempt + 1);
 		verifyResult = await runVerify({ verifyPath, outputDir, input: runtimeInput });
 		if (verifyResult.passed) break;
 
@@ -912,7 +921,7 @@ async function runTaskWithRetry(
 	if (!verifyResult) {
 		verifyResult = { passed: false, failures: [], stdout: "", stderr: "", exitCode: null, durationMs: 0 };
 	}
-	return { workerResult: workerResult!, verifyResult, attempts, aborted: Boolean(opts.signal?.aborted), checkerAborted };
+	return { workerResult: workerResult!, verifyResult, attempts, aborted: workerAborted, checkerAborted };
 }
 
 async function executeSubtask(
@@ -1069,6 +1078,13 @@ async function handleTaskRun(
 						...runState.progress.slice(-5).map((line, index) => `${index + 1}. ${line}`),
 					]);
 				}
+			},
+			onVerifyStart: (attempt) => {
+				setTaskRunWidget(ctx, [
+					`⏳ taskbook "${finalName}" 运行中...`,
+					`尝试 ${attempt}/${maxRetry + 1}`,
+					"verify 执行中...",
+				]);
 			},
 		});
 		const { workerResult, verifyResult, attempts } = outcome;
@@ -1739,8 +1755,9 @@ export function registerTask(pi: ExtensionAPI): void {
 				pi.sendUserMessage?.("你刚才的 taskbook 结果没有被 /task 解析成合法 JSON。请重新输出一个合法 JSON 对象,包含 description、skill、verify、contract；不要输出 markdown 代码块或改动摘要；skill/verify 里的换行必须作为 JSON 字符串内容正确转义。", { deliverAs: "followUp" });
 				return;
 			}
-			// ponytail: 单源校验。解析阶段就拦非法 contract,避免 reviewResult 进 state 后
+			// ponytail: 早拦截。解析阶段就校验 contract,避免非法 reviewResult 进 state 后
 			// 在 saveTaskbook 才抛 Invalid contract.runtimeInput —— 那时已误发"复盘完成"。
+			// saveCurrentTask 入口和 saveTaskbook 各有一道校验,覆盖 resumed 脏 state 和物理写入。
 			let contractError: string | undefined;
 			try {
 				assertValidContract(result.contract);

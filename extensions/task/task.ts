@@ -32,7 +32,7 @@ import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } fro
 import { buildTaskbookPrompt } from "./task-registry.ts";
 import { dispatchTaskGuide } from "./task-guide.ts";
 import { dispatchTaskRunReviewer } from "./task-run-reviewer.ts";
-import { runVerify } from "./task-verify.ts";
+import { runVerify, type VerifyFailure } from "./task-verify.ts";
 import { dispatchWorker, type TaskWorkerResult } from "./task-worker.ts";
 import { mapWithConcurrencyLimit } from "../subagent-runtime.ts";
 
@@ -703,6 +703,9 @@ async function formatRepairSummary(
 		...(failures.length > 0
 			? failures.map((failure) => `- ${failure.assertion}: 预期 ${failure.expected}, 实际 ${failure.actual}`)
 			: ["- verify 未返回结构化失败"]),
+		...(looksLikeMissingArtifact(failures)
+			? ["", "⚠️ 这次失败像是「文件不存在」。先别急着放宽 verify 或改执行方法,优先核对三处产物名是否一致:contract.artifacts[].name、skill.md 里写出的文件名、verify.mjs 里 stat/读取的路径。最常见的死循环就是三者名字写岔了。"]
+			: []),
 		"",
 		"WorkerSummary:",
 		workerResult?.summary?.trim() || "(none)",
@@ -722,6 +725,15 @@ async function formatRepairSummary(
 		JSON.stringify(loaded.contract, null, "\t"),
 		"```",
 	].join("\n");
+}
+
+// ponytail: 文件不存在是产物名漂移的典型症状(三处名字写岔)。命中就给 reviewer
+// 一条定向提示,别让它围着「文件不存在」症状改、回到「统一产物名」根因。
+// 只匹配明确的不存在信号,不确定时不误报(宁可漏报让 reviewer 自己判断)。
+export function looksLikeMissingArtifact(failures: { assertion: string; actual: string }[]): boolean {
+	if (failures.length === 0) return false;
+	const re = /ENOENT|not\s+found|找不到|不存在|no\s+such\s+file/i;
+	return failures.some((f) => re.test(`${f.assertion} ${f.actual}`));
 }
 
 function formatTaskbookUpdateSummary(loaded: LoadedTaskbook): string {

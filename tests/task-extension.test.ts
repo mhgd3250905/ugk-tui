@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs, waitForTaskRunForTests } from "../extensions/task/task.ts";
+import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs, waitForTaskRunForTests, looksLikeMissingArtifact } from "../extensions/task/task.ts";
 import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, markReviewQuestionnaireUsed, setTaskReviewResult, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
 import { appendRunToTaskbook, assertValidContract, loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
@@ -1898,4 +1898,16 @@ test("/task save defaults to execute output dir when no output-dir is passed", a
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}
+});
+
+test("looksLikeMissingArtifact flags missing-file failures and stays quiet otherwise", () => {
+	// ponytail: 「文件不存在」是产物名漂移的典型症状。命中即提示,正常失败不误报。
+	const miss = (actual: string) => [{ assertion: "产物存在", expected: "pass", actual }];
+	assert.equal(looksLikeMissingArtifact([]), false);
+	assert.equal(looksLikeMissingArtifact(miss("ENOENT: no such file")), true);
+	assert.equal(looksLikeMissingArtifact(miss("文件 linux_do_post.json 不存在")), true);
+	assert.equal(looksLikeMissingArtifact(miss("找不到 report.md")), true);
+	assert.equal(looksLikeMissingArtifact(miss("not found")), true);
+	assert.equal(looksLikeMissingArtifact(miss('字段 name 实际为 "wrong"')), false, "内容错误不算文件不存在");
+	assert.equal(looksLikeMissingArtifact(miss("exit 1")), false, "非文件类失败不误报");
 });

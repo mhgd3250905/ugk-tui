@@ -164,6 +164,11 @@ test("run_task single returns machine-verifiable PASS and records the run", asyn
 		assert.equal(result.details.results[0].artifacts.length, 1);
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
 		assert.deepEqual(loaded?.taskbook.runs.at(-1)?.input, { text: "hello" });
+		// ponytail: terminate:true 避开工具后的总结轮(那轮 provider 卡住时 Esc 接不住);
+		// workerSummary 不进 content(白占 token + 放大卡顿),只留 details。
+		assert.equal(result.terminate, true, "run_task PASS 后应 terminate,不进入自动总结轮");
+		assert.match(result.details.results[0].workerSummary, /写好了/, "workerSummary 仍在 details");
+		assert.doesNotMatch(result.content[0].text, /workerSummary/, "workerSummary 不进 LLM context");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);

@@ -1034,12 +1034,14 @@ function formatSubtaskToolText(mode: "single" | "parallel", results: SubtaskResu
 	const header = mode === "parallel" ? `${passed}/${results.length} succeeded` : `run_task ${results[0]?.status.toUpperCase() ?? "FAIL"}`;
 	return [
 		header,
+		// workerSummary 不进 LLM context —— 它可能很长(产物摘要表格等),白占 token
+		// 还会触发主 agent 进入后续总结轮(那轮若 provider 卡住,Esc 也救不回来)。
+		// 完整 workerSummary 仍在 details.results[].workerSummary,UI/调试照常可取。
 		...results.map((result) => [
 			`- ${result.name}: ${result.status.toUpperCase()}`,
 			`  outputDir: ${result.outputDir}`,
 			result.artifacts.length > 0 ? `  artifacts: ${result.artifacts.join(", ")}` : "",
 			result.verifyFailures.length > 0 ? `  verifyFailures: ${JSON.stringify(result.verifyFailures)}` : "",
-			result.workerSummary ? `  workerSummary: ${result.workerSummary}` : "",
 		].filter(Boolean).join("\n")),
 	].join("\n");
 }
@@ -1491,6 +1493,10 @@ export function registerTask(pi: ExtensionAPI): void {
 				return {
 					content: [{ type: "text", text: formatSubtaskToolText(parsed.mode, results) }],
 					details: { mode: parsed.mode, results },
+					// ponytail: run_task 是一次性确定性任务,PASS/FAIL + 产物路径已在 content 里。
+					// terminate:true 跳过工具后的自动总结轮 —— 那轮若 provider 卡住,Esc 接不住(用户实测过)。
+					// 这既是止血(避开卡死轮次),也是正确语义(确定性任务无需主 agent 再总结)。
+					terminate: true,
 				};
 			} catch (error) {
 				return {

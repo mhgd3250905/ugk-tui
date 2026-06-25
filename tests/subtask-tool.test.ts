@@ -316,6 +316,52 @@ test("run_task parallel isolates a single task's execution failure from the batc
 	}
 });
 
+test("run_task parallel isolates a single task's input-parse failure (does not abort the batch)", async () => {
+	// 回归保护:parallel 模式下单个 task 的 resolveRuntimeInput 抛错(dispatcher 缺必填字段),
+	// 不能上抛炸掉整个 run_task 工具(返回 isError + 空 results)。
+	// 应转成该 task 的 FAIL,其他 task 正常返回。
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => workerOk("done"));
+	// good 的 contract 不声明 required → 保守语义不门禁 → 部分输入也能解析成功
+	// bad 的 contract 声明 required:text + 无 default → 解析失败抛错(模拟必填字段补不全)
+	await saveFixtureTask(cwd, "good");
+	await saveTaskbook("project", cwd, "gated", {
+		description: "gated task",
+		spec,
+		skill: "do thing",
+		verify: "process.exit(0);\n",
+		contract: { runtimeInput: ["text"], runtimeInputMeta: { text: { required: true } }, artifacts: [] },
+	});
+	// dispatcher 对 good 返回完整 {text},对 gated 返回 undefined(模拟补不全必填)
+	setTaskDispatcherForTests(async (_ctx: any, _skill: any, contract: any, _raw: string) => {
+		const meta = contract?.runtimeInputMeta;
+		return meta?.text?.required === true ? undefined : { text: "ok" };
+	});
+	try {
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", {
+			tasks: [
+				{ name: "good", input: "anything" },
+				{ name: "gated", input: "incomplete" },
+			],
+		}, undefined, undefined, ctx);
+
+		// 关键:不 isError(批次没被炸),两个 task 都有结果
+		assert.equal(result.isError, undefined);
+		assert.match(result.content[0].text, /1\/2 succeeded/);
+		assert.equal(result.details.results.length, 2);
+		const failed = result.details.results.filter((item: any) => item.status === "fail");
+		assert.equal(failed.length, 1, "gated task FAIL,good task PASS");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("run_task parallel returns per-task output directories and aggregate count", async () => {
 	const { pi, tools } = makePi();
 	const { cwd, ctx } = makeCtx();

@@ -58,6 +58,7 @@ type SubtaskResult = {
 	duration: number;
 	attempts: number;
 	phases?: Record<string, number>; // ponytail: 诊断用,各阶段耗时(ms)
+	parseFailed?: boolean; // ponytail: 此 FAIL 源自输入解析失败(非 worker/verify),run_task 层据此判断是否标 isError
 };
 
 type TaskRunFailure = {
@@ -1014,21 +1015,31 @@ async function executeSubtask(
 	const runDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${request.name}-${startedAt}-${Math.random().toString(36).slice(2, 8)}`);
 	const outputDir = path.join(runDir, "output");
 	await mkdir(outputDir, { recursive: true });
-	const runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, request.input, true);
+	// ponytail: resolveRuntimeInput 的错误(如 dispatcher 缺必填字段)也要纳入单 task 隔离,
+	// 否则 parallel 模式下单个 task 的解析失败会上抛,穿过 mapWithConcurrencyLimit,
+	// 让整个 run_task 工具进 catch,返回 isError + 空 results —— 其他并发 task 的进度全丢。
+	// 解析失败应转成该 task 的 FAIL,而非炸掉整个批次。
+	let runtimeInput: unknown;
 	let outcome: TaskRetryOutcome;
 	try {
+		runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, request.input, true);
 		outcome = await runTaskWithRetry(loaded, runtimeInput, outputDir, cwdOf(ctx), { env: workerEnv, signal });
 	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
 		return {
 			name: request.name,
 			status: "fail",
 			outputDir,
 			artifacts: [],
 			verifyFailures: [],
-			workerSummary: `执行异常: ${error instanceof Error ? error.message : String(error)}`,
+			workerSummary: `执行异常: ${message}`,
 			duration: (Date.now() - startedAt) / 1000,
 			attempts: 1,
-		};
+			// parseFailed 标记:此 FAIL 是输入解析失败(非 worker/verify 失败)。
+			// run_task 工具层据此判断:单任务(single)全 parseFailed → 标 isError 让 agent 知道是输入问题;
+			// 并行(parallel)部分 parseFailed → 不炸批次,各 task 独立 PASS/FAIL。
+			parseFailed: true,
+		} as SubtaskResult;
 	}
 	const duration = (Date.now() - startedAt) / 1000;
 	const status = outcome.workerResult.ok && outcome.verifyResult.passed ? "pass" : "fail";
@@ -1540,6 +1551,18 @@ export function registerTask(pi: ExtensionAPI): void {
 				if (workerEnv === null) throw new Error("run_task 需要受保护工具授权,但未获授权。");
 				const results = await mapWithConcurrencyLimit(parsed.tasks, SUBTASK_CONCURRENCY, async (task, index) =>
 					await executeSubtask(ctx, task, loaded[index], workerEnv, signal));
+				// ponytail: 所有 task 都因输入解析失败而 FAIL → 标 isError。
+				// 这保留 single 模式的旧行为(解析失败 = 调用失败,agent 据此重试输入);
+				// parallel 模式下只要有任一 task 正常执行(PASS 或 worker/verify FAIL),不标 isError,
+				// 各 task 独立结果在 content 里,批次不被单个解析失败炸掉。
+				const allParseFailed = results.length > 0 && results.every((r) => r.parseFailed === true);
+				if (allParseFailed) {
+					return {
+						content: [{ type: "text", text: results.map((r) => r.workerSummary).join("\n") || "所有 task 的输入解析失败" }],
+						details: { mode: parsed.mode, results },
+						isError: true,
+					};
+				}
 				return {
 					content: [{ type: "text", text: formatSubtaskToolText(parsed.mode, results) }],
 					details: { mode: parsed.mode, results },

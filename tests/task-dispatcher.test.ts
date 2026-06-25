@@ -210,9 +210,10 @@ test("required gate: dispatcher unavailable and partial missing required → thr
 	);
 });
 
-test("required gate: contract without required declarations keeps legacy behavior", async () => {
-	// 旧式 contract(无 required 字段):所有字段视为必填(default required:true)
-	// local 抽到部分仍会走 dispatcher 补全 —— 但这里测无 runtimeInputMeta 的情况
+test("required gate: contract without required:true declarations does NOT gate (legacy compat)", async () => {
+	// 保守语义:只有显式 required:true 才门禁。旧式 contract(无 required 字段)不门禁,
+	// 保持旧行为不变——部分输入不会被拦截,不会从软失败变成硬失败。
+	// 这是回归保护:防止"激活 required"误伤所有旧 taskbook。
 	const legacyContract = { runtimeInput: ["text"] };
 	setTaskDispatcherForTests(async () => ({ text: "from-dispatcher" }));
 	try {
@@ -222,4 +223,20 @@ test("required gate: contract without required declarations keeps legacy behavio
 	} finally {
 		setTaskDispatcherForTests(undefined);
 	}
+});
+
+test("required gate: legacy contract with partial input does NOT throw in headless (no required field gated)", async () => {
+	// 关键回归保护:旧式 contract(runtimeInput 有多个字段,但都没声明 required:true),
+	// 输入只抽到部分字段。改之前(bf0ed04^):静默返回部分结果。
+	// 改之后(bf0ed04):误判成必填 → headless 抛错(破坏旧行为)。
+	// 本修复:保守语义,无 required:true 不门禁 → 不抛错,返回部分结果(补 default)。
+	const legacyMultiContract = {
+		runtimeInput: ["a", "b"],
+		// 无 runtimeInputMeta,或 meta 里没有 required:true
+	};
+	// dispatcher 不可用,local 只抽到 a(URL 不是 field=value,但 a=... 能抽)
+	// 这模拟"用户输入不完整 + dispatcher 也补不全"的真实场景
+	const value = await resolveRuntimeInputFromText({}, "# Skill", legacyMultiContract, "a=hello", undefined, true);
+	// 不抛错,返回部分结果 {a:hello}(无 default 可补,b 缺失但不是门禁字段)
+	assert.deepEqual(value, { a: "hello" });
 });

@@ -70,21 +70,22 @@ function runtimeDefaults(contract: unknown): Record<string, unknown> {
 }
 
 /**
- * 提取 contract 中声明为 required 的 runtimeInput 字段名。
- * required 默认为 true(未声明 meta 或未写 required 都视为必填),
- * 显式 required:false 才视为可选。这让 required 从死字段变成运行时门禁。
+ * 提取 contract 中显式声明 required:true 的 runtimeInput 字段名。
+ * 保守语义:只有显式 required:true 才是门禁字段;未声明或 required:false 都不算。
+ * 这保持旧 contract(无 runtimeInputMeta 或无 required 字段)的行为完全不变——
+ * 不会把原本能软失败(返回部分结果)的场景变成硬失败(headless 抛错)。
+ * required:true 激活了之前死字段的门禁能力,但不改变默认契约语义。
  */
 function runtimeRequiredFields(contract: unknown): string[] {
 	const fields = runtimeFields(contract);
 	if (fields.length === 0) return [];
-	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return fields;
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return [];
 	const meta = (contract as Record<string, unknown>).runtimeInputMeta;
-	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return fields;
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return [];
 	return fields.filter((field) => {
 		const fieldMeta = (meta as Record<string, unknown>)[field];
-		if (!fieldMeta || typeof fieldMeta !== "object" || Array.isArray(fieldMeta)) return true; // 无 meta 视为必填
-		const required = (fieldMeta as Record<string, unknown>).required;
-		return required !== false; // 显式 false 才可选,其余(含 undefined/true)必填
+		if (!fieldMeta || typeof fieldMeta !== "object" || Array.isArray(fieldMeta)) return false; // 无 meta 不门禁
+		return (fieldMeta as Record<string, unknown>).required === true; // 仅显式 true 才门禁
 	});
 }
 

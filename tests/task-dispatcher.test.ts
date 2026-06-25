@@ -61,6 +61,14 @@ test("resolveRuntimeInputFromText merges dispatcher output with defaults", async
 	}
 });
 
+test("resolveRuntimeInputFromText parses explicit topN input before dispatcher", async () => {
+	const topNContract = { runtimeInput: ["topN"] };
+
+	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "{\"topN\":3}", undefined, true), { topN: 3 });
+	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "topN: 3", undefined, true), { topN: 3 });
+	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "帮我查询知乎top3", undefined, true), { topN: 3 });
+});
+
 test("resolveRuntimeInputFromText uses dispatcher result for natural language input", async () => {
 	setTaskDispatcherForTests(async () => ({ url: "https://b23.tv/xxx" }));
 	try {

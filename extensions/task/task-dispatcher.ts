@@ -74,6 +74,29 @@ function runtimeInputWithDefaults(contract: unknown, input: unknown): unknown {
 	return { ...runtimeDefaults(contract), ...input };
 }
 
+function parseScalar(value: string): string | number {
+	const trimmed = value.trim();
+	return /^-?\d+(?:\.\d+)?$/.test(trimmed) ? Number(trimmed) : trimmed;
+}
+
+function localRuntimeInput(contract: unknown, rawInput: string): unknown | undefined {
+	const direct = extractRuntimeInputFromText(rawInput);
+	if (direct) return direct;
+	const fields = runtimeFields(contract);
+	const entries: Record<string, string | number> = {};
+	for (const field of fields) {
+		const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const match = rawInput.match(new RegExp(`(?:^|[\\s,;，；])${escaped}\\s*[:=：]\\s*([^\\s,;，；]+)`, "i"));
+		if (match) entries[field] = parseScalar(match[1]);
+	}
+	if (Object.keys(entries).length > 0) return entries;
+	if (fields.length === 1 && /^topN$/i.test(fields[0])) {
+		const match = rawInput.match(/(?:top|前)\s*(\d+)/i) ?? rawInput.trim().match(/^(\d+)$/);
+		if (match) return { [fields[0]]: Number(match[1]) };
+	}
+	return undefined;
+}
+
 function inputTitle(contract: unknown, field: string): string {
 	const defaults = runtimeDefaults(contract);
 	return Object.hasOwn(defaults, field) ? `task input: ${field} (default: ${String(defaults[field])})` : `task input: ${field}`;
@@ -114,6 +137,8 @@ async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInp
 export async function resolveRuntimeInputFromText(ctx: any, skill: string, contract: unknown, rawInput: string, modelOverride?: string, headless = false): Promise<unknown> {
 	const fields = runtimeFields(contract);
 	if (rawInput.trim()) {
+		const local = localRuntimeInput(contract, rawInput);
+		if (local) return runtimeInputWithDefaults(contract, local);
 		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride).catch(() => undefined);
 		if (dispatched) return runtimeInputWithDefaults(contract, dispatched);
 	}

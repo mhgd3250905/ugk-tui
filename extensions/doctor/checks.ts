@@ -7,6 +7,7 @@ import { createChromeCdpClient, getChromeCdpStatus, type ChromeCdpStatus } from 
 import { createChromeCdpState, resolveChromeCdpPort } from "../chrome-cdp/config.ts";
 import { resolveChromeBinary, type ChromeBinaryResolution } from "../chrome-cdp/launcher.ts";
 import { getDeepSeekStatus, type DeepSeekStatusDeps } from "../deepseek-status.ts";
+import { readSettingsJson, updateSettingsJson } from "../shared/settings-io.ts";
 import type { DoctorCheck, DoctorResult } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
@@ -47,7 +48,9 @@ function defaultAgentDir(): string {
 
 function readShellPathFromSettings(agentDir: string, readFile: (filePath: string) => string): string | undefined {
 	try {
-		const settings = JSON.parse(readFile(path.join(agentDir, "settings.json")));
+		// BOM-safe 读取(见 shared/settings-io.ts):注入 readFile 以保持可测试性,
+		// helper 内部会剥离 UTF-8 BOM 再解析。
+		const settings = readSettingsJson({ agentDir, readFile }) ?? {};
 		return typeof settings.shellPath === "string" && settings.shellPath.trim() ? settings.shellPath : undefined;
 	} catch {
 		return undefined;
@@ -59,13 +62,7 @@ function readSettings(
 	readFile: (filePath: string) => string,
 	exists: (candidate: string) => boolean,
 ): Record<string, unknown> | undefined {
-	const settingsPath = path.join(agentDir, "settings.json");
-	try {
-		const settings = JSON.parse(readFile(settingsPath));
-		return settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
-	} catch {
-		return exists(settingsPath) ? undefined : {};
-	}
+	return readSettingsJson({ agentDir, readFile, exists });
 }
 
 function persistBashResolutionForChildAgents(resolution: BashResolution, deps: BashCheckDeps): void {
@@ -73,21 +70,15 @@ function persistBashResolutionForChildAgents(resolution: BashResolution, deps: B
 	if (platform !== "win32" || resolution.source === "settings.json shellPath") return;
 	if (!path.win32.isAbsolute(resolution.command) || path.win32.basename(resolution.command).toLowerCase() !== "bash.exe") return;
 
-	const agentDir = deps.agentDir ?? defaultAgentDir();
-	const exists = deps.exists ?? fs.existsSync;
-	const readFile = deps.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
-	const writeFile = deps.writeFile ?? ((filePath: string, content: string) => fs.writeFileSync(filePath, content));
-	const mkdir = deps.mkdir ?? ((dirPath: string, options: { recursive: true }) => {
-		fs.mkdirSync(dirPath, options);
+	// BOM-safe 读-改-写(见 shared/settings-io.ts):updateSettingsJson 内部会剥离
+	// BOM 读取,值相同则跳过写入,写回时不带 BOM。
+	updateSettingsJson({ shellPath: resolution.command }, {
+		agentDir: deps.agentDir,
+		exists: deps.exists,
+		readFile: deps.readFile,
+		writeFile: deps.writeFile,
+		mkdir: deps.mkdir,
 	});
-	const settingsPath = path.join(agentDir, "settings.json");
-	const settings = readSettings(agentDir, readFile, exists);
-	if (!settings) return;
-	if (settings.shellPath === resolution.command) return;
-
-	settings.shellPath = resolution.command;
-	mkdir(agentDir, { recursive: true });
-	writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 export function resolveBashCommand(deps: BashCheckDeps = {}): BashResolution {

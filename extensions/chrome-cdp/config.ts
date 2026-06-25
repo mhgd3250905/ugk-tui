@@ -1,6 +1,6 @@
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { readSettingsJson, updateSettingsJson } from "../shared/settings-io.ts";
 
 export type ChromeCdpMode = "off" | "ask" | "on";
 export type ChromeCdpAction = "status" | "tabs" | "navigate" | "evaluate" | "screenshot";
@@ -49,35 +49,15 @@ export function resolveUgkSettingsPath(deps: ChromeCdpPortDeps = {}): string {
 }
 
 export function readPersistedCdpPort(deps: ChromeCdpPortDeps = {}): number | undefined {
-	const settingsPath = resolveUgkSettingsPath(deps);
-	const exists = deps.exists ?? fs.existsSync;
-	const readFile = deps.readFile ?? ((p: string) => fs.readFileSync(p, "utf8"));
-	try {
-		if (!exists(settingsPath)) return undefined;
-		const settings = JSON.parse(readFile(settingsPath));
-		return parsePort(settings?.cdpPort);
-	} catch {
-		return undefined;
-	}
+	// BOM-safe 读取(见 shared/settings-io.ts):旧实现裸 JSON.parse 遇 BOM 会失败,
+	// 导致持久化端口读不到、回退默认 9222。
+	const settings = readSettingsJson(deps);
+	return parsePort(settings?.cdpPort);
 }
 
 export function persistCdpPort(port: number, deps: ChromeCdpPortDeps = {}): void {
-	const settingsPath = resolveUgkSettingsPath(deps);
-	const exists = deps.exists ?? fs.existsSync;
-	const readFile = deps.readFile ?? ((p: string) => fs.readFileSync(p, "utf8"));
-	const writeFile = deps.writeFile ?? ((p: string, content: string) => fs.writeFileSync(p, content));
-	const mkdir = deps.mkdir ?? ((p: string, opts: { recursive: true }) => fs.mkdirSync(p, opts));
-	let settings: Record<string, unknown> = {};
-	try {
-		if (exists(settingsPath)) settings = JSON.parse(readFile(settingsPath)) ?? {};
-	} catch {
-		settings = {};
-	}
-	if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
-	if (settings.cdpPort === port) return;
-	settings.cdpPort = port;
-	mkdir(path.dirname(settingsPath), { recursive: true });
-	writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+	// BOM-safe 读-改-写(见 shared/settings-io.ts):值相同则跳过,写回不带 BOM。
+	updateSettingsJson({ cdpPort: port }, deps);
 }
 
 export function createChromeCdpState(

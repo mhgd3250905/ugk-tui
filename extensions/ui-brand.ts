@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -14,6 +13,7 @@ import {
 	type UgkFooterUsage,
 } from "./ui-brand-utils.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
+import { readSettingsJson } from "./shared/settings-io.ts";
 
 function readUgkVersion(): string {
 	try {
@@ -45,22 +45,15 @@ function formatTitle(pi: ExtensionAPI, cwd: string): string {
 	return session ? `ugk - ${session} - ${cwdName}` : `ugk - ${cwdName}`;
 }
 
-function getUgkSettingsPath(): string {
-	const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
-	return path.join(agentDir, "settings.json");
-}
-
 function shouldClearStartupScreen(): boolean {
 	const rawEnv = process.env.UGK_CLEAR_STARTUP;
 	if (rawEnv && DISABLED_ENV_VALUES.has(rawEnv.toLowerCase())) return false;
 	if (rawEnv && ENABLED_ENV_VALUES.has(rawEnv.toLowerCase())) return true;
 
-	try {
-		const settings = JSON.parse(fs.readFileSync(getUgkSettingsPath(), "utf8"));
-		return settings.clearStartupScreen !== false;
-	} catch {
-		return true;
-	}
+	// BOM-safe 读取(见 shared/settings-io.ts):settings.json 可能带 UTF-8 BOM,
+	// 旧实现裸 JSON.parse 会抛错静默降级,这里改用 helper 剥离 BOM。
+	const settings = readSettingsJson();
+	return (settings?.clearStartupScreen ?? true) !== false;
 }
 
 function clearStartupScreen(ctx: ExtensionContext): void {

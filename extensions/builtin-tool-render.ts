@@ -6,6 +6,21 @@ import {
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { readSettingsJson } from "./shared/settings-io.ts";
+
+/**
+ * 从 settings.json 读取 shellPath(BOM-safe)。
+ *
+ * 为什么需要这步:覆盖式重注册 bash 时,pi 不会自动注入 shellPath(原生注册
+ * 走 agent-session 内部的 settingsManager,扩展层拿不到)。如果直接
+ * createBashTool(cwd) 不传 shellPath,Windows 上会 fallback 到系统 bash(WSL),
+ * 导致 bash 工具走 WSL 而非配置的 Git Bash。这里自己读 settings 拿 shellPath。
+ */
+function resolveShellPath(): string | undefined {
+	const settings = readSettingsJson();
+	const shellPath = settings?.shellPath;
+	return typeof shellPath === "string" && shellPath.trim() ? shellPath : undefined;
+}
 
 export default function registerBuiltinToolRenderers(pi: ExtensionAPI): void {
 	const bashTool = createBashTool(process.cwd());
@@ -16,7 +31,10 @@ export default function registerBuiltinToolRenderers(pi: ExtensionAPI): void {
 		parameters: bashTool.parameters,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
-			return createBashTool(ctx?.cwd ?? process.cwd()).execute(toolCallId, params, signal, onUpdate, ctx);
+			const cwd = ctx?.cwd ?? process.cwd();
+			const shellPath = resolveShellPath();
+			// 必须显式传 shellPath,否则 Windows fallback 到 WSL。
+			return createBashTool(cwd, shellPath ? { shellPath } : {}).execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme) {

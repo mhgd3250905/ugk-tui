@@ -15,7 +15,10 @@ export function ensureUgkQuietStartupDefault(agentDir = getUgkAgentDir()) {
 
 	try {
 		if (fs.existsSync(settingsPath)) {
-			settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+			// settings.json 在 Windows 上可能因 PowerShell 写入带 UTF-8 BOM,
+			// 裸 JSON.parse 会抛错静默 return 导致默认值不补;先剥离 BOM 再解析。
+			const raw = fs.readFileSync(settingsPath, "utf8");
+			settings = JSON.parse(raw.replace(/^\uFEFF/, ""));
 		}
 	} catch {
 		return;

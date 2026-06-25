@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
+import { stripBom } from "./shared/settings-io.ts";
 
 export interface DeepSeekStatusDeps {
 	env?: Record<string, string | undefined>;
@@ -16,7 +17,9 @@ function getAuthPath(env: Record<string, string | undefined>, authPath?: string)
 
 function hasDeepSeekAuth(rawAuth: string): boolean {
 	try {
-		const auth = JSON.parse(rawAuth);
+		// BOM-safe:auth.json 可能被 PowerShell 重写带 UTF-8 BOM,裸 parse 会抛错
+		// 静默返回 false,误报 deepseek 未配置。
+		const auth = JSON.parse(stripBom(rawAuth));
 		return Boolean(auth?.deepseek);
 	} catch {
 		return false;

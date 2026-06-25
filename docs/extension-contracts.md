@@ -106,11 +106,11 @@ Windows 上 PowerShell 的 `Set-Content` / `Out-File` 默认写 UTF-8 BOM,而 No
 
 ## 附:已发生的同类事故
 
-| 时间 | 事故 | 根因类别 |
-|---|---|---|
-| 2026-06 | bash 走 WSL,curl 全 exit 1 | 覆盖 bash 丢 shellPath |
-| 2026-06 | settings.json BOM → 外部 skill 全加载 + 标题显示 | 裸 JSON.parse |
-| 2026-06 | (待修)auth.json/mcp.json/taskbook.json BOM | 同类坑未清剿 |
-| 2026-06 | (待修)bash 丢 commandPrefix | 潜伏不一致 |
+| 时间 | 事故 | 根因类别 | 状态 |
+|---|---|---|---|
+| 2026-06 | bash 走 WSL,curl 全 exit 1 | 覆盖 bash 丢 shellPath | ✅ 已修(`3d8d848`) |
+| 2026-06 | settings.json BOM → 外部 skill 全加载 + 标题显示 | 裸 JSON.parse | ✅ 已修(`3d8d848`) |
+| 2026-06 | auth.json/mcp.json/taskbook.json BOM | 同类坑未清剿 | ✅ 已修(本次 hardening) |
+| 2026-06 | bash 丢 commandPrefix | 潜伏不一致 | ✅ 已修(本次 hardening) |
 
 新增事故请继续追加到此表。

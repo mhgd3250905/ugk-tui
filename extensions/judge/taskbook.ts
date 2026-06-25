@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { DriverSummary, RequirementsSpec, SteerRecord } from "./judge-state.ts";
+import { stripBom } from "../shared/settings-io.ts";
 
 export interface RunSummary {
 	timestamp: string;
@@ -84,7 +85,8 @@ function sortAndTrimRuns(runs: RunSummary[]): RunSummary[] {
 }
 
 async function readJson(filePath: string): Promise<unknown> {
-	return JSON.parse(await readFile(filePath, "utf8"));
+	// BOM-safe:用户手编 spec.json 等 PowerShell 保存会带 UTF-8 BOM,裸 parse 抛错。
+	return JSON.parse(stripBom(await readFile(filePath, "utf8")));
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {

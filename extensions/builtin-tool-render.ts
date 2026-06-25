@@ -22,6 +22,19 @@ function resolveShellPath(): string | undefined {
 	return typeof shellPath === "string" && shellPath.trim() ? shellPath : undefined;
 }
 
+/**
+ * 从 settings.json 读取 shellCommandPrefix(BOM-safe)。
+ *
+ * pi 原生注册 bash 时会注入 commandPrefix(来自 settingsManager.getShellCommandPrefix,
+ * 如 "shopt -s expand_aliases")。覆盖式重注册同样拿不到这个隐式注入,需要自己补回,
+ * 否则用户配置的命令前缀在扩展 bash 下不生效,与原生 bash 行为不一致。
+ */
+function resolveShellCommandPrefix(): string | undefined {
+	const settings = readSettingsJson();
+	const commandPrefix = settings?.shellCommandPrefix;
+	return typeof commandPrefix === "string" && commandPrefix.trim() ? commandPrefix : undefined;
+}
+
 export default function registerBuiltinToolRenderers(pi: ExtensionAPI): void {
 	const bashTool = createBashTool(process.cwd());
 	pi.registerTool({
@@ -33,8 +46,13 @@ export default function registerBuiltinToolRenderers(pi: ExtensionAPI): void {
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const cwd = ctx?.cwd ?? process.cwd();
 			const shellPath = resolveShellPath();
-			// 必须显式传 shellPath,否则 Windows fallback 到 WSL。
-			return createBashTool(cwd, shellPath ? { shellPath } : {}).execute(toolCallId, params, signal, onUpdate, ctx);
+			const commandPrefix = resolveShellCommandPrefix();
+			// 必须显式传 shellPath(否则 Windows fallback 到 WSL)和 commandPrefix
+			// (否则用户配置的命令前缀不生效),补回 pi 原生的隐式注入。
+			const options: { shellPath?: string; commandPrefix?: string } = {};
+			if (shellPath) options.shellPath = shellPath;
+			if (commandPrefix) options.commandPrefix = commandPrefix;
+			return createBashTool(cwd, options).execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme) {

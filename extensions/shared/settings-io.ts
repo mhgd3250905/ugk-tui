@@ -106,3 +106,20 @@ export function updateSettingsJson(updates: Record<string, unknown>, deps: Setti
 	mkdir(path.dirname(settingsPath), { recursive: true });
 	writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
+
+/**
+ * BOM-safe 读取并解析任意 JSON 文件。
+ *
+ * 与 readSettingsJson 的区别:不做"不存在返回 {}"的静默假设,解析失败/文件
+ * 不存在都抛错,由调用方用自己的 try/catch 决定降级语义(auth→false、
+ * mcp→errors 列表、taskbook→null 各自不同)。这样改动最小、不破坏现有语义。
+ *
+ * 用于 auth.json / mcp.json / taskbook JSON 等 pi 管理、但路径不固定的文件。
+ */
+export function readJsonBomSafe(
+	filePath: string,
+	deps: { readFile?: (p: string) => string } = {},
+): unknown {
+	const readFile = deps.readFile ?? ((p: string) => fs.readFileSync(p, "utf8"));
+	return JSON.parse(stripBom(readFile(filePath)));
+}

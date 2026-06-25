@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { stripBom } from "../shared/settings-io.ts";
 
 export type McpConfigScope = "install" | "user" | "project" | "local";
 
@@ -144,7 +145,9 @@ function loadConfigFile(filePath: string, scope: McpConfigScope, opts: McpConfig
 
 	let rawConfig: unknown;
 	try {
-		rawConfig = JSON.parse(fs.readFileSync(filePath, "utf8"));
+		// BOM-safe:project/local scope 的 .mcp.json 是用户手编,PowerShell 保存会带
+		// UTF-8 BOM,裸 parse 会抛错导致整个文件的所有 server 进 errors(failed)。
+		rawConfig = JSON.parse(stripBom(fs.readFileSync(filePath, "utf8")));
 	} catch (error) {
 		return {
 			servers,

@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import { isRequirementsSpec, type RequirementsSpec } from "./task-spec.ts";
+import { stripBom } from "../shared/settings-io.ts";
 
 export { isRequirementsSpec } from "./task-spec.ts";
 
@@ -114,7 +115,9 @@ export function sortAndTrimRuns(runs: TaskRun[]): TaskRun[] {
 }
 
 async function readJson(filePath: string): Promise<unknown> {
-	return JSON.parse(await readFile(filePath, "utf8"));
+	// BOM-safe:spec.json/contract.json 是用户手编,PowerShell 保存会带 UTF-8 BOM,
+	// 裸 parse 会抛错导致整个 taskbook 在 loadFromDir 静默返回 null(不可用)。
+	return JSON.parse(stripBom(await readFile(filePath, "utf8")));
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {

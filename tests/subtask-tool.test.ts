@@ -164,9 +164,9 @@ test("run_task single returns machine-verifiable PASS and records the run", asyn
 		assert.equal(result.details.results[0].artifacts.length, 1);
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
 		assert.deepEqual(loaded?.taskbook.runs.at(-1)?.input, { text: "hello" });
-		// ponytail: terminate:true 避开工具后的总结轮(那轮 provider 卡住时 Esc 接不住);
-		// workerSummary 不进 content(白占 token + 放大卡顿),只留 details。
-		assert.equal(result.terminate, true, "run_task PASS 后应 terminate,不进入自动总结轮");
+		// ponytail: 不 terminate。agent 拿到 PASS/FAIL 后自行决定是否结束或继续下一步
+		// (如"先抓列表再下载"的组合编排)。terminate 会截断多步编排的第一步。
+		assert.notEqual(result.terminate, true, "run_task 不应 terminate,要让 agent 决定是否继续");
 		assert.match(result.details.results[0].workerSummary, /写好了/, "workerSummary 仍在 details");
 		assert.doesNotMatch(result.content[0].text, /workerSummary/, "workerSummary 不进 LLM context");
 		// ponytail: phases 纯诊断,落盘进 run 记录(回答"到底慢在哪")。
@@ -359,8 +359,7 @@ test("run_task parallel does NOT terminate — lets the agent continue multi-ste
 			tasks: [{ name: "ok-task", input: "one" }],
 		}, undefined, undefined, ctx);
 
-		// parallel 模式不 terminate:组合任务(如"先抓列表再批量下载")需要主 agent
-		// 在 PASS 后自动继续下一步。terminate 会截断组合编排,逼用户手动"继续"。
+		// 所有模式都不 terminate:agent 拿到结果后自行决定是否继续编排下一步。
 		assert.equal(result.isError, undefined);
 		assert.notEqual(result.terminate, true, "parallel 模式不应 terminate,要让 agent 继续编排");
 	} finally {

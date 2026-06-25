@@ -1543,12 +1543,12 @@ export function registerTask(pi: ExtensionAPI): void {
 				return {
 					content: [{ type: "text", text: formatSubtaskToolText(parsed.mode, results) }],
 					details: { mode: parsed.mode, results },
-					// ponytail: terminate 策略按模式区分。
-					// single:一次性确定性任务,PASS/FAIL + 产物路径已在 content 里,terminate:true
-					//   跳过工具后的自动总结轮(那轮若 provider 卡住,Esc 接不住)。既是止血也是正确语义。
-					// parallel:往往是多步骤编排的一部分(如"先抓列表再批量下载"),terminate 会截断组合任务,
-					//   让主 agent 没机会自动继续下一步。parallel 不 terminate,把连续决策权交还 agent。
-					terminate: parsed.mode === "single",
+					// ponytail: 不 terminate。确定性任务的 PASS/FAIL + 产物路径已在 content 里,
+					// agent 拿到后自行判断是否结束还是继续下一步(如"先抓列表再下载"的组合编排)。
+					// 之前 terminate:true 是为绕开"工具后自动总结轮 provider 卡死",但那是 provider 层
+					// 问题,terminate 只是回避不是修复,且代价是截断所有后续 agent 决策——多步编排的
+					// 第一步(往往是 single)会被截断,逼用户手动"继续"。若 provider 卡死重现,应从
+					// abort/provider 层修,不在 task 工具层用 terminate 兜底。
 				};
 			} catch (error) {
 				return {

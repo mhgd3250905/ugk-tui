@@ -8,12 +8,17 @@ import {
 	setTaskDispatcherForTests,
 } from "../extensions/task/task-dispatcher.ts";
 
-const contract = { runtimeInput: ["text"], artifacts: [] };
+const contract = {
+	runtimeInput: ["text"],
+	runtimeInputMeta: { text: { type: "string", default: "text" } },
+	artifacts: [],
+};
 
 test("task dispatcher prompt includes skill contract and raw input", () => {
 	const prompt = buildTaskDispatcherPrompt("# Skill", contract, "Hello 世界");
 
 	assert.match(prompt, /contract\.runtimeInput/);
+	assert.match(prompt, /runtimeInputMeta/);
 	assert.match(prompt, /Hello 世界/);
 	assert.match(prompt, /# Skill/);
 });
@@ -36,7 +41,24 @@ test("resolveRuntimeInputFromText asks fields when dispatcher is unavailable", a
 	const value = await resolveRuntimeInputFromText(ctx, "# Skill", contract, "Hello 世界");
 
 	assert.deepEqual(value, { text: "asked-text" });
-	assert.deepEqual(asks, [{ title: "task input: text", value: "text" }]);
+	assert.deepEqual(asks, [{ title: "task input: text (default: text)", value: "text" }]);
+});
+
+test("resolveRuntimeInputFromText merges dispatcher output with defaults", async () => {
+	setTaskDispatcherForTests(async () => ({ text: "Hello 世界" }));
+	try {
+		const value = await resolveRuntimeInputFromText({}, "# Skill", {
+			runtimeInput: ["text", "section"],
+			runtimeInputMeta: {
+				text: { type: "string" },
+				section: { type: "string", default: "技术" },
+			},
+		}, "Hello 世界");
+
+		assert.deepEqual(value, { text: "Hello 世界", section: "技术" });
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
 });
 
 test("resolveRuntimeInputFromText uses dispatcher result for natural language input", async () => {

@@ -28,6 +28,7 @@ const contract = {
 	outputDir: "<runtime>",
 	artifacts: [{ name: "report.json", type: "file", required: true }],
 	runtimeInput: ["source"],
+	runtimeInputMeta: { source: { type: "string", default: "repo" } },
 };
 
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -74,6 +75,24 @@ test("saveTaskbook writes and loadTaskbook reads all five files", async () => {
 		assert.equal(loaded?.skill, "# 生成报告\n");
 		assert.equal(loaded?.verify, "process.exit(0);\n");
 		assert.deepEqual(loaded?.contract, contract);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("saveTaskbook rejects runtimeInputMeta fields that are not declared", async () => {
+	const cwd = tempCwd();
+	try {
+		await assert.rejects(() => saveTaskbook("project", cwd, "bad-contract", {
+			description: "bad",
+			spec,
+			skill: "# 生成报告\n",
+			verify: "process.exit(0);\n",
+			contract: {
+				runtimeInput: ["source"],
+				runtimeInputMeta: { missing: { type: "string", default: "repo" } },
+			},
+		}), /runtimeInputMeta/);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

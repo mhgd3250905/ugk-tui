@@ -115,6 +115,20 @@ test("buildTaskbookPrompt lists task names, descriptions, and input fields", asy
 	try {
 		await saveFixtureTask(cwd, "alpha");
 		await saveFixtureTask(cwd, "beta");
+		await saveTaskbook("project", cwd, "defaults", {
+			description: "defaulted description",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: {
+				runtimeInput: ["topN", "section"],
+				runtimeInputMeta: {
+					topN: { type: "integer", default: 10 },
+					section: { type: "string", default: "技术" },
+				},
+				artifacts: [],
+			},
+		});
 
 		const prompt = await buildTaskbookPrompt(cwd);
 
@@ -122,6 +136,7 @@ test("buildTaskbookPrompt lists task names, descriptions, and input fields", asy
 		assert.match(prompt, /- alpha — alpha description/);
 		assert.match(prompt, /- beta — beta description/);
 		assert.match(prompt, /input: text/);
+		assert.match(prompt, /defaults — defaulted description \(input: topN=10, section=技术\)/);
 		assert.doesNotMatch(prompt, /contract\.json/);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });

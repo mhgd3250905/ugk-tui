@@ -6,9 +6,18 @@ function inputFields(contract: unknown): string[] {
 	return Array.isArray(runtimeInput) ? runtimeInput.filter((item) => typeof item === "string") : [];
 }
 
+function formatInputField(contract: unknown, field: string): string {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return field;
+	const meta = (contract as Record<string, unknown>).runtimeInputMeta;
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return field;
+	const fieldMeta = (meta as Record<string, unknown>)[field];
+	if (!fieldMeta || typeof fieldMeta !== "object" || Array.isArray(fieldMeta) || !("default" in fieldMeta)) return field;
+	return `${field}=${String((fieldMeta as Record<string, unknown>).default)}`;
+}
+
 function formatTaskbookLine(item: Awaited<ReturnType<typeof listTaskbooks>>[number]): string {
 	const fields = inputFields(item.contract);
-	const input = fields.length > 0 ? ` (input: ${fields.join(", ")})` : "";
+	const input = fields.length > 0 ? ` (input: ${fields.map((field) => formatInputField(item.contract, field)).join(", ")})` : "";
 	return `- ${item.name} — ${item.description}${input}`;
 }
 

@@ -449,6 +449,15 @@ function runtimeFields(contract: unknown): string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : [];
 }
 
+function runtimeDefault(contract: unknown, field: string): string | undefined {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return undefined;
+	const meta = (contract as Record<string, unknown>).runtimeInputMeta;
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+	const fieldMeta = (meta as Record<string, unknown>)[field];
+	if (!fieldMeta || typeof fieldMeta !== "object" || Array.isArray(fieldMeta) || !("default" in fieldMeta)) return undefined;
+	return String((fieldMeta as Record<string, unknown>).default);
+}
+
 function contractToolNames(contract: unknown): string[] {
 	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return [];
 	const record = contract as Record<string, unknown>;
@@ -508,7 +517,7 @@ async function resolveRuntimeInput(ctx: any, skill: string, contract: unknown, r
 async function resolveSelfCheckInput(ctx: any, contract: unknown): Promise<unknown> {
 	const fields = runtimeFields(contract);
 	if (fields.length === 0) return {};
-	return Object.fromEntries(fields.map((field) => [field, ""]));
+	return Object.fromEntries(fields.map((field) => [field, runtimeDefault(contract, field) ?? ""]));
 }
 
 async function askSelfCheckInput(ctx: any, contract: unknown): Promise<unknown> {
@@ -516,8 +525,10 @@ async function askSelfCheckInput(ctx: any, contract: unknown): Promise<unknown> 
 	if (fields.length === 0) return {};
 	const entries: Array<[string, string]> = [];
 	for (const field of fields) {
-		const value = await ctx.ui?.input?.(`verify 自证示例输入: ${field}`, field);
-		entries.push([field, value ?? ""]);
+		const defaultValue = runtimeDefault(contract, field) ?? field;
+		const suffix = runtimeDefault(contract, field) === undefined ? "" : ` (default: ${defaultValue})`;
+		const value = await ctx.ui?.input?.(`verify 自证示例输入: ${field}${suffix}`, defaultValue);
+		entries.push([field, value ?? defaultValue]);
 	}
 	return Object.fromEntries(entries);
 }

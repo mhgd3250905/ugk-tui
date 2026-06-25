@@ -12,6 +12,7 @@ export function buildTaskDispatcherPrompt(skill: string, contract: unknown, rawI
 	return [
 		"以下是 /task taskbook 的 skill 和 contract。",
 		"请按 contract.runtimeInput 的字段定义,从用户输入中提取 runtimeInput JSON。",
+		"如果 contract.runtimeInputMeta.<field>.default 存在且用户未提供该字段,可以省略该字段,系统会补默认值。",
 		"只输出 fenced JSON。",
 		"",
 		"## skill.md",
@@ -54,6 +55,35 @@ function runtimeFields(contract: unknown): string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : [];
 }
 
+function runtimeDefaults(contract: unknown): Record<string, unknown> {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return {};
+	const meta = (contract as Record<string, unknown>).runtimeInputMeta;
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return {};
+	const defaults: Record<string, unknown> = {};
+	for (const field of runtimeFields(contract)) {
+		const value = (meta as Record<string, unknown>)[field];
+		if (value && typeof value === "object" && !Array.isArray(value) && "default" in value) {
+			defaults[field] = (value as Record<string, unknown>).default;
+		}
+	}
+	return defaults;
+}
+
+function runtimeInputWithDefaults(contract: unknown, input: unknown): unknown {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+	return { ...runtimeDefaults(contract), ...input };
+}
+
+function inputTitle(contract: unknown, field: string): string {
+	const defaults = runtimeDefaults(contract);
+	return Object.hasOwn(defaults, field) ? `task input: ${field} (default: ${String(defaults[field])})` : `task input: ${field}`;
+}
+
+function inputDefault(contract: unknown, field: string): string {
+	const defaults = runtimeDefaults(contract);
+	return Object.hasOwn(defaults, field) ? String(defaults[field]) : field;
+}
+
 function findModel(ctx: any, modelOverride?: string): any {
 	if (!modelOverride) return ctx.model;
 	const normalized = normalizeAgentModelForCli(modelOverride);
@@ -85,7 +115,7 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 	const fields = runtimeFields(contract);
 	if (rawInput.trim()) {
 		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride).catch(() => undefined);
-		if (dispatched) return dispatched;
+		if (dispatched) return runtimeInputWithDefaults(contract, dispatched);
 	}
 	if (fields.length === 0) return {};
 	if (headless) {
@@ -93,8 +123,8 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 	}
 	const entries: Array<[string, string]> = [];
 	for (const field of fields) {
-		const value = await ctx.ui?.input?.(`task input: ${field}`, field);
-		entries.push([field, value ?? ""]);
+		const value = await ctx.ui?.input?.(inputTitle(contract, field), inputDefault(contract, field));
+		entries.push([field, value ?? inputDefault(contract, field)]);
 	}
 	return Object.fromEntries(entries);
 }

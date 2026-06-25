@@ -108,6 +108,19 @@ function normalizeTaskbook(value: unknown): Taskbook {
 	return value;
 }
 
+function assertValidContract(contract: unknown): void {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) throw new Error("Invalid contract.json");
+	const record = contract as Record<string, unknown>;
+	if (record.runtimeInput !== undefined && !isStringArray(record.runtimeInput)) throw new Error("Invalid contract.runtimeInput");
+	if (record.runtimeInputMeta === undefined) return;
+	if (!record.runtimeInputMeta || typeof record.runtimeInputMeta !== "object" || Array.isArray(record.runtimeInputMeta)) throw new Error("Invalid contract.runtimeInputMeta");
+	const fields = new Set(isStringArray(record.runtimeInput) ? record.runtimeInput : []);
+	for (const [field, meta] of Object.entries(record.runtimeInputMeta as Record<string, unknown>)) {
+		if (!fields.has(field)) throw new Error(`Invalid contract.runtimeInputMeta: "${field}" is not declared in runtimeInput`);
+		if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new Error(`Invalid contract.runtimeInputMeta.${field}`);
+	}
+}
+
 export function sortAndTrimRuns(runs: TaskRun[]): TaskRun[] {
 	return [...runs]
 		.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
@@ -157,6 +170,7 @@ export async function saveTaskbook(scope: "user" | "project", cwd: string, name:
 	tags?: string[];
 }): Promise<Taskbook> {
 	if (!isValidTaskbookName(name)) throw new Error(`Invalid taskbook name: ${name}`);
+	assertValidContract(data.contract);
 	const dir = taskDir(scope, cwd, name);
 	const existing = await loadFromDir(scope, dir).catch(() => null);
 	const now = new Date().toISOString();

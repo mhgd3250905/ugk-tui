@@ -396,6 +396,7 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.match(TASK_REVIEW_PROMPT, /output path and format/);
 	assert.match(TASK_REVIEW_PROMPT, /contract\.outputDir/);
 	assert.match(TASK_REVIEW_PROMPT, /requiredTools/);
+	assert.match(TASK_REVIEW_PROMPT, /runtimeInputMeta/);
 	assert.match(TASK_REVIEW_PROMPT, /VERIFY DESIGN GATE/);
 	assert.match(TASK_REVIEW_PROMPT, /artifacts/);
 	assert.match(TASK_REVIEW_PROMPT, /assertions/);

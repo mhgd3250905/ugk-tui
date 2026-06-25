@@ -250,7 +250,14 @@ if (failures.length > 0) {
       }
     }
   ],
-  "runtimeInput": ["url", "expectedDuration"]
+  "runtimeInput": ["url", "expectedDuration"],
+  "runtimeInputMeta": {
+    "expectedDuration": {
+      "type": "number",
+      "default": 60,
+      "description": "用于 verify 的预期视频秒数"
+    }
+  }
 }
 ```
 
@@ -258,6 +265,7 @@ if (failures.length > 0) {
 - worker 的 skill 里写死"产出必须落在 contract.outputDir 下、按 artifacts 命名"
 - verify 按 contract 验每个 artifact(存在性、大小、schema)
 - checker 读 contract 知道该有哪些产出,做归因
+- `runtimeInputMeta` 是可选轻量元数据:只给 `runtimeInput` 字段补说明和默认值;落盘时拒绝未声明字段的 meta。
 
 worker 只被告知 contract(产出规范),**永远不被告知 verify 内容**。这是关键隔离——worker 不能 overfit 验收。
 

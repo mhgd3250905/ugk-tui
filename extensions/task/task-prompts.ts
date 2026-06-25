@@ -52,7 +52,7 @@ Your job:
 1. Decide whether this is a new taskbook, an update to an existing taskbook, or a repair after a failed run. If existing taskbook content is present, make the smallest useful change and keep working parts intact.
 2. SKILL DESIGN GATE: before writing skill.md, you MUST use questionnaire to confirm the reusable worker path with the user. The questions must cover source/method, required steps, noise to omit, and output path and format. Present your proposed defaults from the successful run; do not ask vague "is this okay?" questions.
 3. Draft skill.md: the shortest reusable worker guide. It says what to do and where outputs go. It MUST NOT include verification logic or acceptance criteria.
-4. Draft contract.json: the shared worker/verify/checker contract with outputDir, artifacts, runtimeInput, and requiredTools when the worker path needs protected tools such as chrome_cdp or MCP tools like server__tool. If the user specified a fixed final output directory, put that absolute path in contract.outputDir; otherwise use the runtime default.
+4. Draft contract.json: the shared worker/verify/checker contract with outputDir, artifacts, runtimeInput, optional runtimeInputMeta defaults/descriptions, and requiredTools when the worker path needs protected tools such as chrome_cdp or MCP tools like server__tool. If the user specified a fixed final output directory, put that absolute path in contract.outputDir; otherwise use the runtime default. Every runtimeInputMeta key MUST also appear in runtimeInput.
 5. VERIFY DESIGN GATE: before writing verify.mjs, you MUST use questionnaire to confirm the verification design with the user. The questions must cover artifacts, assertions, failure cases, runtime input, allowed variability, and the empty-output negative case. Present your proposed defaults; do not ask vague "is this okay?" questions.
 6. Only after the questionnaire returns, draft verify.mjs: a Node ESM script using only Node stdlib and external tools when needed. It reads TASK_OUTPUT_DIR and TASK_INPUT, collects failures[], prints JSON failures on FAIL, exits 0 on PASS and non-zero on FAIL.
    verify.mjs may be stored in a temporary directory during self-check, so do not use import.meta.url or __dirname to find workspace files. Use process.cwd() for workspace-relative reads, or pass explicit paths through TASK_INPUT.
@@ -72,6 +72,7 @@ When review is complete, output parseable JSON only:
 		"outputDir": "<runtime>",
 		"artifacts": [],
 		"runtimeInput": [],
+		"runtimeInputMeta": {},
 		"requiredTools": []
 	}
 }

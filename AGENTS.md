@@ -105,6 +105,7 @@
 
 ## 关键约定
 
+- **扩展开发契约**: `docs/extension-contracts.md`(改 `extensions/` 或 `bin/` 前必读)
 - **bash 工具走 Git Bash**(`D:\Git\bin\bash.exe`),命令用 Linux 语法,Windows 路径用正斜杠
 - **subagent 的 agent 定义** 在仓库 `agents/*.md`(版本管理),需复制到 `~/.pi/agent/agents/` 才生效(见 subagent-guide skill)
 - **模型**:全局默认 `deepseek-v4-pro`;`agents/*.md` 的 frontmatter 记录角色意图,但当前 pi 运行时不靠修改这些 frontmatter 来切换 Judge/Driver 的实际模型。需要更换模型时必须改 session 创建/模型选择代码并补测试。

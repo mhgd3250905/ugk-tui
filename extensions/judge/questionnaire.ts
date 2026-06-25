@@ -1,5 +1,6 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 
 interface QuestionOption {
 	value: string;
@@ -115,17 +116,52 @@ export default function registerQuestionnaire(pi: ExtensionAPI): void {
 				content: [
 					{
 						type: "text",
-						text: answers
-							.map((answer) =>
-								answer.wasCustom
-									? `${answer.id}: user wrote: ${answer.label}`
-									: `${answer.id}: user selected: ${answer.index}. ${answer.label}`,
-							)
-							.join("\n"),
+						text: answers.map(formatAnswerLine).join("\n"),
 					},
 				],
 				details: { answers, cancelled: false },
 			};
 		},
+
+		renderCall(args, theme) {
+			const questions = Array.isArray(args?.questions) ? args.questions : [];
+			const count = questions.length;
+			const labels = questions
+				.map((q: Question) => q.label || q.id)
+				.filter(Boolean)
+				.slice(0, 3)
+				.join(", ");
+			let text = theme.fg("toolTitle", theme.bold(`questionnaire  ${count} question${count === 1 ? "" : "s"}`));
+			if (labels) text += theme.fg("dim", ` (${labels}${count > 3 ? "..." : ""})`);
+			return new Text(text, 0, 0);
+		},
+
+		renderResult(result, { expanded, isPartial }, theme) {
+			if (isPartial) return new Text(theme.fg("warning", "Asking..."), 0, 0);
+
+			const details = result.details as { answers?: Answer[]; cancelled?: boolean } | undefined;
+			const answers = details?.answers ?? [];
+			const cancelled = details?.cancelled === true;
+
+			if (cancelled) {
+				let text = theme.fg("warning", `✗ cancelled after ${answers.length} answer${answers.length === 1 ? "" : "s"}`);
+				if (expanded && answers.length > 0) {
+					text += "\n" + answers.map(formatAnswerLine).join("\n");
+				}
+				return new Text(text, 0, 0);
+			}
+
+			let text = theme.fg("success", `✓ answered ${answers.length} question${answers.length === 1 ? "" : "s"}`);
+			if (expanded && answers.length > 0) {
+				text += "\n" + answers.map(formatAnswerLine).join("\n");
+			}
+			return new Text(text, 0, 0);
+		},
 	});
+}
+
+function formatAnswerLine(answer: Answer): string {
+	return answer.wasCustom
+		? `${answer.id}: user wrote: ${answer.label}`
+		: `${answer.id}: user selected: ${answer.index}. ${answer.label}`;
 }

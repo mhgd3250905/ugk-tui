@@ -174,3 +174,51 @@ test("questionnaire returns cancelled error when UI is unavailable", async () =>
 	assert.equal(result.details.cancelled, true);
 	assert.match(result.content[0].text, /UI not available/);
 });
+
+// theme stub: passthrough, so assertions read the raw text the renderer built.
+const stubTheme = { fg: (_c: string, t: string) => t, bold: (t: string) => t } as any;
+
+const sampleAnswers = [
+	{ id: "scope", value: "file", label: "Single file", wasCustom: false, index: 1 },
+	{ id: "detail", value: "custom answer", label: "custom answer", wasCustom: true },
+];
+
+test("renderResult collapses to a one-line summary and expands on demand", () => {
+	const tool = makeQuestionnaireTool();
+	const result = { content: [{ type: "text" as const, text: "..." }], details: { answers: sampleAnswers, cancelled: false } };
+
+	const collapsed = String(tool.renderResult(result, { expanded: false, isPartial: false }, stubTheme).text);
+	assert.match(collapsed, /answered 2 questions/);
+	assert.doesNotMatch(collapsed, /scope/);
+
+	const expanded = String(tool.renderResult(result, { expanded: true, isPartial: false }, stubTheme).text);
+	assert.match(expanded, /scope: user selected: 1\. Single file/);
+	assert.match(expanded, /detail: user wrote: custom answer/);
+});
+
+test("renderResult reports cancelled state", () => {
+	const tool = makeQuestionnaireTool();
+	const result = {
+		content: [{ type: "text" as const, text: "User cancelled the questionnaire" }],
+		details: { answers: [sampleAnswers[0]], cancelled: true },
+	};
+
+	const collapsed = String(tool.renderResult(result, { expanded: false, isPartial: false }, stubTheme).text);
+	assert.match(collapsed, /cancelled after 1 answer/);
+});
+
+test("renderCall shows question count and up to three labels", () => {
+	const tool = makeQuestionnaireTool();
+	const args = {
+		questions: [
+			{ id: "a", label: "Alpha", prompt: "p", options: [{ value: "x", label: "X" }] },
+			{ id: "b", label: "Beta", prompt: "p", options: [{ value: "x", label: "X" }] },
+			{ id: "c", prompt: "p", options: [{ value: "x", label: "X" }] },
+			{ id: "d", label: "Delta", prompt: "p", options: [{ value: "x", label: "X" }] },
+		],
+	};
+
+	const text = String(tool.renderCall(args, stubTheme).text);
+	assert.match(text, /4 questions/);
+	assert.match(text, /Alpha, Beta, c\.\.\./);
+});

@@ -70,6 +70,8 @@ planning → executing → reviewing → landed
 
 早期实现这条路径用 `pi.sendUserMessage`,prompt 被 pi 强制渲染成完整 user 气泡,无法折叠。改用 custom message + renderer 是为了让超长 prompt 默认折叠,用户需要时再展开。`task-progress` 是同款模式的先例(可折叠的 custom message renderer)。
 
+**questionnaire 结果折叠**:`questionnaire` 工具(`extensions/judge/questionnaire.ts`,plan/review 共用)的 `registerTool` 挂了 `renderCall` + `renderResult`,走 pi 的工具自定义渲染机制(同 bash/edit 的 `builtin-tool-render.ts`)。折叠态结果框只显示一行汇总(`✓ answered N questions` / `✗ cancelled after N answers`),`Ctrl+O` 展开看逐题明细。`execute` 返回的 content 文本(进 LLM context,给 agent 看的答案原文)不受 renderer 影响——两处格式化职责分离,content 给 LLM、renderer 给用户。早期 questionnaire 没写 `renderResult`,走 pi 的全量文本 fallback,逐题明细默认铺满屏;补 renderer 后默认折叠。
+
 ### 2.3 C-2 闸(强制对齐)
 
 复用 Judge 的 C-2 机制 idiom,应用到 `/task` 的两个边界:

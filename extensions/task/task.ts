@@ -39,6 +39,7 @@ import { mapWithConcurrencyLimit } from "../subagent-runtime.ts";
 const TASK_STATE_TYPE = "task-state";
 const TASK_PLAN_CONTEXT_TYPE = "task-plan-context";
 const TASK_REVIEW_CONTEXT_TYPE = "task-review-context";
+const TASK_REVIEW_PROMPT_TYPE = "task-review-prompt";
 const TASK_PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const TASK_NORMAL_TOOLS = ["read", "bash", "edit", "write", "subagent"];
 const PREVIEW_TEXT_EXTENSIONS = new Set([".md", ".txt", ".json", ".csv", ".tsv", ".html", ".htm"]);
@@ -781,6 +782,26 @@ function renderTaskProgressMessage(message: any, { expanded }: { expanded: boole
 	return new Text([theme.fg("toolTitle", theme.bold(title)), body, hint].filter(Boolean).join("\n"), 0, 0);
 }
 
+function sendTaskReviewPromptMessage(pi: ExtensionAPI, content: string, details: Record<string, unknown> = {}): void {
+	if (typeof (pi as any).sendMessage !== "function") return;
+	(pi as any).sendMessage({
+		customType: TASK_REVIEW_PROMPT_TYPE,
+		content,
+		display: true,
+		details,
+	}, { triggerTurn: true, deliverAs: "followUp" });
+}
+
+function renderTaskReviewPromptMessage(message: any, { expanded }: { expanded: boolean }, theme: any): Text {
+	const content = typeof message.content === "string" ? message.content : "";
+	const lineCount = content ? content.split(/\r?\n/).length : 0;
+	const title = `▸ [TASK REVIEW MODE] 已注入复盘指令 (${lineCount} 行)`;
+	if (!expanded) {
+		return new Text(theme.fg("toolTitle", theme.bold(`${title}  ${theme.fg("muted", "(Ctrl+O to expand)")}`)), 0, 0);
+	}
+	return new Text([theme.fg("toolTitle", theme.bold(title)), content].join("\n"), 0, 0);
+}
+
 function formatProgressLines(text: string): string[] {
 	if (text.trim() === "(running...)") return [];
 	return text
@@ -1193,6 +1214,7 @@ async function handleTaskRename(ctx: any, name: string | undefined, tokens: stri
 
 export function registerTask(pi: ExtensionAPI): void {
 	(pi as any).registerMessageRenderer?.("task-progress", renderTaskProgressMessage);
+	(pi as any).registerMessageRenderer?.(TASK_REVIEW_PROMPT_TYPE, renderTaskReviewPromptMessage);
 	let state = createTaskState();
 	let restoreToolsSnapshot: string[] | undefined;
 	let cachedTaskbookPrompt = "";
@@ -1227,7 +1249,11 @@ export function registerTask(pi: ExtensionAPI): void {
 		pi.setActiveTools?.(TASK_PLANNING_TOOLS);
 		persistState();
 		setTaskStatus(ctx, "📋 reviewing");
-		pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary, userEditRequest), { deliverAs: "followUp" });
+		sendTaskReviewPromptMessage(
+			pi,
+			buildTaskReviewPrompt(state.spec, state.summary, userEditRequest),
+			userEditRequest.trim() ? { mode: "edit", userEditRequest } : {},
+		);
 	}
 
 	let promptingTaskMenu = false;
@@ -1302,7 +1328,7 @@ export function registerTask(pi: ExtensionAPI): void {
 		pi.setActiveTools?.(TASK_PLANNING_TOOLS);
 		persistState();
 		setTaskStatus(ctx, "📋 reviewing");
-		pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary), { deliverAs: "followUp" });
+		sendTaskReviewPromptMessage(pi, buildTaskReviewPrompt(state.spec, state.summary));
 	}
 
 	async function enterRepairFromPending(ctx: any, note = ""): Promise<void> {
@@ -1314,7 +1340,7 @@ export function registerTask(pi: ExtensionAPI): void {
 		pi.setActiveTools?.(TASK_PLANNING_TOOLS);
 		persistState();
 		setTaskStatus(ctx, "📋 reviewing");
-		pi.sendUserMessage?.(buildTaskReviewPrompt(state.spec, state.summary), { deliverAs: "followUp" });
+		sendTaskReviewPromptMessage(pi, buildTaskReviewPrompt(state.spec, state.summary));
 	}
 
 	async function saveCurrentTask(ctx: any, name: string | undefined, tokens: string[]): Promise<void> {

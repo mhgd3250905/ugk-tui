@@ -62,7 +62,13 @@ planning → executing → reviewing → landed
 
 **review 用新 context**:复盘要冷静看整个执行过程,不能被执行阶段的兴奋带偏。review 看的是执行**摘要**(产出了什么、走了哪几步),不是原始 transcript,避免被过程细节淹没。
 
-**v1 实现注记**:review 阶段不开新 session(避免 command-handler-only API 的 `ctx.newSession()` 在 `agent_end` 触发链路里的复杂度),而是用 **context filter** 模拟新 context:进入 reviewing 阶段后,`before_agent_start` 注入 `task-review-context` custom message,`context` 事件过滤掉旧的 `task-plan-context`,只保留 review prompt + 执行摘要。效果等价于新 context:review agent 看不到 plan 阶段的完整 transcript。如果 v2 发现 review 质量受影响(比如 review agent 仍被早期 plan 推理带偏),再升级到真正的 `ctx.newSession()`。
+**v1 实现注记**:review 阶段不开新 session(避免 command-handler-only API 的 `ctx.newSession()` 在 `agent_end` 触发链路里的复杂度),而是用 **context filter** 模拟新 context:进入 reviewing 阶段后,`before_agent_start` 注入 `task-review-context` custom message(`display:false`,只进 LLM context 不渲染),`context` 事件过滤掉旧的 `task-plan-context`,只保留 review prompt + 执行摘要。效果等价于新 context:review agent 看不到 plan 阶段的完整 transcript。如果 v2 发现 review 质量受影响(比如 review agent 仍被早期 plan 推理带偏),再升级到真正的 `ctx.newSession()`。
+
+**review prompt 的两条注入路径**(故意分离):
+1. **context 主路径**(`display:false`)— `before_agent_start` 注入 `task-review-context` custom message,只进 LLM context,用户不可见。这是 review agent 拿到完整 prompt 的主通道。
+2. **触发 + 折叠展示路径**(`display:true`)— 进入 reviewing 时 `sendTaskReviewPromptMessage` 发 `task-review-prompt` custom message(`triggerTurn:true, deliverAs:"followUp"`),职责是(a)主动启动 review turn(`before_agent_start` 是被动的,不能自己启动 turn);(b)给用户一个可折叠的 prompt 预览(注册 `renderTaskReviewPromptMessage` renderer,默认折叠成 `▸ [TASK REVIEW MODE] 已注入复盘指令 (N 行)`,`Ctrl+O` 全局展开)。content 仍作为 `role:user` 进 LLM context(pi 的 `convertToLlm` 把 custom message 转 user role,两条路径内容对 LLM 一致)。
+
+早期实现这条路径用 `pi.sendUserMessage`,prompt 被 pi 强制渲染成完整 user 气泡,无法折叠。改用 custom message + renderer 是为了让超长 prompt 默认折叠,用户需要时再展开。`task-progress` 是同款模式的先例(可折叠的 custom message renderer)。
 
 ### 2.3 C-2 闸(强制对齐)
 

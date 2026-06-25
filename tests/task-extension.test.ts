@@ -543,7 +543,7 @@ test("/task menu lets user enter review from executing with a completion summary
 });
 
 test("/task menu enters review when execute completion is already pending", async () => {
-	const { pi, commands, handlers, entries, activeTools, userMessages } = makePi();
+	const { pi, commands, handlers, entries, activeTools, sentMessages } = makePi();
 	const { ctx, statusCalls } = makeCtx();
 	registerTask(pi as any);
 
@@ -564,11 +564,15 @@ test("/task menu enters review when execute completion is already pending", asyn
 	assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
 	assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
 	assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "📋 reviewing" });
-	assert.match(userMessages.at(-1)?.text ?? "", /TASK REVIEW MODE/);
+	const reviewPrompt = sentMessages.at(-1);
+	assert.equal(reviewPrompt?.message?.customType, "task-review-prompt");
+	assert.match(reviewPrompt?.message?.content ?? "", /TASK REVIEW MODE/);
+	assert.equal(reviewPrompt?.message?.display, true);
+	assert.deepEqual(reviewPrompt?.options, { triggerTurn: true, deliverAs: "followUp" });
 });
 
 test("task_complete records process log and Enter gates review/save transitions", async () => {
-	const { pi, commands, handlers, entries, activeTools, tools, userMessages } = makePi();
+	const { pi, commands, handlers, entries, activeTools, tools, sentMessages } = makePi();
 	const { cwd, ctx, notifications, statusCalls } = makeCtx();
 	registerTask(pi as any);
 
@@ -601,7 +605,11 @@ test("task_complete records process log and Enter gates review/save transitions"
 		assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
 		assert.deepEqual(statusCalls.at(-1), { key: "task-mode", value: "📋 reviewing" });
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
-		assert.match(userMessages.at(-1)?.text ?? "", /TASK REVIEW MODE/);
+		const reviewPrompt = sentMessages.at(-1);
+		assert.equal(reviewPrompt?.message?.customType, "task-review-prompt");
+		assert.match(reviewPrompt?.message?.content ?? "", /TASK REVIEW MODE/);
+		assert.equal(reviewPrompt?.message?.display, true);
+		assert.deepEqual(reviewPrompt?.options, { triggerTurn: true, deliverAs: "followUp" });
 
 		const injected = await handlers.get("before_agent_start")![0]({}, ctx);
 		assert.equal(injected.message.customType, "task-review-context");
@@ -905,7 +913,7 @@ test("/task save reruns empty-output negative check after asking runtime input",
 });
 
 test("/task edit loads an existing taskbook into update review", async () => {
-	const { pi, commands, entries, userMessages, activeTools } = makePi();
+	const { pi, commands, entries, sentMessages, activeTools } = makePi();
 	const { cwd, ctx } = makeCtx();
 	registerTask(pi as any);
 	ctx.ui.input = () => "结果只要 md 文件不要 html";
@@ -925,18 +933,21 @@ test("/task edit loads an existing taskbook into update review", async () => {
 		assert.equal((entries.at(-1)?.data as any).taskbookName, "editable");
 		assert.equal((entries.at(-1)?.data as any).taskbookScope, "project");
 		assert.deepEqual(activeTools.at(-1), ["read", "bash", "grep", "find", "ls", "questionnaire"]);
-		assert.match(userMessages.at(-1)?.text ?? "", /UserEditRequest:/);
-		assert.match(userMessages.at(-1)?.text ?? "", /结果只要 md 文件不要 html/);
-		assert.match(userMessages.at(-1)?.text ?? "", /更新已有 taskbook/);
-		assert.match(userMessages.at(-1)?.text ?? "", /现有 skill\.md/);
-		assert.match(userMessages.at(-1)?.text ?? "", /现有 verify\.mjs/);
+		const reviewPrompt = sentMessages.at(-1);
+		assert.equal(reviewPrompt?.message?.customType, "task-review-prompt");
+		assert.equal(reviewPrompt?.message?.details?.mode, "edit");
+		assert.match(reviewPrompt?.message?.content ?? "", /UserEditRequest:/);
+		assert.match(reviewPrompt?.message?.content ?? "", /结果只要 md 文件不要 html/);
+		assert.match(reviewPrompt?.message?.content ?? "", /更新已有 taskbook/);
+		assert.match(reviewPrompt?.message?.content ?? "", /现有 skill\.md/);
+		assert.match(reviewPrompt?.message?.content ?? "", /现有 verify\.mjs/);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
 
 test("/task edit cancels when the first edit request prompt is cancelled", async () => {
-	const { pi, commands, entries, userMessages } = makePi();
+	const { pi, commands, entries, sentMessages } = makePi();
 	const { cwd, ctx } = makeCtx();
 	registerTask(pi as any);
 	ctx.ui.input = () => undefined;
@@ -952,14 +963,14 @@ test("/task edit cancels when the first edit request prompt is cancelled", async
 		await commands.get("task").handler("edit editable-cancel", ctx);
 
 		assert.equal(entries.length, 0);
-		assert.equal(userMessages.length, 0);
+		assert.equal(sentMessages.length, 0);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
 
 test("/task show task edit reuses the edit request flow", async () => {
-	const { pi, commands, entries, userMessages } = makePi();
+	const { pi, commands, entries, sentMessages } = makePi();
 	const { cwd, ctx } = makeCtx();
 	registerTask(pi as any);
 	ctx.ui.select = (title: string) => title.startsWith("taskbook:") ? "task 编辑" : "Exit";
@@ -977,15 +988,17 @@ test("/task show task edit reuses the edit request flow", async () => {
 
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
 		assert.equal((entries.at(-1)?.data as any).taskbookName, "show-edit");
-		assert.match(userMessages.at(-1)?.text ?? "", /UserEditRequest:/);
-		assert.match(userMessages.at(-1)?.text ?? "", /结果只要 md 文件不要 html/);
+		const reviewPrompt = sentMessages.at(-1);
+		assert.equal(reviewPrompt?.message?.customType, "task-review-prompt");
+		assert.match(reviewPrompt?.message?.content ?? "", /UserEditRequest:/);
+		assert.match(reviewPrompt?.message?.content ?? "", /结果只要 md 文件不要 html/);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
 
 test("/task show guide edit passes the selected guide item into edit", async () => {
-	const { pi, commands, entries, userMessages } = makePi();
+	const { pi, commands, entries, sentMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
 	mockTaskGuideRunner("1. 任务目标: 生成报告\n5. 产物契约: report.md; snapshot.html");
@@ -1008,9 +1021,11 @@ test("/task show guide edit passes the selected guide item into edit", async () 
 
 		assert.match(notifications.at(-1)?.message ?? "", /# task 导览: guide-edit \[project\]/);
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
-		assert.match(userMessages.at(-1)?.text ?? "", /用户选择导览项 5: 产物契约/);
-		assert.match(userMessages.at(-1)?.text ?? "", /snapshot\.html/);
-		assert.match(userMessages.at(-1)?.text ?? "", /不要保存 html/);
+		const reviewPrompt = sentMessages.at(-1);
+		assert.equal(reviewPrompt?.message?.customType, "task-review-prompt");
+		assert.match(reviewPrompt?.message?.content ?? "", /用户选择导览项 5: 产物契约/);
+		assert.match(reviewPrompt?.message?.content ?? "", /snapshot\.html/);
+		assert.match(reviewPrompt?.message?.content ?? "", /不要保存 html/);
 	} finally {
 		setTaskGuideRunnerForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
@@ -1317,6 +1332,14 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 	let reviewerPrompt = "";
 	registerTask(pi as any);
 	assert.equal(typeof renderers.get("task-progress"), "function");
+	assert.equal(typeof renderers.get("task-review-prompt"), "function");
+	const reviewRenderer = renderers.get("task-review-prompt");
+	const reviewMessage = { content: "line1\nline2\nline3", details: {} };
+	const collapsedText = String(reviewRenderer(reviewMessage, { expanded: false }, { fg: (_c: string, t: string) => t, bold: (t: string) => t })?.text ?? "");
+	const expandedText = String(reviewRenderer(reviewMessage, { expanded: true }, { fg: (_c: string, t: string) => t, bold: (t: string) => t })?.text ?? "");
+	assert.match(collapsedText, /3 行/);
+	assert.doesNotMatch(collapsedText, /line1/);
+	assert.match(expandedText, /line1/);
 	setTaskWorkerRunnerForTests(async (...args: any[]) => {
 		const onUpdate = args[7];
 		onUpdate?.({
@@ -1771,9 +1794,11 @@ test("/task run failure offers optional taskbook repair", async () => {
 
 		assert.deepEqual(selections.at(-1)?.options, ["复盘上次运行", "修正本 taskbook", "重新运行", "查看 taskbook 详情", "放弃", "Exit"]);
 		assert.equal((entries.at(-1)?.data as any).phase, "reviewing");
-		assert.match(userMessages.at(-1)?.text ?? "", /修正已有 taskbook/);
-		assert.match(userMessages.at(-1)?.text ?? "", /失败断言/);
-		assert.match(userMessages.at(-1)?.text ?? "", /link/);
+		const repairPrompt = sentMessages.at(-1);
+		assert.equal(repairPrompt?.message?.customType, "task-review-prompt");
+		assert.match(repairPrompt?.message?.content ?? "", /修正已有 taskbook/);
+		assert.match(repairPrompt?.message?.content ?? "", /失败断言/);
+		assert.match(repairPrompt?.message?.content ?? "", /link/);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskCheckerRunnerForTests(undefined);

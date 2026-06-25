@@ -1720,7 +1720,11 @@ export function registerTask(pi: ExtensionAPI): void {
 		restoreActiveTools();
 	});
 
-	pi.on("before_agent_start", async () => {
+	// before_agent_start: 追加 taskbook 清单到 system prompt,而非整体覆盖。
+	// 覆盖会吃掉 base prompt 里的 skill 清单/工具说明/项目上下文等全部内容,
+	// 导致模型既看不到 skill 也触发不了。pi 把当前完整 systemPrompt 传给 event,
+	// 我们只在其末尾追加 task 清单。
+	pi.on("before_agent_start", async (event: any) => {
 		const result: any = {};
 		if (state.phase === "reviewing") {
 			result.message = {
@@ -1735,7 +1739,10 @@ export function registerTask(pi: ExtensionAPI): void {
 				display: false,
 			};
 		}
-		if (cachedTaskbookPrompt) result.systemPrompt = cachedTaskbookPrompt;
+		if (cachedTaskbookPrompt) {
+			const base = typeof event?.systemPrompt === "string" ? event.systemPrompt : "";
+			result.systemPrompt = `${base}\n\n${cachedTaskbookPrompt}`;
+		}
 		return Object.keys(result).length > 0 ? result : undefined;
 	});
 

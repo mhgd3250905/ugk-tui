@@ -24,6 +24,11 @@ export interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	// ponytail: 纯诊断。子进程各阶段相对 spawn 的耗时(ms):
+	//   coldStartMs = spawn → 子进程首个事件(Node 启动 + pi 初始化);
+	//   llmDecisionMs = 首个事件 → 首个 tool_execution_start(模型读完 taskbook、决定怎么干);
+	//   toolMs = 所有 tool_execution_start→end 累计(写脚本/连 CDP/抓取/sleep)。
+	phases?: Record<string, number>;
 }
 
 export interface SubagentDetails {

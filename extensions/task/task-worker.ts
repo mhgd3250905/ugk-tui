@@ -16,6 +16,7 @@ export interface TaskWorkerResult {
 	summary: string;
 	errorMessage?: string;
 	usage: { input: number; output: number; cost: number };
+	phases?: Record<string, number>; // ponytail: 诊断用,worker 子进程各阶段耗时(ms)
 }
 
 type RunSingleAgentLike = typeof runSingleAgent;
@@ -108,5 +109,6 @@ export async function dispatchWorker(
 		summary,
 		errorMessage: failed ? (result.errorMessage || result.stderr || summary || `worker exit ${result.exitCode}`) : undefined,
 		usage: compactUsage(result.usage),
+		phases: result.phases,
 	};
 }

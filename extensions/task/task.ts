@@ -690,14 +690,18 @@ async function formatRunResult(
 }
 
 // ponytail: 纯诊断展示。把 phases(ms)转成可读分段,回答"到底慢在哪"。
-// workerFirstOutputMs = worker 子进程启动+首轮 LLM 的延迟(用户感受的"启动慢");
-// workerMs = worker 整体(含造脚本/CDP);verifyMs = 校验。其余 = 重试/checker/间隙。
+// 两层:task 层(worker 整体/verify)给总览;worker 子进程内部细分(冷启动/LLM决策/工具执行)
+// 回答"是 agent 启动慢、还是启动后开始工作慢"——这正是优化的决策依据。
 export function formatPhaseBreakdown(phases?: Record<string, number>): string[] {
 	if (!phases) return [];
 	const s = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 	const lines = ["", "耗时分解:"];
 	if (phases.workerFirstOutputMs !== undefined) lines.push(`  worker 启动+首轮: ${s(phases.workerFirstOutputMs)}`);
 	if (phases.workerMs !== undefined) lines.push(`  worker 整体: ${s(phases.workerMs)}`);
+	// worker 子进程内部细分(最后一次 worker):coldStart=Node+pi 冷启动;llmDecision=模型决定怎么干;tool=写脚本/连CDP/抓取/sleep
+	if (phases["worker.coldStartMs"] !== undefined) lines.push(`    ├ 冷启动(Node+pi): ${s(phases["worker.coldStartMs"])}`);
+	if (phases["worker.llmDecisionMs"] !== undefined) lines.push(`    ├ LLM 决策: ${s(phases["worker.llmDecisionMs"])}`);
+	if (phases["worker.toolMs"] !== undefined) lines.push(`    └ 工具执行(CDP/脚本): ${s(phases["worker.toolMs"])}`);
 	if (phases.verifyMs !== undefined) lines.push(`  verify: ${s(phases.verifyMs)}`);
 	return lines;
 }
@@ -991,6 +995,11 @@ async function runTaskWithRetry(
 	}
 	const phases: Record<string, number> = { workerMs, verifyMs };
 	if (workerFirstOutputMs !== undefined) phases.workerFirstOutputMs = workerFirstOutputMs;
+	// ponytail: 合并 worker 子进程内部细分(最后一次 worker 的)。带前缀,与 task 层 workerMs 区分。
+	// 诊断用:回答"worker 里是冷启动慢、LLM 决策慢、还是工具执行(CDP)慢"。
+	for (const [key, value] of Object.entries(workerResult?.phases ?? {})) {
+		phases[`worker.${key}`] = value;
+	}
 	return { workerResult: workerResult!, verifyResult, attempts, aborted: workerAborted, checkerAborted, phases };
 }
 

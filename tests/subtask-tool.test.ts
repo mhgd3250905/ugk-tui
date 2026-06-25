@@ -569,4 +569,12 @@ test("formatPhaseBreakdown renders ms phases into readable seconds", () => {
 	assert.ok(lines.some((l) => /worker 启动\+首轮: 12\.0s/.test(l)));
 	assert.ok(lines.some((l) => /worker 整体: 90\.0s/.test(l)));
 	assert.ok(lines.some((l) => /verify: 5\.0s/.test(l)));
+	// worker 子进程内部细分:冷启动 / LLM 决策 / 工具执行(CDP/脚本)
+	const detail = formatPhaseBreakdown({
+		workerMs: 90000, verifyMs: 5000,
+		"worker.coldStartMs": 8000, "worker.llmDecisionMs": 20000, "worker.toolMs": 60000,
+	});
+	assert.ok(detail.some((l) => /冷启动.*8\.0s/.test(l)), "细分冷启动");
+	assert.ok(detail.some((l) => /LLM 决策.*20\.0s/.test(l)), "细分 LLM 决策");
+	assert.ok(detail.some((l) => /工具执行.*60\.0s/.test(l)), "细分工具执行");
 });

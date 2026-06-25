@@ -149,6 +149,9 @@ export async function runSingleAgent(
 
 		args.push(`Task: ${task}`);
 		let wasAborted = false;
+		// ponytail: 纯诊断计时。相对 spawn 时间戳,记子进程关键阶段首次出现时刻。
+		// 不改执行逻辑,只在事件流里顺手打点。最终算 ms 塞进 currentResult.phases。
+		const timing = { spawnMs: Date.now(), firstEventMs: undefined as number | undefined, firstToolStartMs: undefined as number | undefined, toolMs: 0, toolRunStartMs: undefined as number | undefined };
 
 		const exitCode = await new Promise<number>((resolve) => {
 			const invocation = getPiInvocation(args);
@@ -167,6 +170,21 @@ export async function runSingleAgent(
 					event = JSON.parse(line);
 				} catch {
 					return;
+				}
+
+				// ponytail: 诊断计时。第一个事件 = 子进程冷启动完成(Node+pi 初始化);
+				// tool_execution_start 首次 = LLM 决策完成(读完 taskbook、决定怎么干);
+				// toolMs 累计所有工具执行(写脚本/连 CDP/抓取/sleep)。
+				if (timing.firstEventMs === undefined && event.type !== "session_header") {
+					timing.firstEventMs = Date.now() - timing.spawnMs;
+				}
+				if (event.type === "tool_execution_start") {
+					if (timing.firstToolStartMs === undefined) timing.firstToolStartMs = Date.now() - timing.spawnMs;
+					timing.toolRunStartMs = Date.now();
+				}
+				if (event.type === "tool_execution_end" && timing.toolRunStartMs !== undefined) {
+					timing.toolMs += Date.now() - timing.toolRunStartMs;
+					timing.toolRunStartMs = undefined;
 				}
 
 				if (event.type === "message_end" && event.message) {
@@ -231,6 +249,15 @@ export async function runSingleAgent(
 		});
 
 		currentResult.exitCode = exitCode;
+		// ponytail: 把诊断计时落进 result(相对 spawn 的 ms)。无事件流时不动 phases。
+		if (timing.firstEventMs !== undefined) {
+			const phases: Record<string, number> = { coldStartMs: timing.firstEventMs };
+			if (timing.firstToolStartMs !== undefined) {
+				phases.llmDecisionMs = timing.firstToolStartMs - timing.firstEventMs;
+			}
+			phases.toolMs = timing.toolMs;
+			currentResult.phases = phases;
+		}
 		if (wasAborted) throw new Error("Subagent was aborted");
 		return currentResult;
 	} finally {

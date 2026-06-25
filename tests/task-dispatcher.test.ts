@@ -140,3 +140,85 @@ test("task dispatcher uses contract dispatcherModel override when available", as
 		faux.unregister();
 	}
 });
+
+// === required 门禁测试 ===
+// 复现报告场景:contract 有 url(required) + page(optional, default:1)。
+// 验证 local 部分命中(只抽到 page)时不再 short-circuit,会让 dispatcher 补全 required 的 url。
+const biliContract = {
+	runtimeInput: ["url", "page"],
+	runtimeInputMeta: {
+		url: { description: "B站UP主主页视频链接", required: true },
+		page: { description: "页码,从1开始", required: false, default: 1 },
+	},
+};
+
+test("required gate: local partial hit (page only) falls through to dispatcher to fill url", async () => {
+	// 模拟 dispatcher 能从 "URL, page=1" 里抽出 url
+	setTaskDispatcherForTests(async () => ({ url: "https://space.bilibili.com/12890453/upload/video" }));
+	try {
+		// 输入 "URL, page=1":local 只抽到 page,缺 required 的 url → 走 dispatcher 补全
+		const value = await resolveRuntimeInputFromText({}, "# Skill", biliContract, "https://space.bilibili.com/12890453/upload/video, page=1");
+
+		// 结果必须同时含 url(dispatcher 补) 和 page(local 抽),且 page 补 default 后仍是 1
+		assert.deepEqual(value, {
+			url: "https://space.bilibili.com/12890453/upload/video",
+			page: 1,
+		});
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("required gate: full local hit (url + page) skips dispatcher entirely", async () => {
+	let dispatcherCalled = false;
+	setTaskDispatcherForTests(async () => { dispatcherCalled = true; return {}; });
+	try {
+		// 输入 "url=... page=1":local 抽全 required → 直接返回,dispatcher 不该被调用
+		const value = await resolveRuntimeInputFromText({}, "# Skill", biliContract, "url=https://space.bilibili.com/12890453/upload/video page=1");
+
+		assert.equal(dispatcherCalled, false);
+		assert.deepEqual(value, {
+			url: "https://space.bilibili.com/12890453/upload/video",
+			page: 1,
+		});
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("required gate: bare URL (local undefined) still routes to dispatcher", async () => {
+	setTaskDispatcherForTests(async () => ({ url: "https://space.bilibili.com/12890453/upload/video" }));
+	try {
+		// 裸 URL:local 抽不出任何 field=value → undefined → 走 dispatcher
+		const value = await resolveRuntimeInputFromText({}, "# Skill", biliContract, "https://space.bilibili.com/12890453/upload/video");
+
+		assert.deepEqual(value, {
+			url: "https://space.bilibili.com/12890453/upload/video",
+			page: 1,
+		});
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("required gate: dispatcher unavailable falls back to partial local result (no worse than before)", async () => {
+	// dispatcher 不可用(返回 undefined):local 只抽到 page,缺 url → 用部分结果补 default
+	// 这不比改前差(改前会直接返回 {page:1},verify 仍会报 url 缺失,但至少不崩)
+	const value = await resolveRuntimeInputFromText({}, "# Skill", biliContract, "https://x.com, page=2", undefined, true);
+
+	assert.deepEqual(value, { page: 2 });
+});
+
+test("required gate: contract without required declarations keeps legacy behavior", async () => {
+	// 旧式 contract(无 required 字段):所有字段视为必填(default required:true)
+	// local 抽到部分仍会走 dispatcher 补全 —— 但这里测无 runtimeInputMeta 的情况
+	const legacyContract = { runtimeInput: ["text"] };
+	setTaskDispatcherForTests(async () => ({ text: "from-dispatcher" }));
+	try {
+		// 无 field=value 格式 → local undefined → dispatcher
+		const value = await resolveRuntimeInputFromText({}, "# Skill", legacyContract, "some natural language");
+		assert.deepEqual(value, { text: "from-dispatcher" });
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});

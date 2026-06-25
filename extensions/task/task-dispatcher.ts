@@ -69,6 +69,25 @@ function runtimeDefaults(contract: unknown): Record<string, unknown> {
 	return defaults;
 }
 
+/**
+ * 提取 contract 中声明为 required 的 runtimeInput 字段名。
+ * required 默认为 true(未声明 meta 或未写 required 都视为必填),
+ * 显式 required:false 才视为可选。这让 required 从死字段变成运行时门禁。
+ */
+function runtimeRequiredFields(contract: unknown): string[] {
+	const fields = runtimeFields(contract);
+	if (fields.length === 0) return [];
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return fields;
+	const meta = (contract as Record<string, unknown>).runtimeInputMeta;
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return fields;
+	return fields.filter((field) => {
+		const fieldMeta = (meta as Record<string, unknown>)[field];
+		if (!fieldMeta || typeof fieldMeta !== "object" || Array.isArray(fieldMeta)) return true; // 无 meta 视为必填
+		const required = (fieldMeta as Record<string, unknown>).required;
+		return required !== false; // 显式 false 才可选,其余(含 undefined/true)必填
+	});
+}
+
 function runtimeInputWithDefaults(contract: unknown, input: unknown): unknown {
 	if (!input || typeof input !== "object" || Array.isArray(input)) return input;
 	return { ...runtimeDefaults(contract), ...input };
@@ -136,11 +155,22 @@ async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInp
 
 export async function resolveRuntimeInputFromText(ctx: any, skill: string, contract: unknown, rawInput: string, modelOverride?: string, headless = false): Promise<unknown> {
 	const fields = runtimeFields(contract);
+	const required = runtimeRequiredFields(contract);
+	const coversRequired = (input: unknown): boolean =>
+		!!input && typeof input === "object" && !Array.isArray(input) &&
+		required.every((field) => Object.prototype.hasOwnProperty.call(input, field));
+
 	if (rawInput.trim()) {
 		const local = localRuntimeInput(contract, rawInput);
-		if (local) return runtimeInputWithDefaults(contract, local);
+		// local 必须覆盖所有 required 字段才直接返回;否则缺 required 时不 short-circuit,
+		// 让 dispatcher 兜底补全(它更擅长理解自然语言里的裸 URL 等)。
+		// 修复:之前 local 抽到任意字段就返回,导致 "URL, page=1" 只抽到 page 就丢失 url。
+		if (local && coversRequired(local)) return runtimeInputWithDefaults(contract, local);
 		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride).catch(() => undefined);
-		if (dispatched) return runtimeInputWithDefaults(contract, dispatched);
+		if (dispatched && coversRequired(dispatched)) return runtimeInputWithDefaults(contract, dispatched);
+		// dispatcher 也没抽全 required:若 local/dispatched 至少有部分结果,补 default 后用它(不比现状差)。
+		const partial = dispatched ?? local;
+		if (partial) return runtimeInputWithDefaults(contract, partial);
 	}
 	if (fields.length === 0) return {};
 	const defaults = runtimeDefaults(contract);

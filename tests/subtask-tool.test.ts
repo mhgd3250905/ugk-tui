@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { registerTask } from "../extensions/task/task.ts";
+import { registerTask, formatPhaseBreakdown } from "../extensions/task/task.ts";
 import { saveTaskbook, loadTaskbook } from "../extensions/task/task-book.ts";
 import { buildTaskbookPrompt } from "../extensions/task/task-registry.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
@@ -169,6 +169,10 @@ test("run_task single returns machine-verifiable PASS and records the run", asyn
 		assert.equal(result.terminate, true, "run_task PASS 后应 terminate,不进入自动总结轮");
 		assert.match(result.details.results[0].workerSummary, /写好了/, "workerSummary 仍在 details");
 		assert.doesNotMatch(result.content[0].text, /workerSummary/, "workerSummary 不进 LLM context");
+		// ponytail: phases 纯诊断,落盘进 run 记录(回答"到底慢在哪")。
+		const runPhases = loaded?.taskbook.runs.at(-1)?.phases;
+		assert.equal(typeof runPhases?.workerMs, "number", "workerMs 记录落盘");
+		assert.equal(typeof runPhases?.verifyMs, "number", "verifyMs 记录落盘");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
@@ -556,4 +560,13 @@ test("run_task reports clean FAIL with empty verifyFailures when worker fails wi
 		setTaskDispatcherForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
 	}
+});
+
+test("formatPhaseBreakdown renders ms phases into readable seconds", () => {
+	// ponytail: 纯展示函数。无 phases 时空;有时输出可读分段(回答"慢在哪")。
+	assert.deepEqual(formatPhaseBreakdown(undefined), []);
+	const lines = formatPhaseBreakdown({ workerFirstOutputMs: 12000, workerMs: 90000, verifyMs: 5000 });
+	assert.ok(lines.some((l) => /worker 启动\+首轮: 12\.0s/.test(l)));
+	assert.ok(lines.some((l) => /worker 整体: 90\.0s/.test(l)));
+	assert.ok(lines.some((l) => /verify: 5\.0s/.test(l)));
 });

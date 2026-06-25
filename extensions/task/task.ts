@@ -57,6 +57,7 @@ type SubtaskResult = {
 	workerSummary: string;
 	duration: number;
 	attempts: number;
+	phases?: Record<string, number>; // ponytail: 诊断用,各阶段耗时(ms)
 };
 
 type TaskRunFailure = {
@@ -643,7 +644,9 @@ async function formatRunResult(
 	durationSeconds: number,
 	progress?: string[],
 	notes?: string[],
+	phases?: Record<string, number>,
 ): Promise<string> {
+	const phaseLines = formatPhaseBreakdown(phases);
 	if (passed) {
 		return [
 			"## 任务结果",
@@ -651,6 +654,7 @@ async function formatRunResult(
 			`任务: ${loaded.taskbook.description}`,
 			`尝试: ${attempts} 次`,
 			`耗时: ${durationSeconds.toFixed(1)}s`,
+			...phaseLines,
 			"",
 			...await formatArtifacts(loaded.contract, outputDir),
 			"",
@@ -670,6 +674,7 @@ async function formatRunResult(
 		`任务: ${loaded.taskbook.description}`,
 		`尝试: ${attempts} 次`,
 		`耗时: ${durationSeconds.toFixed(1)}s`,
+		...phaseLines,
 		"",
 		"## 验证",
 		"失败断言:",
@@ -682,6 +687,19 @@ async function formatRunResult(
 		...formatOptionalSection("最近进展", progress),
 		...formatOptionalSection("运行中用户备注", notes),
 	].join("\n");
+}
+
+// ponytail: 纯诊断展示。把 phases(ms)转成可读分段,回答"到底慢在哪"。
+// workerFirstOutputMs = worker 子进程启动+首轮 LLM 的延迟(用户感受的"启动慢");
+// workerMs = worker 整体(含造脚本/CDP);verifyMs = 校验。其余 = 重试/checker/间隙。
+export function formatPhaseBreakdown(phases?: Record<string, number>): string[] {
+	if (!phases) return [];
+	const s = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+	const lines = ["", "耗时分解:"];
+	if (phases.workerFirstOutputMs !== undefined) lines.push(`  worker 启动+首轮: ${s(phases.workerFirstOutputMs)}`);
+	if (phases.workerMs !== undefined) lines.push(`  worker 整体: ${s(phases.workerMs)}`);
+	if (phases.verifyMs !== undefined) lines.push(`  verify: ${s(phases.verifyMs)}`);
+	return lines;
 }
 
 async function formatRepairSummary(
@@ -880,6 +898,7 @@ interface TaskRetryOutcome {
 	attempts: number; // 实际 worker 尝试次数 (1..maxRetry+1)
 	aborted: boolean; // worker 被中断(worker.ok===false 且 signal.aborted),区别于普通失败
 	checkerAborted?: boolean; // checker 主动判 abort 提前终止
+	phases?: Record<string, number>; // ponytail: 纯诊断,各阶段累计耗时(ms)
 }
 
 async function runTaskWithRetry(
@@ -907,9 +926,22 @@ async function runTaskWithRetry(
 	// 不用 Boolean(signal.aborted):那样 verify/checker 期间被 abort 也会算 aborted,
 	// 而 worker 那轮其实成功了,会被 handleTaskRun 误判进 abort 分支或漏判 FAIL。
 	let workerAborted = false;
+	// ponytail: 纯诊断计时。workerFirstOutput = 从 runTaskWithRetry 进入到 worker 子进程
+	// 首次产出(子进程启动 + 首轮 LLM 的延迟);workerMs/verifyMs = 各阶段累计。不改执行逻辑。
+	const runStartMs = Date.now();
+	let workerFirstOutputMs: number | undefined;
+	let workerMs = 0;
+	let verifyMs = 0;
+	const wrappedOnWorkerUpdate = opts.onWorkerUpdate
+		? (text: string) => {
+			if (workerFirstOutputMs === undefined) workerFirstOutputMs = Date.now() - runStartMs;
+			opts.onWorkerUpdate!(text);
+		}
+		: undefined;
 	for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
 		opts.onWorkerStart?.(attempt + 1, feedback);
 		attempts = attempt + 1;
+		const workerStartMs = Date.now();
 		workerResult = await dispatchWorker({
 			skill: loaded.skill,
 			contract: loaded.contract,
@@ -920,8 +952,9 @@ async function runTaskWithRetry(
 			cwd,
 			env: opts.env,
 			signal: opts.signal,
-			onUpdate: opts.onWorkerUpdate,
+			onUpdate: wrappedOnWorkerUpdate,
 		});
+		workerMs += Date.now() - workerStartMs;
 
 		// worker 失败不重试(与 /task run 一致)。worker 被中断专门标记,区别于普通失败。
 		if (!workerResult.ok) {
@@ -930,7 +963,9 @@ async function runTaskWithRetry(
 		}
 
 		opts.onVerifyStart?.(attempt + 1);
+		const verifyStartMs = Date.now();
 		verifyResult = await runVerify({ verifyPath, outputDir, input: runtimeInput });
+		verifyMs += Date.now() - verifyStartMs;
 		if (verifyResult.passed) break;
 
 		// 最后一次或被中断:不再调 checker
@@ -954,7 +989,9 @@ async function runTaskWithRetry(
 	if (!verifyResult) {
 		verifyResult = { passed: false, failures: [], stdout: "", stderr: "", exitCode: null, durationMs: 0 };
 	}
-	return { workerResult: workerResult!, verifyResult, attempts, aborted: workerAborted, checkerAborted };
+	const phases: Record<string, number> = { workerMs, verifyMs };
+	if (workerFirstOutputMs !== undefined) phases.workerFirstOutputMs = workerFirstOutputMs;
+	return { workerResult: workerResult!, verifyResult, attempts, aborted: workerAborted, checkerAborted, phases };
 }
 
 async function executeSubtask(
@@ -993,6 +1030,7 @@ async function executeSubtask(
 		exitCode: status === "pass" ? 0 : (outcome.verifyResult.exitCode ?? 1),
 		verifyFailures: outcome.verifyResult.failures,
 		duration,
+		phases: outcome.phases,
 	});
 	return {
 		name: request.name,
@@ -1003,6 +1041,7 @@ async function executeSubtask(
 		workerSummary: outcome.workerResult.ok ? outcome.workerResult.summary : (outcome.workerResult.errorMessage ?? "worker failed"),
 		duration,
 		attempts: outcome.attempts,
+		phases: outcome.phases,
 	};
 }
 
@@ -1128,7 +1167,7 @@ async function handleTaskRun(
 
 		// abort:用户主动 /task stop 中断,不算失败,不发 onFail
 		if (!workerResult.ok && outcome.aborted) {
-			const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, false, attempts, duration, runState.progress, runState.notes);
+			const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, false, attempts, duration, runState.progress, runState.notes, outcome.phases);
 			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
 			ctx.ui.notify(`已停止 taskbook "${finalName}" 运行。下一步可用 /task 选择"复盘上次运行"。`, "info");
 			return;
@@ -1142,8 +1181,9 @@ async function handleTaskRun(
 				exitCode: 0,
 				verifyFailures: [],
 				duration,
+				phases: outcome.phases,
 			});
-			const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, true, attempts, duration, runState.progress, runState.notes);
+			const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, true, attempts, duration, runState.progress, runState.notes, outcome.phases);
 			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
 			sendTaskProgressMessage(pi, { taskbookName: finalName, status: "PASS", lines: runState.progress });
 			sendTaskMessage(pi, ctx, report, "info");
@@ -1163,8 +1203,9 @@ async function handleTaskRun(
 			exitCode: verifyResult.exitCode ?? 1,
 			verifyFailures: verifyResult.failures,
 			duration,
+			phases: outcome.phases,
 		});
-		const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, false, attempts, duration, runState.progress, runState.notes);
+		const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, false, attempts, duration, runState.progress, runState.notes, outcome.phases);
 		lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
 		sendTaskProgressMessage(pi, { taskbookName: finalName, status: "FAIL", lines: runState.progress });
 		onFail?.({

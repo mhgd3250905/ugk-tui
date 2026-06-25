@@ -21,6 +21,9 @@ export interface TaskRun {
 	exitCode: number;
 	verifyFailures: VerifyFailure[];
 	duration: number;
+	// ponytail: 纯诊断字段,不改执行逻辑。各阶段累计耗时(ms),调试"到底慢在哪"用。
+	// 例如 workerFirstOutput = worker 子进程启动+首轮 LLM 的延迟;worker = worker 整体;verify = 校验。
+	phases?: Record<string, number>;
 }
 
 export interface Taskbook {

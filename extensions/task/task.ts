@@ -838,6 +838,83 @@ async function loadSubtask(cwd: string, name: string): Promise<LoadedTaskbook> {
 	throw new Error(`taskbook "${name}" 不存在。可用: ${available}`);
 }
 
+// ponytail: 单源重试内核 — executeSubtask(run_task 工具)和 handleTaskRun(/task run 交互式)共用。
+// 抽出来的纯逻辑:worker→verify→checker→feedback 循环。UI 耦合(widget/progress/notes/通知)留在调用方,
+// 通过 onWorkerStart / onUpdate 回调按需注入,默认不传即纯函数式。两条路径行为由此保证一致。
+interface TaskRetryOutcome {
+	workerResult: TaskWorkerResult;
+	verifyResult: Awaited<ReturnType<typeof runVerify>>;
+	attempts: number; // 实际 worker 尝试次数 (1..maxRetry+1)
+	aborted: boolean; // 是否被 signal 中断(worker 运行中被 abort)
+	checkerAborted?: boolean; // checker 主动判 abort 提前终止
+}
+
+async function runTaskWithRetry(
+	loaded: LoadedTaskbook,
+	runtimeInput: unknown,
+	outputDir: string,
+	cwd: string,
+	opts: {
+		env: Record<string, string | undefined>;
+		signal?: AbortSignal;
+		maxRetry?: number;
+		onWorkerStart?: (attempt: number, feedback: unknown) => void;
+		onWorkerUpdate?: (text: string) => void;
+	},
+): Promise<TaskRetryOutcome> {
+	const maxRetry = opts.maxRetry ?? 3;
+	const verifyPath = path.join(loaded.dir, "verify.mjs");
+	let feedback: unknown;
+	let workerResult: TaskWorkerResult | undefined;
+	let verifyResult: Awaited<ReturnType<typeof runVerify>> | undefined;
+	let attempts = 0;
+	let checkerAborted = false;
+	for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
+		opts.onWorkerStart?.(attempt + 1, feedback);
+		attempts = attempt + 1;
+		workerResult = await dispatchWorker({
+			skill: loaded.skill,
+			contract: loaded.contract,
+			runtimeInput,
+			outputDir,
+			feedback,
+		}, {
+			cwd,
+			env: opts.env,
+			signal: opts.signal,
+			onUpdate: opts.onWorkerUpdate,
+		});
+
+		// worker 失败不重试(与 /task run 一致);abort 由调用方判断 opts.signal
+		if (!workerResult.ok) break;
+
+		verifyResult = await runVerify({ verifyPath, outputDir, input: runtimeInput });
+		if (verifyResult.passed) break;
+
+		// 最后一次或被中断:不再调 checker
+		if (attempt === maxRetry || opts.signal?.aborted) break;
+
+		const checkerResult = await dispatchChecker({
+			failures: verifyResult.failures,
+			contract: loaded.contract,
+			outputDir,
+			retryBudget: maxRetry - attempt - 1,
+		}, { cwd, signal: opts.signal });
+		if (checkerResult.verdict === "abort") {
+			checkerAborted = true;
+			break;
+		}
+		feedback = checkerResult;
+	}
+	// ponytail: worker 失败(含 abort)时根本没跑 verify,verifyResult 仍是 undefined。
+	// 合成一个"未验证"结果(passed:false, exitCode:null, 无 failures)让 outcome 字段恒有值,
+	// 调用方不必散落 null-guard。exitCode:null 语义即"未运行 verify"。
+	if (!verifyResult) {
+		verifyResult = { passed: false, failures: [], stdout: "", stderr: "", exitCode: null, durationMs: 0 };
+	}
+	return { workerResult: workerResult!, verifyResult, attempts, aborted: Boolean(opts.signal?.aborted), checkerAborted };
+}
+
 async function executeSubtask(
 	ctx: any,
 	request: SubtaskRequest,
@@ -850,24 +927,9 @@ async function executeSubtask(
 	const outputDir = path.join(runDir, "output");
 	await mkdir(outputDir, { recursive: true });
 	const runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, request.input, true);
-	let workerResult: TaskWorkerResult;
-	let verifyResult: Awaited<ReturnType<typeof runVerify>>;
+	let outcome: TaskRetryOutcome;
 	try {
-		workerResult = await dispatchWorker({
-			skill: loaded.skill,
-			contract: loaded.contract,
-			runtimeInput,
-			outputDir,
-		}, {
-			cwd: cwdOf(ctx),
-			env: workerEnv,
-			signal,
-		});
-		verifyResult = await runVerify({
-			verifyPath: path.join(loaded.dir, "verify.mjs"),
-			outputDir,
-			input: runtimeInput,
-		});
+		outcome = await runTaskWithRetry(loaded, runtimeInput, outputDir, cwdOf(ctx), { env: workerEnv, signal });
 	} catch (error) {
 		return {
 			name: request.name,
@@ -881,13 +943,13 @@ async function executeSubtask(
 		};
 	}
 	const duration = (Date.now() - startedAt) / 1000;
-	const status = workerResult.ok && verifyResult.passed ? "pass" : "fail";
+	const status = outcome.workerResult.ok && outcome.verifyResult.passed ? "pass" : "fail";
 	await appendRunToTaskbook(loaded.scope, cwdOf(ctx), request.name, {
 		timestamp: new Date().toISOString(),
 		status,
 		input: runtimeInput,
-		exitCode: status === "pass" ? 0 : (verifyResult.exitCode ?? 1),
-		verifyFailures: verifyResult.failures,
+		exitCode: status === "pass" ? 0 : (outcome.verifyResult.exitCode ?? 1),
+		verifyFailures: outcome.verifyResult.failures,
 		duration,
 	});
 	return {
@@ -895,10 +957,10 @@ async function executeSubtask(
 		status,
 		outputDir,
 		artifacts: await collectArtifactPaths(loaded.contract, outputDir),
-		verifyFailures: verifyResult.failures,
-		workerSummary: workerResult.ok ? workerResult.summary : (workerResult.errorMessage ?? "worker failed"),
+		verifyFailures: outcome.verifyResult.failures,
+		workerSummary: outcome.workerResult.ok ? outcome.workerResult.summary : (outcome.workerResult.errorMessage ?? "worker failed"),
 		duration,
-		attempts: 1,
+		attempts: outcome.attempts,
 	};
 }
 
@@ -975,38 +1037,33 @@ async function handleTaskRun(
 	await mkdir(outputDir, { recursive: true });
 	const runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, finalRawInput ?? "");
 	const maxRetry = 3;
-	let lastVerifyResult: Awaited<ReturnType<typeof runVerify>> | undefined;
-	let lastWorkerResult: TaskWorkerResult | undefined;
-	let feedback: unknown;
 	const abortController = new AbortController();
 	const runState: ActiveTaskRun = { taskbookName: finalName, abortController, progress: [], notes: [] };
 	activeTaskRun = runState;
 
 	const runPromise = (async () => {
 	try {
-	for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
-		const widgetBase = (status: string) => [
-			`⏳ taskbook "${finalName}" 运行中...`,
-			`尝试 ${attempt + 1}/${maxRetry + 1}`,
-			status,
-		];
-		setTaskRunWidget(ctx, widgetBase("worker 执行中..."));
-		const workerResult = await dispatchWorker({
-			skill: loaded.skill,
-			contract: loaded.contract,
-			runtimeInput,
-			outputDir,
-			feedback,
-		}, {
-			cwd: cwdOf(ctx),
+		let currentAttempt = 1;
+		const outcome = await runTaskWithRetry(loaded, runtimeInput, outputDir, cwdOf(ctx), {
 			env: workerEnv,
 			signal: abortController.signal,
-			onUpdate: (text) => {
+			maxRetry,
+			onWorkerStart: (attempt) => {
+				currentAttempt = attempt;
+				setTaskRunWidget(ctx, [
+					`⏳ taskbook "${finalName}" 运行中...`,
+					`尝试 ${attempt}/${maxRetry + 1}`,
+					"worker 执行中...",
+				]);
+			},
+			onWorkerUpdate: (text) => {
 				const progress = formatProgressLines(text);
 				const added = appendUniqueProgressLines(runState.progress, progress);
 				if (added.length > 0) {
 					setTaskRunWidget(ctx, [
-						...widgetBase("worker 执行中..."),
+						`⏳ taskbook "${finalName}" 运行中...`,
+						`尝试 ${currentAttempt}/${maxRetry + 1}`,
+						"worker 执行中...",
 						"",
 						"最近进展:",
 						...runState.progress.slice(-5).map((line, index) => `${index + 1}. ${line}`),
@@ -1014,80 +1071,59 @@ async function handleTaskRun(
 				}
 			},
 		});
-		lastWorkerResult = workerResult;
+		const { workerResult, verifyResult, attempts } = outcome;
+		const duration = (Date.now() - startedAt) / 1000;
+		const passed = workerResult.ok && verifyResult.passed;
 
-		if (!workerResult.ok) {
-			if (abortController.signal.aborted) {
-				const duration = (Date.now() - startedAt) / 1000;
-				const report = await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, false, attempt + 1, duration, runState.progress, runState.notes);
-				lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
-				ctx.ui.notify(`已停止 taskbook "${finalName}" 运行。下一步可用 /task 选择"复盘上次运行"。`, "info");
-				return;
-			}
-			ctx.ui.notify(`worker 执行失败: ${workerResult.errorMessage}`, "error");
-			break;
+		// abort:用户主动 /task stop 中断,不算失败,不发 onFail
+		if (!workerResult.ok && outcome.aborted) {
+			const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, false, attempts, duration, runState.progress, runState.notes);
+			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
+			ctx.ui.notify(`已停止 taskbook "${finalName}" 运行。下一步可用 /task 选择"复盘上次运行"。`, "info");
+			return;
 		}
 
-		setTaskRunWidget(ctx, widgetBase("verify 执行中..."));
-		lastVerifyResult = await runVerify({
-			verifyPath: path.join(loaded.dir, "verify.mjs"),
-			outputDir,
-			input: runtimeInput,
-		});
-
-		if (lastVerifyResult.passed) {
+		if (passed) {
 			await appendRunToTaskbook(loaded.scope, cwdOf(ctx), finalName, {
 				timestamp: new Date().toISOString(),
 				status: "pass",
 				input: runtimeInput,
 				exitCode: 0,
 				verifyFailures: [],
-				duration: (Date.now() - startedAt) / 1000,
+				duration,
 			});
-			const duration = (Date.now() - startedAt) / 1000;
-			const report = await formatRunResult(loaded, outputDir, workerResult, lastVerifyResult, true, attempt + 1, duration, runState.progress, runState.notes);
+			const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, true, attempts, duration, runState.progress, runState.notes);
 			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
 			sendTaskProgressMessage(pi, { taskbookName: finalName, status: "PASS", lines: runState.progress });
 			sendTaskMessage(pi, ctx, report, "info");
 			return;
 		}
 
-		if (attempt === maxRetry) break;
-
-		const checkerResult = await dispatchChecker({
-			failures: lastVerifyResult.failures,
-			contract: loaded.contract,
-			outputDir,
-			retryBudget: maxRetry - attempt - 1,
-		}, { cwd: cwdOf(ctx) });
-
-		if (checkerResult.verdict === "abort") {
-			ctx.ui.notify(`checker 判 abort: ${checkerResult.reason}`, "warning");
-			break;
+		// FAIL: worker 失败 / verify 一直没过 / checker 主动 abort
+		if (!workerResult.ok) {
+			ctx.ui.notify(`worker 执行失败: ${workerResult.errorMessage}`, "error");
+		} else if (outcome.checkerAborted) {
+			ctx.ui.notify("checker 判 abort,提前终止。", "warning");
 		}
-		feedback = checkerResult;
-	}
-
-	await appendRunToTaskbook(loaded.scope, cwdOf(ctx), finalName, {
-		timestamp: new Date().toISOString(),
-		status: "fail",
-		input: runtimeInput,
-		exitCode: lastVerifyResult?.exitCode ?? 1,
-		verifyFailures: lastVerifyResult?.failures ?? [],
-		duration: (Date.now() - startedAt) / 1000,
-	});
-	const duration = (Date.now() - startedAt) / 1000;
-	const report = await formatRunResult(loaded, outputDir, lastWorkerResult, lastVerifyResult, false, maxRetry + 1, duration, runState.progress, runState.notes);
-	lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
-	sendTaskProgressMessage(pi, { taskbookName: finalName, status: "FAIL", lines: runState.progress });
-	onFail?.({
-		taskbookName: finalName,
-		taskbookScope: loaded.scope,
-		spec: loaded.spec,
-		runDir,
-		summary: await formatRepairSummary(loaded, outputDir, lastWorkerResult, lastVerifyResult),
-	});
-	sendTaskMessage(pi, ctx, `${report}\n\n下一步: 输入修改意见修正 taskbook,或用 /task 选择修正/重新运行/查看/放弃。`, "error");
+		await appendRunToTaskbook(loaded.scope, cwdOf(ctx), finalName, {
+			timestamp: new Date().toISOString(),
+			status: "fail",
+			input: runtimeInput,
+			exitCode: verifyResult.exitCode ?? 1,
+			verifyFailures: verifyResult.failures,
+			duration,
+		});
+		const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, false, attempts, duration, runState.progress, runState.notes);
+		lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
+		sendTaskProgressMessage(pi, { taskbookName: finalName, status: "FAIL", lines: runState.progress });
+		onFail?.({
+			taskbookName: finalName,
+			taskbookScope: loaded.scope,
+			spec: loaded.spec,
+			runDir,
+			summary: await formatRepairSummary(loaded, outputDir, workerResult, verifyResult),
+		});
+		sendTaskMessage(pi, ctx, `${report}\n\n下一步: 输入修改意见修正 taskbook,或用 /task 选择修正/重新运行/查看/放弃。`, "error");
 	} catch (error) {
 		ctx.ui.notify(`taskbook "${finalName}" 运行异常: ${error instanceof Error ? error.message : String(error)}`, "error");
 	} finally {

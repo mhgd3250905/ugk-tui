@@ -8,6 +8,7 @@ import { saveTaskbook, loadTaskbook } from "../extensions/task/task-book.ts";
 import { buildTaskbookPrompt } from "../extensions/task/task-registry.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
 import { setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
+import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
 
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 const testAgentDir = mkdtempSync(path.join(os.tmpdir(), "ugk-subtask-tool-agent-"));
@@ -351,4 +352,150 @@ test("task executing phase blocks nested run_task", async () => {
 
 	assert.equal(blocked.block, true);
 	assert.match(blocked.reason, /禁止调用/);
+});
+
+// ponytail: run_task 现在和 /task run 一样有 worker→verify→checker→feedback 重试内核。
+// 这组测试证明"worker 真的会带着失败信息回去改"——之前 run_task 零重试的核心缺口。
+// verify 校验产出文件内容是合法 JSON:worker 第1次写非法 JSON → fail → checker 判 retry → 第2次写合法 → pass。
+
+const JSON_VERIFY = `import { readFile } from 'node:fs/promises';
+const raw = await readFile(process.env.TASK_OUTPUT_DIR + '/out.json', 'utf8').catch(() => '');
+try { JSON.parse(raw); process.exit(0); }
+catch (e) { console.log(JSON.stringify([{ assertion: 'json is valid', expected: 'valid JSON', actual: String(e.message) }])); process.exit(1); }
+`;
+
+// checker mock 返回 verdict=retry,提示修正 JSON
+function checkerRetryMock() {
+	return async () => ({
+		agent: "checker",
+		agentSource: "user",
+		task: "task",
+		exitCode: 0,
+		messages: [{ role: "assistant", content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify({ hint: "修正 JSON 语法", verdict: "retry", reason: "JSON 非法,可修" })}\n\`\`\`` }] }],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+	} as any);
+}
+
+function checkerAbortMock() {
+	return async () => ({
+		agent: "checker",
+		agentSource: "user",
+		task: "task",
+		exitCode: 0,
+		messages: [{ role: "assistant", content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify({ hint: "无法修复", verdict: "abort", reason: "死局" })}\n\`\`\`` }] }],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+	} as any);
+}
+
+// worker mock:按调用次数产出不同内容,内联在每个测试里(见下)。
+// outputDir 从 worker prompt 文本里提取(真实 worker 也是从 prompt 知道路径,不走 env)。
+function outputDirFromTask(task: string): string {
+	const m = task.match(/所有产出必须落到:\s*(\S+)/);
+	if (!m) throw new Error("outputDir not found in worker prompt");
+	return m[1];
+}
+
+test("run_task retries worker after verify fail and passes on the second attempt", async () => {
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	let workerCalls = 0;
+	const workerSpy = async (_d: unknown, _a: unknown, _n: string, task: string) => {
+		workerCalls += 1;
+		const { writeFile, mkdir } = await import("node:fs/promises");
+		const dir = outputDirFromTask(task);
+		await mkdir(dir, { recursive: true });
+		// 第1次非法 JSON(模拟你这次的真实失败),第2次合法
+		await writeFile(path.join(dir, "out.json"), workerCalls === 1 ? "{bad json" : '{"ok": true}', "utf8");
+		return workerOk(workerCalls === 1 ? "v1" : "fixed");
+	};
+	setTaskWorkerRunnerForTests(workerSpy as any);
+	setTaskCheckerRunnerForTests(checkerRetryMock());
+	setTaskDispatcherForTests(async () => ({ text: "x" }));
+	try {
+		await saveFixtureTask(cwd, "retry-pass", JSON_VERIFY);
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", { name: "retry-pass", input: "x" }, undefined, undefined, ctx);
+
+		assert.equal(result.isError, undefined);
+		assert.match(result.content[0].text, /PASS/);
+		assert.equal(result.details.results[0].status, "pass");
+		assert.equal(result.details.results[0].attempts, 2, "worker 应被调 2 次");
+		assert.equal(workerCalls, 2);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskCheckerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("run_task fails after exhausting all 4 attempts with verify failures", async () => {
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	let workerCalls = 0;
+	setTaskWorkerRunnerForTests(async (_d: unknown, _a: unknown, _n: string, task: string) => {
+		workerCalls += 1;
+		const { writeFile, mkdir } = await import("node:fs/promises");
+		const dir = outputDirFromTask(task);
+		await mkdir(dir, { recursive: true });
+		// 一直写非法 JSON
+		await writeFile(path.join(dir, "out.json"), "{always bad", "utf8");
+		return workerOk("still bad");
+	});
+	setTaskCheckerRunnerForTests(checkerRetryMock());
+	setTaskDispatcherForTests(async () => ({ text: "x" }));
+	try {
+		await saveFixtureTask(cwd, "retry-exhaust", JSON_VERIFY);
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", { name: "retry-exhaust", input: "x" }, undefined, undefined, ctx);
+
+		assert.equal(result.details.results[0].status, "fail");
+		assert.equal(result.details.results[0].attempts, 4, "maxRetry=3 共 4 次");
+		assert.equal(workerCalls, 4);
+		assert.ok(result.details.results[0].verifyFailures.length > 0, "带具体 verify 失败");
+		assert.match(JSON.stringify(result.details.results[0].verifyFailures), /json is valid/);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskCheckerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("run_task stops early when checker judges abort", async () => {
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	let workerCalls = 0;
+	setTaskWorkerRunnerForTests(async (_d: unknown, _a: unknown, _n: string, task: string) => {
+		workerCalls += 1;
+		const { writeFile, mkdir } = await import("node:fs/promises");
+		const dir = outputDirFromTask(task);
+		await mkdir(dir, { recursive: true });
+		await writeFile(path.join(dir, "out.json"), "{bad", "utf8");
+		return workerOk("bad");
+	});
+	setTaskCheckerRunnerForTests(checkerAbortMock());
+	setTaskDispatcherForTests(async () => ({ text: "x" }));
+	try {
+		await saveFixtureTask(cwd, "retry-abort", JSON_VERIFY);
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", { name: "retry-abort", input: "x" }, undefined, undefined, ctx);
+
+		assert.equal(result.details.results[0].status, "fail");
+		assert.equal(result.details.results[0].attempts, 1, "checker 判 abort,worker 只跑 1 次");
+		assert.equal(workerCalls, 1);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskCheckerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
 });

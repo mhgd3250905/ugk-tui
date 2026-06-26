@@ -251,7 +251,7 @@ test("required gate: legacy contract with partial input does NOT throw in headle
 });
 
 // === dispatcher 是唯一参数解析路径 ===
-// 设计:裸值、自然语言、结构化输入一律交给 dispatcher(reasoningEffort=low + 明确映射 prompt)。
+// 设计:裸值、自然语言、结构化输入一律交给 dispatcher(reasoningEffort=medium + 明确映射 prompt)。
 // 本地只接明确的 "field=value" 和 JSON(确定性解析,不是猜)。撤掉了之前的单字段裸值捷径
 // —— 那是针对特定 contract 形态打补丁,强化 dispatcher 后不需要。
 // 下面这组用 dispatcher mock 验证:这些输入确实路由到 dispatcher,且 prompt 把映射规则讲清楚了。

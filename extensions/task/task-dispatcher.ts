@@ -111,7 +111,7 @@ function localRuntimeInput(contract: unknown, rawInput: string): unknown | undef
 	if (direct) return direct;
 	// ponytail: 只接明确的 "field=value" 形式(确定性字符串匹配,不是猜)。
 	// 裸值、自然语言一律交给 dispatcher —— 它拿 contract 说明书从输入解析是本职,
-	// reasoningEffort=low + 明确的映射 prompt 足以稳定处理。本地捷径是打补丁,撤掉。
+	// reasoningEffort=medium + 明确的映射 prompt 足以稳定处理。本地捷径是打补丁,撤掉。
 	const fields = runtimeFields(contract);
 	const entries: Record<string, string | number> = {};
 	for (const field of fields) {
@@ -152,7 +152,7 @@ async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInp
 			content: [{ type: "text", text: buildTaskDispatcherPrompt(skill, contract, rawInput) }],
 			timestamp: Date.now(),
 		}],
-	}, { apiKey: auth.apiKey, headers: auth.headers, reasoningEffort: "low" });
+	}, { apiKey: auth.apiKey, headers: auth.headers, reasoningEffort: "medium" });
 	const text = response.content
 		.filter((block): block is { type: "text"; text: string } => block.type === "text")
 		.map((block) => block.text)

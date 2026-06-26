@@ -23,11 +23,11 @@ test("buildUgkHeaderLines brands startup without pi copy", () => {
 	assert.match(text, /█/);
 	assert.match(text, /┌─ ugk v1\.0\.0/);
 	assert.match(text, /Welcome back/);
-	assert.match(text, /Tips for getting started/);
-	assert.match(text, /What's new/);
+	assert.match(text, /◆ Tips for getting started/);
+	assert.match(text, /◆ What's new/);
 	assert.match(text, /workspace\s+ugk-tui/);
 	assert.match(text, /model\s+deepseek-v4-pro/);
-	assert.match(text, /\/plan\s+draft before changing files/);
+	assert.match(text, /› \/plan\s+draft before changing files/);
 	assert.doesNotMatch(text, /├─ quick actions/);
 	assert.doesNotMatch(text, /\n  deepseek-v4-pro/);
 	assert.match(text, /ugk v1\.0\.0/);
@@ -97,8 +97,8 @@ test("buildUgkStartupScreenLines fills the terminal viewport with character effe
 
 	assert.equal(lines.length, 19);
 	assert.match(lines.join("\n"), /Welcome back/);
-	assert.match(lines.join("\n"), /Tips for getting started/);
-	assert.match(lines.join("\n"), /What's new/);
+	assert.match(lines.join("\n"), /◆ Tips for getting started/);
+	assert.match(lines.join("\n"), /◆ What's new/);
 	assert.match(lines.join("\n"), /█/);
 	assert.match(lines.join("\n"), /\/plan/);
 	for (const line of lines) {

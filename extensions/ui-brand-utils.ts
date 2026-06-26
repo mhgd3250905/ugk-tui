@@ -204,15 +204,15 @@ function buildUgkWelcomePanelLines(options: UgkHeaderOptions): string[] {
 		`model      ${model}`,
 	];
 	const rightRows = [
-		"Tips for getting started",
-		"/plan      draft before changing files",
-		"/implement run the guided pipeline",
-		"/check-env verify local tools",
+		"◆ Tips for getting started",
+		"› /plan      draft before changing files",
+		"› /implement run the guided pipeline",
+		"› /check-env verify local tools",
 		"",
-		"What's new",
-		"task runs show worker progress",
-		"footer shows usage and ready state",
-		"@agent delegates focused work",
+		"◆ What's new",
+		"› task runs show worker progress",
+		"› footer shows usage and ready state",
+		"› @agent delegates focused work",
 	];
 
 	const rowCount = Math.max(leftRows.length, rightRows.length);

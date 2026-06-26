@@ -86,8 +86,8 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 	if (trimmed.startsWith("│")) {
 		const colored = logoColoredLine
 			.replace(/(workspace|agent|stack|model)/, theme.fg("dim", "$1"))
-			.replace("Tips for getting started", theme.fg("success", "Tips for getting started"))
-			.replace("What's new", theme.fg("success", "What's new"))
+			.replace("◆ Tips for getting started", theme.bold(theme.fg("success", "◆ Tips for getting started")))
+			.replace("◆ What's new", theme.bold(theme.fg("success", "◆ What's new")))
 			.replace("/plan", theme.fg("success", "/plan"))
 			.replace("/implement", theme.fg("success", "/implement"))
 			.replace("/check-env", theme.fg("success", "/check-env"))

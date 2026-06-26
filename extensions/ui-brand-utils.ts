@@ -63,9 +63,10 @@ export function classifyUgkStatusTone(text: string): UgkStatusTone {
 }
 
 const UGK_BLOCK_LOGO = [
-	"█ █  ███  █ █",
-	"█ █  █▄█  ██ ",
-	"▀▀▀  ▀▀█  █ █",
+	"█  █  ███  █  █",
+	"█  █ █     █ █",
+	"█  █ █ ██  ██",
+	"████  ███  █  █",
 ];
 
 function hardTruncate(text: string, width: number): string {
@@ -185,10 +186,11 @@ function buildUgkWelcomePanelLines(options: UgkHeaderOptions): string[] {
 
 	const model = options.modelId || "model not selected";
 	const leftWidth = Math.max(28, Math.floor((rowWidth - 7) * 0.45));
+	const logoWidth = Math.max(...UGK_BLOCK_LOGO.map((line) => visibleWidth(line)));
 	const leftRows = [
 		"Welcome back.",
 		"",
-		...UGK_BLOCK_LOGO.map((line) => fitVisible(line, leftWidth, "center")),
+		...UGK_BLOCK_LOGO.map((line) => fitVisible(padEndVisible(line, logoWidth), leftWidth, "center")),
 		"",
 		`workspace  ${options.cwdName}`,
 		`model      ${model}`,

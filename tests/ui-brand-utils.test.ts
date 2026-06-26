@@ -72,12 +72,29 @@ test("buildUgkHeaderLines does not leak ANSI resets when truncating cells", () =
 test("buildUgkLogoLines renders a compact block-character logo", () => {
 	const lines = buildUgkLogoLines(96);
 
-	assert.equal(lines.length, 3);
-	assert.match(lines.join("\n"), /[▀▄]/);
+	assert.deepEqual(lines, [
+		"█  █  ███  █  █",
+		"█  █ █     █ █",
+		"█  █ █ ██  ██",
+		"████  ███  █  █",
+	]);
+	assert.doesNotMatch(lines.join("\n"), /[▀▄]/);
 	for (const line of lines) {
 		assert.match(line, /█/);
-		assert.ok(visibleWidth(line) <= 14, `logo line is too wide: ${line}`);
+		assert.ok(visibleWidth(line) <= 16, `logo line is too wide: ${line}`);
 	}
+});
+
+test("buildUgkHeaderLines aligns the logo as one block", () => {
+	const logoRows = buildUgkHeaderLines({
+		version: "1.0.0",
+		cwdName: "ugk-tui",
+		modelId: "deepseek-v4-pro",
+		width: 80,
+	}).filter((line) => line.includes("█"));
+
+	const starts = new Set(logoRows.map((line) => line.indexOf("█")));
+	assert.equal(starts.size, 1);
 });
 
 test("buildUgkStartupScreenLines fills the terminal viewport with character effects", () => {

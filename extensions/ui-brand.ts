@@ -69,10 +69,10 @@ function hasSessionMessages(ctx: { sessionManager?: { getEntries?: () => unknown
 
 function colorHeaderLine(line: string, index: number, theme: any): string {
 	const trimmed = line.trimStart();
-	if (/[█▀▄]/.test(line) && !trimmed.startsWith("│")) {
+	if (line.includes("█") && !trimmed.startsWith("│")) {
 		return theme.bold(theme.fg("success", line));
 	}
-	const logoColoredLine = line.replace(/[█▀▄]+/g, (block) => theme.bold(theme.fg("success", block)));
+	const logoColoredLine = line.replace(/█+/g, (block) => theme.bold(theme.fg("success", block)));
 	if (/[░▒▓]/.test(line) || trimmed.startsWith("╭")) {
 		return theme.fg("dim", line);
 	}

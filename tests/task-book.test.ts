@@ -217,3 +217,26 @@ test("task-book exposes user root and spec guard", () => {
 	assert.equal(isRequirementsSpec(spec), true);
 	assert.equal(isRequirementsSpec({ goal: "missing arrays" }), false);
 });
+
+// 并发 append 回归测试: run_task parallel 多 worker 同时调 appendRunToTaskbook。
+// 修复前是 read-modify-write 无锁并发 → 末尾多出 `}` 写坏 JSON(见 taskbook.json 实测),
+// 且各 worker 的 run 互相覆盖丢失。本测试同时守这两条:文件不坏 + run 不丢。
+test("appendRunToTaskbook is safe under concurrent appends (parallel run_task regression)", async () => {
+	const cwd = tempCwd();
+	try {
+		await saveTaskbook("project", cwd, "concurrent", { description: "concurrent", spec, skill: "s", verify: "v", contract });
+		// N=8: 低于 sortAndTrimRuns 的 10 条上限,断言"全部保留"才成立
+		const N = 8;
+		const starts = Array.from({ length: N }, (_, i) =>
+			appendRunToTaskbook("project", cwd, "concurrent", run(`2026-06-22T00:00:${String(i).padStart(2, "0")}.000Z`, i % 2 === 0 ? "pass" : "fail")));
+		await Promise.all(starts);
+
+		// 1) 文件必须仍是合法 JSON(修复前会写坏,loadTaskbook 直接抛 JSON parse error)
+		const loaded = await loadTaskbook(cwd, "concurrent");
+		assert.ok(loaded, "taskbook should still load after concurrent appends");
+		// 2) 所有 N 条 run 都必须保留(修复前 read-modify-write 互相覆盖,只剩最后写的 1 条)
+		assert.equal(loaded?.taskbook.runs.length, N, "no run lost to concurrent append");
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});

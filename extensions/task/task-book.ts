@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { isRequirementsSpec, type RequirementsSpec } from "./task-spec.ts";
 import { stripBom } from "../shared/settings-io.ts";
 
@@ -238,15 +239,24 @@ export async function listTaskbooks(cwd: string, tag?: string): Promise<Array<{ 
 }
 
 export async function appendRunToTaskbook(scope: "user" | "project", cwd: string, name: string, run: TaskRun): Promise<Taskbook> {
-	const loaded = await loadFromDir(scope, taskDir(scope, cwd, name));
-	if (!loaded) throw new Error(`Taskbook not found: ${name}`);
-	const taskbook: Taskbook = {
-		...loaded.taskbook,
-		updatedAt: new Date().toISOString(),
-		runs: sortAndTrimRuns([...loaded.taskbook.runs, run]),
-	};
-	await writeJson(path.join(loaded.dir, "taskbook.json"), taskbook);
-	return taskbook;
+	// ponytail: 进程内文件锁串行化同一 taskbook 的 read-modify-write。
+	// run_task parallel 的多 worker 都在 main 进程并发调这里,不加锁会互相覆盖(run 丢失)
+	// 甚至把 taskbook.json 写坏成 `{...}\n{...}` 导致 loadTaskbook 抛 JSON parse error、
+	// taskbook 从清单消失(见 tests/task-book.test.ts 并发回归测试)。
+	// 用 withFileMutationQueue 按 realpath 串行同一文件,不同 taskbook 仍并行。
+	// 进程内锁在这里有效:append 调用都在 main 进程,不跨 worker 子进程。
+	const filePath = path.join(taskDir(scope, cwd, name), "taskbook.json");
+	return withFileMutationQueue(filePath, async () => {
+		const loaded = await loadFromDir(scope, taskDir(scope, cwd, name));
+		if (!loaded) throw new Error(`Taskbook not found: ${name}`);
+		const taskbook: Taskbook = {
+			...loaded.taskbook,
+			updatedAt: new Date().toISOString(),
+			runs: sortAndTrimRuns([...loaded.taskbook.runs, run]),
+		};
+		await writeJson(path.join(loaded.dir, "taskbook.json"), taskbook);
+		return taskbook;
+	});
 }
 
 export async function renameTaskbook(scope: "user" | "project", cwd: string, oldName: string, newName: string): Promise<Taskbook> {

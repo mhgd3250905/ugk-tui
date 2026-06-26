@@ -1,6 +1,6 @@
 {
   "name": "ugk-agent",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "ugk — 基于 pi 的定制化编码 agent,装即用",
   "type": "module",
   "bin": {

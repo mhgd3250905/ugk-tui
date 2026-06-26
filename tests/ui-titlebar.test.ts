@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import registerUiTitlebar from "../extensions/ui-titlebar.ts";
+import registerUgkBrandUi from "../extensions/ui-brand.ts";
 
 function wait(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-test("titlebar spinner stops itself if the captured extension context becomes stale", async () => {
+// ponytail: spinner 容错不变量(原 ui-titlebar.test.ts 迁移)。spinner 已并入 ui-brand,
+// 验证 agent 工作期间 ctx 变 stale 不会抛未捕获异常(timer 自停)。
+test("ugk title spinner stops itself if the captured extension context becomes stale", async () => {
 	const handlers = new Map<string, Function>();
 	let stale = false;
 	const errors: Error[] = [];
@@ -14,20 +16,25 @@ test("titlebar spinner stops itself if the captured extension context becomes st
 		on(event: string, handler: Function) {
 			handlers.set(event, handler);
 		},
+		registerFlag() {},
+		registerCommand() {},
+		getFlag() {
+			return false;
+		},
 		getSessionName() {
-			if (stale) {
-				throw new Error("This extension ctx is stale after session replacement or reload.");
-			}
+			if (stale) throw new Error("ctx stale after session replacement or reload.");
 			return "demo";
 		},
 	};
 	const ctx = {
+		hasUI: true,
 		ui: {
 			setTitle() {
-				if (stale) {
-					throw new Error("This extension ctx is stale after session replacement or reload.");
-				}
+				if (stale) throw new Error("ctx stale after session replacement or reload.");
 			},
+			notify() {},
+			setHeader() {},
+			setFooter() {},
 		},
 	};
 	const onUncaught = (error: Error) => {
@@ -36,7 +43,8 @@ test("titlebar spinner stops itself if the captured extension context becomes st
 
 	process.prependListener("uncaughtException", onUncaught);
 	try {
-		registerUiTitlebar(pi as any);
+		registerUgkBrandUi(pi as any);
+		await handlers.get("session_start")!({}, ctx);
 		await handlers.get("agent_start")!({}, ctx);
 		await wait(120);
 		stale = true;

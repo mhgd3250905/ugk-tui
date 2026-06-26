@@ -45,6 +45,17 @@ function formatTitle(pi: ExtensionAPI, cwd: string): string {
 	return session ? `ugk - ${session} - ${cwdName}` : `ugk - ${cwdName}`;
 }
 
+// ponytail: spinner 动画从 ui-titlebar 并入(修 title 抢占 bug)。ugk 品牌标题优先,
+// 工作态前缀盲文帧、idle 态恢复静态 ugk 标题;off 时 stop,不抢 title。
+const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_INTERVAL_MS = 80;
+
+function formatSpinningTitle(pi: ExtensionAPI, frame: string): string {
+	const cwdName = path.basename(process.cwd());
+	const session = pi.getSessionName();
+	return session ? `${frame} ugk - ${session} - ${cwdName}` : `${frame} ugk - ${cwdName}`;
+}
+
 function shouldClearStartupScreen(): boolean {
 	const rawEnv = process.env.UGK_CLEAR_STARTUP;
 	if (rawEnv && DISABLED_ENV_VALUES.has(rawEnv.toLowerCase())) return false;
@@ -285,6 +296,40 @@ function clearBrandUi(ctx: ExtensionContext): void {
 
 export default function registerUgkBrandUi(pi: ExtensionAPI): void {
 	let enabled = !envDisablesBrandUi();
+	let spinnerTimer: ReturnType<typeof setInterval> | null = null;
+	let spinnerFrame = 0;
+
+	function stopSpinnerTitle(ctx: ExtensionContext): void {
+		if (spinnerTimer) {
+			clearInterval(spinnerTimer);
+			spinnerTimer = null;
+		}
+		spinnerFrame = 0;
+		if (enabled) {
+			try {
+				ctx.ui.setTitle(formatTitle(pi, process.cwd()));
+			} catch {
+				// session 可能在 replacement/reload 拆除时已 stale。
+			}
+		}
+	}
+
+	function startSpinnerTitle(ctx: ExtensionContext): void {
+		stopSpinnerTitle(ctx);
+		if (!enabled) return;
+		spinnerTimer = setInterval(() => {
+			try {
+				const frame = BRAILLE_FRAMES[spinnerFrame % BRAILLE_FRAMES.length];
+				ctx.ui.setTitle(formatSpinningTitle(pi, frame));
+				spinnerFrame++;
+			} catch {
+				if (spinnerTimer) {
+					clearInterval(spinnerTimer);
+					spinnerTimer = null;
+				}
+			}
+		}, SPINNER_INTERVAL_MS);
+	}
 
 	pi.registerFlag("ugk-ui-off", {
 		description: "Disable ugk branded header/footer UI",
@@ -312,6 +357,7 @@ export default function registerUgkBrandUi(pi: ExtensionAPI): void {
 			}
 			if (action === "off" || action === "disable") {
 				enabled = false;
+				stopSpinnerTitle(ctx);
 				clearBrandUi(ctx);
 				ctx.ui.notify("ugk UI disabled", "info");
 				return;
@@ -332,6 +378,17 @@ export default function registerUgkBrandUi(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
+		stopSpinnerTitle(ctx);
 		clearBrandUi(ctx);
+	});
+
+	// ponytail: spinner 动画驱动(原 ui-titlebar 职责并入)。工作态盲文帧 + ugk 标题,
+	// 结束恢复静态 ugk 标题。off 时 startSpinnerTitle 直接 return,不抢 title。
+	pi.on("agent_start", async (_event, ctx) => {
+		startSpinnerTitle(ctx);
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		stopSpinnerTitle(ctx);
 	});
 }

@@ -345,7 +345,7 @@ ugk-core/
 │   ├── judge/               # Judge 委托验收模式
 │   ├── chrome-cdp/          # 本地登录态 Chrome CDP 控制
 │   ├── mcp/                 # MCP stdio client、registry、tools、permissions、/mcp
-│   └── ui-*.ts               # UI 美化(品牌层/footer/状态条/标题栏spinner)
+│   └── ui-*.ts               # UI 美化(品牌层含 header/footer/title+spinner、状态条)
 ├── cron/
 │   └── service.ts            # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)

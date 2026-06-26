@@ -21,9 +21,7 @@ import { scrcpyTool } from "./scrcpy-tool.ts";
 import registerSubagent from "./subagent.ts";
 import registerSubagentCommand from "./subagent-command.ts";
 import { discoverAgents } from "./subagent-agents.ts";
-import registerUiFooter from "./ui-footer.ts";
 import registerUiStatusline from "./ui-statusline.ts";
-import registerUiTitlebar from "./ui-titlebar.ts";
 import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
@@ -97,9 +95,7 @@ export default function (pi: ExtensionAPI) {
 	//   - statusline:底部状态条显示回合进度(●第N轮... / ✓完成)
 	//   - titlebar:agent 工作时终端标题栏转盲文 spinner
 	registerUgkBrandUi(pi);
-	registerUiFooter(pi);
 	registerUiStatusline(pi);
-	registerUiTitlebar(pi);
 	pi.on("session_start", async (_event, ctx) => {
 		ctx.ui.addAutocompleteProvider?.(suppressNaturalAtAutocomplete);
 	});

@@ -1576,10 +1576,9 @@ export function registerTask(pi: ExtensionAPI): void {
 		name: "run_task",
 		label: "Run Task",
 		description: [
-			"复用一个已存在、已通过机器验收的固定任务(taskbook)来执行一件确定性的工作。",
-			"当任务明确匹配 system prompt 可用 task 清单中的某项时使用;需要探索或没有匹配 taskbook 时用 subagent。",
-			"参数: single 模式提供 name 和 input; parallel 模式提供 tasks: [{name,input}]。",
-			"返回每个 task 的 PASS/FAIL(机器验收)、产物路径和 outputDir。整体成败由你判断。",
+			"复用已通过机器验收的固定任务(taskbook)执行确定性工作。",
+			"Modes: single (name + input), parallel (tasks: [{name,input}] 数组,最多 8 项,自动并发 4)。",
+			"返回每个 task 的 PASS/FAIL(机器验收)、产物路径、outputDir。整体成败由你判断。",
 		].join("\n"),
 		parameters: Type.Object({
 			name: Type.Optional(Type.String({ description: "taskbook 名(single 模式)" })),

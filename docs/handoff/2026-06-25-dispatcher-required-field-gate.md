@@ -1,5 +1,10 @@
 # dispatcher required 门禁（修复 URL 丢失）
 
+> ⚠️ **本文描述的 dispatcher 行为已过时(v2.1.1 起)。** 继续阅读前请注意:
+> - 本文写于 dispatcher「不可用时静默降级(`return undefined`/`.catch(()=>undefined)`/交互式 fallback)」的年代。
+> - v2.1.1 起,dispatcher 是唯一自然语言解析路径,模型/auth 不可用时**显式抛错**(`dispatcher 模型不可用`),不再降级到本地解析或逐字段 UI 问。`complete()` 的运行时错误(网络/限流)仍在内部 catch。
+> - 本文中"降级安全,不崩""dispatcher 不可用降级"等描述均**不再成立**。权威实现见 `extensions/task/task-dispatcher.ts`。
+
 > 日期：2026-06-25
 > 关联提交：`bf0ed04`
 

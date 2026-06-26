@@ -1,5 +1,10 @@
 # `/task` smoke 复盘发现的缺陷清单
 
+> ⚠️ **本文中"缺陷 1:dispatcher fallback"相关描述已过时(v2.1.1 起)。**
+> - 本文记录了 dispatcher `return undefined` 静默降级、"只有 dispatcher 失败才 fallback 到交互式"的行为。
+> - v2.1.1 起,dispatcher 模型/auth 不可用时**显式抛错**,不再 `return undefined` 降级;`localRuntimeInput` 只接确定性结构化语法(field=value/JSON),自然语言/裸值一律走 dispatcher,无本地捷径。
+> - 因此"dispatcher fallback""return undefined fallback""fallback 到交互式"等描述**不再成立**。权威实现见 `extensions/task/task-dispatcher.ts`。
+
 > **状态:已完成(2026-06-23)。** 5 个缺陷全部修复或合理处理,`npm test` 415/415 pass,`npm run smoke:task` pass 且复盘事件流确认 dispatcher 真跑(0 次 input fallback)。详见本文末尾"实际修复结果"。
 >
 > **原始用途**:给执行 agent 的交接文档,修复 smoke 复盘发现的 5 个缺陷。本文自包含。

@@ -72,10 +72,11 @@ test("buildUgkHeaderLines does not leak ANSI resets when truncating cells", () =
 test("buildUgkLogoLines renders a compact block-character logo", () => {
 	const lines = buildUgkLogoLines(96);
 
-	assert.equal(lines.length, 5);
+	assert.equal(lines.length, 3);
+	assert.match(lines.join("\n"), /[▀▄]/);
 	for (const line of lines) {
 		assert.match(line, /█/);
-		assert.ok(line.length <= 96, `line exceeded width: ${line}`);
+		assert.ok(visibleWidth(line) <= 14, `logo line is too wide: ${line}`);
 	}
 });
 

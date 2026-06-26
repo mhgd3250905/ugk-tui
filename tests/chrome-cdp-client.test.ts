@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import {
 	captureChromeScreenshot,
+	closeChromeTab,
 	createChromeCdpClient,
+	createChromeTab,
 	evaluateChromeExpression,
 	listChromeTabs,
 	navigateChromeTab,
@@ -145,4 +147,52 @@ test("captureChromeScreenshot writes screenshot bytes to disk", async () => {
 		method: "Page.captureScreenshot",
 		params: { format: "png", fromSurface: true },
 	});
+});
+
+// ponytail: 记录 URL + method 的 fetch,用于断言 createChromeTab/closeChromeTab 的 HTTP 契约。
+function recordingFetch(response: unknown, ok = true) {
+	const calls: { url: string; method?: string }[] = [];
+	const fn = async (url: string, init?: RequestInit) => {
+		calls.push({ url, method: init?.method });
+		return { ok, status: ok ? 200 : 500, json: async () => response } as Response;
+	};
+	return { fn, calls };
+}
+
+test("createChromeTab PUTs /json/new with url and returns the new tab descriptor", async () => {
+	const newTab = { id: "tab-new", type: "page", url: "about:blank", webSocketDebuggerUrl: "ws://x/devtools/page/tab-new" };
+	const { fn, calls } = recordingFetch(newTab);
+	const client = createChromeCdpClient({ port: 9222, fetch: fn as any, WebSocket: FakeWebSocket as any });
+
+	const tab = await createChromeTab(client, "about:blank");
+
+	assert.equal(tab.id, "tab-new");
+	assert.equal(calls[0].url, "http://127.0.0.1:9222/json/new?about%3Ablank");
+	assert.equal(calls[0].method, "PUT");
+});
+
+test("createChromeTab PUTs /json/new without url when none given", async () => {
+	const newTab = { id: "tab-new", type: "page", url: "", webSocketDebuggerUrl: "ws://x/devtools/page/tab-new" };
+	const { fn, calls } = recordingFetch(newTab);
+	const client = createChromeCdpClient({ port: 9222, fetch: fn as any, WebSocket: FakeWebSocket as any });
+
+	await createChromeTab(client);
+
+	assert.equal(calls[0].url, "http://127.0.0.1:9222/json/new");
+});
+
+test("createChromeTab throws on non-ok HTTP status", async () => {
+	const client = createChromeCdpClient({ port: 9222, fetch: makeFetch({}, false), WebSocket: FakeWebSocket as any });
+
+	await assert.rejects(createChromeTab(client), /HTTP 500/);
+});
+
+test("closeChromeTab GETs /json/close/<id> without throwing", async () => {
+	const { fn, calls } = recordingFetch({});
+	const client = createChromeCdpClient({ port: 9222, fetch: fn as any, WebSocket: FakeWebSocket as any });
+
+	await closeChromeTab(client, "tab-xyz");
+
+	assert.equal(calls[0].url, "http://127.0.0.1:9222/json/close/tab-xyz");
+	assert.equal(calls[0].method, "GET");
 });

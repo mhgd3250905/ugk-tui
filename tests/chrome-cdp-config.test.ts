@@ -8,6 +8,7 @@ import {
 	persistCdpPort,
 	readPersistedCdpPort,
 	resolveChromeCdpPort,
+	resolveChromeCdpTarget,
 	resolveUgkSettingsPath,
 	setChromeCdpMode,
 	setChromeCdpPort,
@@ -240,4 +241,31 @@ test("runtime port from settings takes priority over env port", () => {
 	const state = createChromeCdpState({ UGK_CDP_PORT: "9333" }, deps);
 
 	assert.equal(resolveChromeCdpPort(state, {}), 9555);
+});
+
+test("createChromeCdpState reads sessionTabId from UGK_CDP_TAB_ID env", () => {
+	const withTab = createChromeCdpState({ UGK_CDP_TAB_ID: "tab-xyz" }, noPersistDeps);
+	assert.equal(withTab.sessionTabId, "tab-xyz");
+
+	const withoutTab = createChromeCdpState({}, noPersistDeps);
+	assert.equal(withoutTab.sessionTabId, undefined);
+});
+
+test("resolveChromeCdpTarget returns explicit target over session tab", () => {
+	const state = createChromeCdpState({ UGK_CDP_TAB_ID: "session-tab" }, noPersistDeps);
+
+	assert.equal(resolveChromeCdpTarget(state, { target: "explicit-tab" }), "explicit-tab");
+});
+
+test("resolveChromeCdpTarget falls back to session tab when no explicit target", () => {
+	const state = createChromeCdpState({ UGK_CDP_TAB_ID: "session-tab" }, noPersistDeps);
+
+	assert.equal(resolveChromeCdpTarget(state, {}), "session-tab");
+});
+
+test("resolveChromeCdpTarget returns undefined when neither target nor session tab set", () => {
+	const state = createChromeCdpState({}, noPersistDeps);
+
+	assert.equal(resolveChromeCdpTarget(state, { target: "explicit" }), "explicit");
+	assert.equal(resolveChromeCdpTarget(state, {}), undefined);
 });

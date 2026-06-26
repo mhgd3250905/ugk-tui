@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { makeCdpTabLifecycle } from "../extensions/chrome-cdp/tab-session.ts";
+import { setWorkerLifecycleFactory } from "../extensions/shared/worker-lifecycle.ts";
 import { buildTaskWorkerPrompt, dispatchWorker, setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
 
 test("buildTaskWorkerPrompt injects skill contract runtime input outputDir and feedback", () => {
@@ -107,6 +109,51 @@ test("dispatchWorker passes extra env to the child agent", async () => {
 		assert.equal(receivedEnv?.UGK_TASK_ALLOW_CHROME_CDP, "1");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
+	}
+});
+
+test("dispatchWorker injects a CDP tab lifecycle only when UGK_TASK_ALLOW_CHROME_CDP is set", async () => {
+	let receivedLifecycle: unknown = undefined;
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		receivedLifecycle = args[10]; // lifecycle is the 11th positional arg (index 10)
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+		} as any;
+	});
+	// ponytail: 模拟组合根接线 —— registerChromeCdp 把工厂注册到 shared 层。task-worker peek 出来用。
+	setWorkerLifecycleFactory((port) => makeCdpTabLifecycle(port));
+
+	try {
+		// 有 CDP env → 传 lifecycle(非 undefined)
+		receivedLifecycle = undefined;
+		await dispatchWorker({
+			skill: "# Skill",
+			contract: {},
+			runtimeInput: {},
+			outputDir: "E:/out",
+		}, { cwd: process.cwd(), env: { UGK_TASK_ALLOW_CHROME_CDP: "1" } });
+		assert.notEqual(receivedLifecycle, undefined, "lifecycle should be injected when UGK_TASK_ALLOW_CHROME_CDP set");
+		assert.equal(typeof (receivedLifecycle as any)?.beforeSpawn, "function");
+		assert.equal(typeof (receivedLifecycle as any)?.afterClose, "function");
+
+		// 无 CDP env → 不传 lifecycle(undefined)
+		receivedLifecycle = "sentinel";
+		await dispatchWorker({
+			skill: "# Skill",
+			contract: {},
+			runtimeInput: {},
+			outputDir: "E:/out",
+		}, { cwd: process.cwd(), env: {} });
+		assert.equal(receivedLifecycle, undefined, "lifecycle should be undefined when UGK_TASK_ALLOW_CHROME_CDP not set");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setWorkerLifecycleFactory(undefined);
 	}
 });
 

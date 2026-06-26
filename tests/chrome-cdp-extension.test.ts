@@ -257,3 +257,69 @@ test("chrome_cdp can be allowed for the current session without prompting again"
 	assert.equal(selections.length, 1);
 	assert.deepEqual(selections[0].options, ["Allow once", "Allow for this session", "Deny"]);
 });
+
+// ponytail: per-worker 会话 tab 隔离。sessionTabId 来自 UGK_CDP_TAB_ID env(worker 进程注入)。
+// 工具 execute 应把它作为 navigate/evaluate 的默认 target,显式 params.target 压过它。
+test("chrome_cdp defaults navigate target to the session tab from UGK_CDP_TAB_ID env", async () => {
+	const previousTabId = process.env.UGK_CDP_TAB_ID;
+	const previousAllow = process.env.UGK_TASK_ALLOW_CHROME_CDP;
+	process.env.UGK_CDP_TAB_ID = "session-tab-1";
+	process.env.UGK_TASK_ALLOW_CHROME_CDP = "1"; // skip ask confirmation
+	try {
+		const { pi, tools } = makePi();
+		let navigatedTarget: string | undefined;
+		registerChromeCdp(pi as any, {
+			navigate: async (_port, target, _url) => {
+				navigatedTarget = target;
+				return {};
+			},
+		});
+
+		await tools.get("chrome_cdp").execute(
+			"tool-1",
+			{ action: "navigate", url: "https://example.com", reason: "Requires logged-in Chrome", normalAccessAttempted: true },
+			undefined,
+			undefined,
+			{ hasUI: false } as any, // non-interactive → deny confirmation not needed; sessionAllowed already true
+		);
+
+		assert.equal(navigatedTarget, "session-tab-1");
+	} finally {
+		if (previousTabId === undefined) delete process.env.UGK_CDP_TAB_ID;
+		else process.env.UGK_CDP_TAB_ID = previousTabId;
+		if (previousAllow === undefined) delete process.env.UGK_TASK_ALLOW_CHROME_CDP;
+		else process.env.UGK_TASK_ALLOW_CHROME_CDP = previousAllow;
+	}
+});
+
+test("explicit params.target overrides the session tab", async () => {
+	const previousTabId = process.env.UGK_CDP_TAB_ID;
+	const previousAllow = process.env.UGK_TASK_ALLOW_CHROME_CDP;
+	process.env.UGK_CDP_TAB_ID = "session-tab-2";
+	process.env.UGK_TASK_ALLOW_CHROME_CDP = "1";
+	try {
+		const { pi, tools } = makePi();
+		let navigatedTarget: string | undefined;
+		registerChromeCdp(pi as any, {
+			navigate: async (_port, target, _url) => {
+				navigatedTarget = target;
+				return {};
+			},
+		});
+
+		await tools.get("chrome_cdp").execute(
+			"tool-1",
+			{ action: "navigate", target: "explicit-tab", url: "https://example.com", reason: "Requires logged-in Chrome", normalAccessAttempted: true },
+			undefined,
+			undefined,
+			{ hasUI: false } as any,
+		);
+
+		assert.equal(navigatedTarget, "explicit-tab");
+	} finally {
+		if (previousTabId === undefined) delete process.env.UGK_CDP_TAB_ID;
+		else process.env.UGK_CDP_TAB_ID = previousTabId;
+		if (previousAllow === undefined) delete process.env.UGK_TASK_ALLOW_CHROME_CDP;
+		else process.env.UGK_TASK_ALLOW_CHROME_CDP = previousAllow;
+	}
+});

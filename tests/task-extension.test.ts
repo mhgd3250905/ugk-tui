@@ -1260,7 +1260,7 @@ test("/task run uses absolute contract outputDir as the final output directory",
 			contract: { outputDir: finalOutputDir, runtimeInput: ["url"], artifacts: [{ name: "ok.txt", type: "file" }] },
 		});
 
-		await commands.get("task").handler("run custom-output download https://x", ctx);
+		await commands.get("task").handler("run custom-output https://x", ctx);
 		await waitForTaskRunForTests();
 
 		assert.match(latestTaskMessage(sentMessages), /PASS/);

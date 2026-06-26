@@ -64,9 +64,16 @@ test("resolveRuntimeInputFromText merges dispatcher output with defaults", async
 test("resolveRuntimeInputFromText parses explicit topN input before dispatcher", async () => {
 	const topNContract = { runtimeInput: ["topN"] };
 
+	// JSON 和 field=value 是确定性解析,本地直接出。
 	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "{\"topN\":3}", undefined, true), { topN: 3 });
 	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "topN: 3", undefined, true), { topN: 3 });
-	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "帮我查询知乎top3", undefined, true), { topN: 3 });
+	// 自然语言("帮我查询知乎top3")交给 dispatcher 提取。
+	setTaskDispatcherForTests(async () => ({ topN: 3 }));
+	try {
+		assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "帮我查询知乎top3", undefined, true), { topN: 3 });
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
 });
 
 test("resolveRuntimeInputFromText uses complete defaults for empty headless input", async () => {
@@ -217,8 +224,6 @@ test("required gate: contract without required:true declarations does NOT gate (
 	// 保守语义:只有显式 required:true 才门禁。旧式 contract(无 required 字段)不门禁,
 	// 保持旧行为不变——部分输入不会被拦截,不会从软失败变成硬失败。
 	// 这是回归保护:防止"激活 required"误伤所有旧 taskbook。
-	// ponytail: 用多字段 contract(无 field=value 格式 → local undefined → 走 dispatcher),
-	// 单字段现在本地解析,不再能验证 dispatcher 路径。
 	const legacyContract = { runtimeInput: ["text", "section"] };
 	setTaskDispatcherForTests(async () => ({ text: "from-dispatcher", section: "x" }));
 	try {
@@ -245,62 +250,57 @@ test("required gate: legacy contract with partial input does NOT throw in headle
 	assert.deepEqual(value, { a: "hello" });
 });
 
-// === 单字段一句话驱动 ===
-// 报告场景复现:bilibili-downloader 是单字段 contract (bilibili_url),
-// main 传裸 URL 时 local 解析失败、退到 LLM dispatcher,dispatcher 又波动 → main 形成
-// "task 必须传结构化输入"的错误心智,40 个 URL 时退化成逐个/写脚本。
-// 修复:单字段 contract,裸 URL(无空格的 URL/路径 token)本地直接解析,不依赖 dispatcher。
-test("single-field contract: bare URL is the field value (no dispatcher needed)", async () => {
+// === dispatcher 是唯一参数解析路径 ===
+// 设计:裸值、自然语言、结构化输入一律交给 dispatcher(reasoningEffort=low + 明确映射 prompt)。
+// 本地只接明确的 "field=value" 和 JSON(确定性解析,不是猜)。撤掉了之前的单字段裸值捷径
+// —— 那是针对特定 contract 形态打补丁,强化 dispatcher 后不需要。
+// 下面这组用 dispatcher mock 验证:这些输入确实路由到 dispatcher,且 prompt 把映射规则讲清楚了。
+
+test("bare URL routes to dispatcher (no local shortcut)", async () => {
+	// 报告场景:bilibili_url = 裸 URL。强化前 local 解析失败 + dispatcher(minimal)抽不出 → 报错。
+	// 现在:裸 URL 交给 dispatcher,它按字段名/描述判断裸值归属。
 	let dispatcherCalled = false;
-	setTaskDispatcherForTests(async () => { dispatcherCalled = true; return {}; });
+	setTaskDispatcherForTests(async () => { dispatcherCalled = true; return { bilibili_url: "https://www.bilibili.com/video/BV1g87a69Ere/" }; });
 	try {
 		const value = await resolveRuntimeInputFromText({}, "# Skill",
-			{ runtimeInput: ["bilibili_url"] },
+			{ runtimeInput: ["bilibili_url"], runtimeInputMeta: { bilibili_url: { required: true } } },
 			"https://www.bilibili.com/video/BV1g87a69Ere/",
 			undefined, true);
-		assert.equal(dispatcherCalled, false, "裸 URL 本地解析成功,不该调 dispatcher");
+		assert.equal(dispatcherCalled, true, "裸 URL 必须走 dispatcher");
 		assert.deepEqual(value, { bilibili_url: "https://www.bilibili.com/video/BV1g87a69Ere/" });
 	} finally {
 		setTaskDispatcherForTests(undefined);
 	}
 });
 
-test("single-field contract: required gate satisfied by bare value", async () => {
-	// required:true 的单字段,裸 URL 也能过门禁(本地已覆盖 required)。
+test("multi-field bare URL routes to dispatcher (spider: url + page default)", async () => {
+	// 报告场景:bili-up-homepage-spider 双字段 url(required) + page(default=1)。
+	// dispatcher 拿 contract 说明书,裸 URL 映射到 url,page 补 default。
 	let dispatcherCalled = false;
-	setTaskDispatcherForTests(async () => { dispatcherCalled = true; return {}; });
+	setTaskDispatcherForTests(async () => { dispatcherCalled = true; return { url: "https://space.bilibili.com/12890453/upload/video" }; });
 	try {
 		const value = await resolveRuntimeInputFromText({}, "# Skill",
-			{ runtimeInput: ["url"], runtimeInputMeta: { url: { required: true } } },
-			"https://space.bilibili.com/3546630389238044/upload/video",
+			{
+				runtimeInput: ["url", "page"],
+				runtimeInputMeta: {
+					url: { description: "B站UP主主页视频链接", required: true },
+					page: { description: "页码,从1开始", required: false, default: 1 },
+				},
+			},
+			"https://space.bilibili.com/12890453/upload/video",
 			undefined, true);
-		assert.equal(dispatcherCalled, false);
-		assert.deepEqual(value, { url: "https://space.bilibili.com/3546630389238044/upload/video" });
+		assert.equal(dispatcherCalled, true);
+		assert.deepEqual(value, {
+			url: "https://space.bilibili.com/12890453/upload/video",
+			page: 1, // default 补上
+		});
 	} finally {
 		setTaskDispatcherForTests(undefined);
 	}
 });
 
-test("single-field contract: natural language (no URL shape) still routes to dispatcher", async () => {
-	// 边界回归:中文自然语言(无 / 无 scheme 无扩展名)不该被本地捷径吞掉,留给 dispatcher。
-	// "含糊不清的输入" 这种没形状的输入,整句当字段值是错的,要靠 LLM 提取。
-	let dispatcherCalled = false;
-	setTaskDispatcherForTests(async () => { dispatcherCalled = true; return { text: "extracted" }; });
-	try {
-		const value = await resolveRuntimeInputFromText({}, "# Skill",
-			{ runtimeInput: ["text"] },
-			"含糊不清的输入",
-			undefined, true);
-		assert.equal(dispatcherCalled, true, "无形状的自然语言必须走 dispatcher 提取");
-		assert.deepEqual(value, { text: "extracted" });
-	} finally {
-		setTaskDispatcherForTests(undefined);
-	}
-});
-
-test("single-field contract: natural language with URL routes to dispatcher (not whole sentence)", async () => {
-	// 边界回归:"下载这个 https://x" 有空格 → 不算单 token → 不走本地捷径 → dispatcher 只抽 URL。
-	// 防止整句 "下载这个 https://x" 被当成字段值喂给 worker。
+test("natural language with embedded URL routes to dispatcher", async () => {
+	// "下载这个 https://x" → dispatcher 从句子里抽 url,不把整句当字段值。
 	let dispatcherCalled = false;
 	setTaskDispatcherForTests(async () => { dispatcherCalled = true; return { url: "https://x" }; });
 	try {
@@ -308,18 +308,18 @@ test("single-field contract: natural language with URL routes to dispatcher (not
 			{ runtimeInput: ["url"] },
 			"下载这个 https://x",
 			undefined, true);
-		assert.equal(dispatcherCalled, true, "含空格的自然语言必须走 dispatcher");
+		assert.equal(dispatcherCalled, true);
 		assert.deepEqual(value, { url: "https://x" });
 	} finally {
 		setTaskDispatcherForTests(undefined);
 	}
 });
 
-test("single-field contract: topN still extracts a number (regression)", async () => {
-	assert.deepEqual(
-		await resolveRuntimeInputFromText({}, "# Skill", { runtimeInput: ["topN"] }, "top3", undefined, true),
-		{ topN: 3 });
-	assert.deepEqual(
-		await resolveRuntimeInputFromText({}, "# Skill", { runtimeInput: ["topN"] }, "5", undefined, true),
-		{ topN: 5 });
+test("buildTaskDispatcherPrompt instructs bare-value mapping and natural-language extraction", () => {
+	// 验证强化后的 prompt 把映射规则讲清楚:裸值归字段、自然语言抽真值、别编造。
+	const prompt = buildTaskDispatcherPrompt("# Skill", { runtimeInput: ["url", "page"] }, "https://x");
+	assert.match(prompt, /裸值.*按字段名或 description.*判断/);
+	assert.match(prompt, /自然语言句子.*抽出字段的真实值/);
+	assert.match(prompt, /不要.*当字段值/);
+	assert.match(prompt, /不要编造/);
 });

@@ -12,8 +12,15 @@ export function buildTaskDispatcherPrompt(skill: string, contract: unknown, rawI
 	return [
 		"以下是 /task taskbook 的 skill 和 contract。",
 		"请按 contract.runtimeInput 的字段定义,从用户输入中提取 runtimeInput JSON。",
-		"如果 contract.runtimeInputMeta.<field>.default 存在且用户未提供该字段,可以省略该字段,系统会补默认值。",
-		"只输出 fenced JSON。",
+		"",
+		"提取规则:",
+		"- 逐个对照 contract.runtimeInput 的字段,从用户输入里找出每个字段的值。",
+		"- 用户输入若是裸值(单个 URL/路径/数字),按字段名或 description 判断它属于哪个字段。",
+		"- 用户输入若是自然语言句子,从句子里抽出字段的真实值(如 \"下载 https://x\" → url 字段取 https://x),不要把整句当字段值。",
+		"- runtimeInputMeta.<field>.default 存在且用户未提供该字段时,省略该字段,系统会补默认值。",
+		"- 不要编造用户没给的、也没有 default 的字段值。",
+		"",
+		"只输出 fenced JSON,不要解释。",
 		"",
 		"## skill.md",
 		skill,
@@ -102,6 +109,9 @@ function parseScalar(value: string): string | number {
 function localRuntimeInput(contract: unknown, rawInput: string): unknown | undefined {
 	const direct = extractRuntimeInputFromText(rawInput);
 	if (direct) return direct;
+	// ponytail: 只接明确的 "field=value" 形式(确定性字符串匹配,不是猜)。
+	// 裸值、自然语言一律交给 dispatcher —— 它拿 contract 说明书从输入解析是本职,
+	// reasoningEffort=low + 明确的映射 prompt 足以稳定处理。本地捷径是打补丁,撤掉。
 	const fields = runtimeFields(contract);
 	const entries: Record<string, string | number> = {};
 	for (const field of fields) {
@@ -110,40 +120,7 @@ function localRuntimeInput(contract: unknown, rawInput: string): unknown | undef
 		if (match) entries[field] = parseScalar(match[1]);
 	}
 	if (Object.keys(entries).length > 0) return entries;
-	// ponytail: 单字段 contract 的裸值捷径 —— 输入就是一个 URL/路径 token 时,
-	// 无需 LLM dispatcher,整个输入即该字段值。这让 task 回到"一句话驱动":
-	// main 派 task 跟派 subagent 心智一致(一句话 + 具名 taskbook)。
-	// 只接"长得像 URL 或路径"的输入,不吞自然语言(无论中英文):
-	//   "https://..." / "/abs/path" / "rel/path.txt"  → 本地解析
-	//   "含糊不清的输入" / "下载这个视频"            → 仍走 dispatcher 提取
-	// 不用"有无空格"判断:中文句子无空格但仍是自然语言,会误吞。
-	// topN 是历史特例(从 "top3"/"前3"/裸数字里抽数字),保留数字语义。
-	if (fields.length === 1) {
-		const field = fields[0];
-		const trimmed = rawInput.trim();
-		if (trimmed) {
-			if (/^topN$/i.test(field)) {
-				const match = trimmed.match(/(?:top|前)\s*(\d+)/i) ?? trimmed.match(/^(\d+)$/);
-				if (match) return { [field]: Number(match[1]) };
-			} else if (!/\s/.test(trimmed) && looksLikeBareValue(trimmed)) {
-				return { [field]: trimmed };
-			}
-		}
-	}
 	return undefined;
-}
-
-// ponytail: 单字段裸值判定。配合"无空格"前置条件(单 token):
-//   - 有 scheme(http(s):// 或 foo://) → URL
-//   - 含路径分隔符且带扩展名 → 文件路径
-//   - 含 / 或 \ → 路径
-// 三个都不中 → 纯自然语言(中英文皆然),留给 dispatcher 提取。
-// 报告场景(bilibili_url = 裸 URL)在这里被接住;"含糊不清的输入"这种无 / 无扩展名的中文句
-// 不匹配 → 仍走 dispatcher。两个条件叠加:"把这个下下来 https://..."有空格被前置 !/\s/ 挡掉。
-function looksLikeBareValue(input: string): boolean {
-	if (/\bhttps?:\/\//i.test(input) || /^[a-z][a-z0-9+.-]*:\/\//i.test(input)) return true;
-	if (input.includes("/") && /\.[a-z0-9]+$/i.test(input)) return true; // 路径/文件,带扩展名
-	return /[\\/]/.test(input); // 含路径分隔符
 }
 
 function inputTitle(contract: unknown, field: string): string {
@@ -175,7 +152,7 @@ async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInp
 			content: [{ type: "text", text: buildTaskDispatcherPrompt(skill, contract, rawInput) }],
 			timestamp: Date.now(),
 		}],
-	}, { apiKey: auth.apiKey, headers: auth.headers, reasoningEffort: "minimal" });
+	}, { apiKey: auth.apiKey, headers: auth.headers, reasoningEffort: "low" });
 	const text = response.content
 		.filter((block): block is { type: "text"; text: string } => block.type === "text")
 		.map((block) => block.text)

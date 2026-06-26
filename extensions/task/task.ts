@@ -482,16 +482,21 @@ function mentionsTool(text: string, tool: string): boolean {
 	return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`).test(text);
 }
 
-function resolveProtectedTaskTools(loaded: LoadedTaskbook | LoadedTaskbook[], activeTools: string[]): { chromeCdp: boolean; mcpTools: string[] } {
-	const taskbooks = Array.isArray(loaded) ? loaded : [loaded];
-	const uses = (tool: string) => taskbooks.some((item) => {
-		const declared = new Set(contractToolNames(item.contract));
-		return declared.has(tool) || mentionsTool(item.skill, tool);
-	});
-	return {
-		chromeCdp: activeTools.includes("chrome_cdp") && uses("chrome_cdp"),
-		mcpTools: activeTools.filter((tool) => tool.includes("__") && uses(tool)),
-	};
+// ponytail: taskbook 单粒度的 protected tool 命中。用于精确缓存:只缓存真正用到
+// protected tool 的 taskbook,而不是整批(批次里夹带的纯 read taskbook 不该入缓存)。
+function protectedToolsForTaskbook(item: LoadedTaskbook, activeTools: string[]): string[] {
+	const declared = new Set(contractToolNames(item.contract));
+	const uses = (tool: string) => declared.has(tool) || mentionsTool(item.skill, tool);
+	return [
+		...(activeTools.includes("chrome_cdp") && uses("chrome_cdp") ? ["chrome_cdp"] : []),
+		...activeTools.filter((tool) => tool.includes("__") && uses(tool)),
+	];
+}
+
+// ponytail: 授权 key = scope:name:sortedTools。scope:name 唯一(同名 user/project 不串);
+// 工具集区分"授权了 cdp,后来 taskbook 加了 mcp 工具"—— 工具集变 → 重新确认。
+function protectedToolGrantKey(item: LoadedTaskbook, tools: string[]): string {
+	return `${item.scope}:${item.taskbook.name}:${[...tools].sort().join(",")}`;
 }
 
 export async function resolveTaskWorkerEnv(
@@ -499,33 +504,35 @@ export async function resolveTaskWorkerEnv(
 	loaded: LoadedTaskbook | LoadedTaskbook[],
 	activeTools: string[],
 ): Promise<Record<string, string | undefined> | null> {
-	const protectedTools = resolveProtectedTaskTools(loaded, activeTools);
-	const names = [
-		...(protectedTools.chromeCdp ? ["chrome_cdp"] : []),
-		...protectedTools.mcpTools,
-	];
-	if (names.length === 0) return {};
 	const taskbooks = Array.isArray(loaded) ? loaded : [loaded];
-	const taskbookNames = taskbooks.map((item) => item.taskbook.name).join(", ");
-	// ponytail: 本会话已授权过全部这些 taskbook → 直接复用,不再弹 confirm。
-	// 批次里只要有任一 taskbook 没授权过,仍弹一次(确认覆盖整个批次),通过后全部入缓存。
-	const allGranted = taskbooks.every((item) => protectedToolGrants.has(item.taskbook.name));
+	// 按 taskbook 粒度算命中,只保留真用 protected tool 的。
+	const perTaskbook = taskbooks
+		.map((item) => ({ item, tools: protectedToolsForTaskbook(item, activeTools) }))
+		.filter((entry) => entry.tools.length > 0);
+	if (perTaskbook.length === 0) return {};
+	const names = [...new Set(perTaskbook.flatMap((entry) => entry.tools))];
+	const taskbookNames = perTaskbook.map((entry) => entry.item.taskbook.name).join(", ");
+	// ponytail: 本会话已授权过全部这些 (taskbook,工具集) → 直接复用,不再弹 confirm。
+	// 批次里任一 taskbook 的工具集没授权过 → 弹一次(覆盖整个批次),通过后全部入缓存。
+	const allGranted = perTaskbook.every((entry) => protectedToolGrants.has(protectedToolGrantKey(entry.item, entry.tools)));
 	if (!allGranted) {
 		const allowed = await ctx.ui?.confirm?.(
 			"允许本次 task 使用受保护工具?",
 			[
 				`taskbook "${taskbookNames}" 声明会使用: ${names.join(", ")}`,
 				"",
-				"授权只传给 worker 子进程,不改变 /cdp 或 /mcp 的全局模式。本会话内同一 taskbook 不再询问。",
+				"授权只传给 worker 子进程,不改变 /cdp 或 /mcp 的全局模式。本会话内同一 taskbook(同工具集)不再询问。",
 			].join("\n"),
 		);
 		if (!allowed) return null;
-		for (const item of taskbooks) protectedToolGrants.add(item.taskbook.name);
+		for (const entry of perTaskbook) protectedToolGrants.add(protectedToolGrantKey(entry.item, entry.tools));
 	}
+	const chromeCdp = names.includes("chrome_cdp");
+	const mcpTools = names.filter((tool) => tool !== "chrome_cdp");
 	return {
-		...(protectedTools.chromeCdp ? { UGK_TASK_ALLOW_CHROME_CDP: "1" } : {}),
-		...(protectedTools.chromeCdp && process.env.UGK_CDP_PORT ? { UGK_CDP_PORT: process.env.UGK_CDP_PORT } : {}),
-		...(protectedTools.mcpTools.length > 0 ? { UGK_TASK_ALLOW_MCP_TOOLS: protectedTools.mcpTools.join(",") } : {}),
+		...(chromeCdp ? { UGK_TASK_ALLOW_CHROME_CDP: "1" } : {}),
+		...(chromeCdp && process.env.UGK_CDP_PORT ? { UGK_CDP_PORT: process.env.UGK_CDP_PORT } : {}),
+		...(mcpTools.length > 0 ? { UGK_TASK_ALLOW_MCP_TOOLS: mcpTools.join(",") } : {}),
 	};
 }
 

@@ -109,9 +109,10 @@ function parseScalar(value: string): string | number {
 function localRuntimeInput(contract: unknown, rawInput: string): unknown | undefined {
 	const direct = extractRuntimeInputFromText(rawInput);
 	if (direct) return direct;
-	// ponytail: 只接明确的 "field=value" 形式(确定性字符串匹配,不是猜)。
-	// 裸值、自然语言一律交给 dispatcher —— 它拿 contract 说明书从输入解析是本职,
-	// reasoningEffort=medium + 明确的映射 prompt 足以稳定处理。本地捷径是打补丁,撤掉。
+	// ponytail: 本地只接确定性结构化语法 —— field=value / field:value / JSON。
+	// 这是显式语法(用户手写的结构化输入),不是对自然语言的猜测。自然语言、裸值一律
+	// 交给 dispatcher(reasoningEffort=medium + 映射 prompt)。dispatcher 是唯一语义解析路径;
+	// 不在本地下任何自然语言/裸值捷径 —— 那是治标不治本的老土补丁,撤掉。
 	const fields = runtimeFields(contract);
 	const entries: Record<string, string | number> = {};
 	for (const field of fields) {
@@ -145,14 +146,27 @@ async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInp
 	if (dispatcherForTests) return await dispatcherForTests(ctx, skill, contract, rawInput);
 	const model = findModel(ctx, modelOverride);
 	const auth = model ? await ctx.modelRegistry?.getApiKeyAndHeaders?.(model) : undefined;
-	if (!model || !auth?.ok || !auth.apiKey) return undefined;
-	const response = await complete(model, {
-		messages: [{
-			role: "user",
-			content: [{ type: "text", text: buildTaskDispatcherPrompt(skill, contract, rawInput) }],
-			timestamp: Date.now(),
-		}],
-	}, { apiKey: auth.apiKey, headers: auth.headers, reasoningEffort: "medium" });
+	// ponytail: dispatcher 是唯一自然语言解析路径。模型/auth 不可用是配置错误,
+	// 显式抛错透传 —— 不静默退化到本地正则兜底(那会治标不治本重新长出字符串比对补丁)。
+	// 这个 throw 在调用方的 .catch 之外(见 resolveRuntimeInputFromText),配置错误不会被吞。
+	if (!model || !auth?.ok || !auth.apiKey) {
+		throw new Error(
+			"dispatcher 模型不可用,无法解析自然语言 input。请配置有效的 dispatcher model(或 contract.dispatcherModel),或改用结构化输入(field=value / JSON)。",
+		);
+	}
+	// complete() 的运行时错误(网络/限流/超时)是临时的,catch 成 undefined 让调用方 fallback。
+	let response;
+	try {
+		response = await complete(model, {
+			messages: [{
+				role: "user",
+				content: [{ type: "text", text: buildTaskDispatcherPrompt(skill, contract, rawInput) }],
+				timestamp: Date.now(),
+			}],
+		}, { apiKey: auth.apiKey, headers: auth.headers, reasoningEffort: "medium" });
+	} catch {
+		return undefined;
+	}
 	const text = response.content
 		.filter((block): block is { type: "text"; text: string } => block.type === "text")
 		.map((block) => block.text)
@@ -173,8 +187,16 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 		// 让 dispatcher 兜底补全(它更擅长理解自然语言里的裸 URL 等)。
 		// 修复:之前 local 抽到任意字段就返回,导致 "URL, page=1" 只抽到 page 就丢失 url。
 		if (local && coversRequired(local)) return runtimeInputWithDefaults(contract, local);
-		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride).catch(() => undefined);
-		if (dispatched && coversRequired(dispatched)) return runtimeInputWithDefaults(contract, dispatched);
+		// 不 .catch:dispatcher 配置错误(模型/auth 不可用)要透传给用户;complete() 的运行时
+		// 错误已在 callDispatcher 内部 catch 成 undefined,不会到这里。
+		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride);
+		if (dispatched && coversRequired(dispatched)) {
+			// ponytail: dispatcher 补全 required 后,显式 local(field=value/JSON,用户手写)优先于
+			// dispatcher 的语义推断。修 "https://x, page=2":local 抽 page=2,dispatcher 抽 url,
+			// 不合的话 page 被 default=1 覆盖。
+			const merged = local ? { ...dispatched, ...local } : dispatched;
+			return runtimeInputWithDefaults(contract, merged);
+		}
 		// dispatcher 也没抽全 required。partial 不覆盖 required 则不返回,
 		// 否则下游 worker 拿到不完整的 input 会 hardcode 或猜值,绕开 contract 约束。
 		// headless 时直接抛错让调用方补 input;交互式时落到后面的 UI prompt。

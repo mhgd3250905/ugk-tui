@@ -28,20 +28,18 @@ test("extractRuntimeInputFromText parses fenced json", () => {
 	assert.equal(extractRuntimeInputFromText("not json"), undefined);
 });
 
-test("resolveRuntimeInputFromText asks fields when dispatcher is unavailable", async () => {
-	const asks: Array<{ title: string; value: string }> = [];
+test("resolveRuntimeInputFromText throws when dispatcher unavailable, even in interactive mode", async () => {
+	// ponytail: dispatcher 配置错误一致性 —— 交互/headless 都抛错,不偷偷退化到逐字段 UI 问。
+	// 用户在场也该知道"dispatcher 没配好",要么配好要么用 field=value,不该静默降级。
 	const ctx = {
 		ui: {
-			input(title: string, value: string) {
-				asks.push({ title, value });
-				return `asked-${value}`;
-			},
+			input() { throw new Error("should not reach UI input — dispatcher error must throw first"); },
 		},
 	};
-	const value = await resolveRuntimeInputFromText(ctx, "# Skill", contract, "Hello 世界");
-
-	assert.deepEqual(value, { text: "asked-text" });
-	assert.deepEqual(asks, [{ title: "task input: text (default: text)", value: "text" }]);
+	await assert.rejects(
+		async () => resolveRuntimeInputFromText(ctx, "# Skill", contract, "Hello 世界"),
+		/dispatcher 模型不可用/,
+	);
 });
 
 test("resolveRuntimeInputFromText merges dispatcher output with defaults", async () => {
@@ -61,19 +59,56 @@ test("resolveRuntimeInputFromText merges dispatcher output with defaults", async
 	}
 });
 
-test("resolveRuntimeInputFromText parses explicit topN input before dispatcher", async () => {
-	const topNContract = { runtimeInput: ["topN"] };
-
-	// JSON 和 field=value 是确定性解析,本地直接出。
-	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "{\"topN\":3}", undefined, true), { topN: 3 });
-	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "topN: 3", undefined, true), { topN: 3 });
-	// 自然语言("帮我查询知乎top3")交给 dispatcher 提取。
-	setTaskDispatcherForTests(async () => ({ topN: 3 }));
+test("resolveRuntimeInputFromText keeps explicit local field=value over dispatcher/default", async () => {
+	// ponytail: 修 P2a。"https://x, page=2":local 抽 page=2(确定性 field=value),
+	// dispatcher 抽 url。合并后 page 必须保留 2,不能被 default=1 覆盖。
+	setTaskDispatcherForTests(async () => ({ url: "https://x" }));
 	try {
-		assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "帮我查询知乎top3", undefined, true), { topN: 3 });
+		const value = await resolveRuntimeInputFromText({}, "# Skill", {
+			runtimeInput: ["url", "page"],
+			runtimeInputMeta: {
+				url: { required: true },
+				page: { default: 1, required: false },
+			},
+		}, "https://x, page=2", undefined, true);
+		assert.deepEqual(value, { url: "https://x", page: 2 });
 	} finally {
 		setTaskDispatcherForTests(undefined);
 	}
+});
+
+test("resolveRuntimeInputFromText parses explicit structured topN input locally", async () => {
+	const topNContract = { runtimeInput: ["topN"] };
+
+	// JSON 和 field=value 是确定性结构化语法,本地直接出,不调 dispatcher。
+	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "{\"topN\":3}", undefined, true), { topN: 3 });
+	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "topN: 3", undefined, true), { topN: 3 });
+});
+
+test("resolveRuntimeInputFromText routes natural-language topN to dispatcher", async () => {
+	// ponytail: 自然语言("帮我查询知乎top3")交给 dispatcher,不在本地用正则抽。
+	// 撤掉了 topN 正则捷径 —— 那是对自然语言的字符串比对,治标不治本。
+	const topNContract = { runtimeInput: ["topN"] };
+	let dispatcherCalled = false;
+	setTaskDispatcherForTests(async () => { dispatcherCalled = true; return { topN: 3 }; });
+	try {
+		const value = await resolveRuntimeInputFromText({}, "# Skill", topNContract, "帮我查询知乎top3", undefined, true);
+		assert.equal(dispatcherCalled, true, "自然语言 topN 必须走 dispatcher");
+		assert.deepEqual(value, { topN: 3 });
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("resolveRuntimeInputFromText throws when dispatcher model is unavailable and input is natural language", async () => {
+	// ponytail: dispatcher 不可用(无 model/auth)是配置错误,显式抛错 —— 不静默退化到本地正则。
+	// 自然语言 input 没有 local 结构化解析兜底,必须报错让用户配 dispatcher 或改用 field=value。
+	const topNContract = { runtimeInput: ["topN"] };
+	// 空 ctx → findModel 返回 undefined → callDispatcher 抛"模型不可用"。
+	await assert.rejects(
+		() => resolveRuntimeInputFromText({}, "# Skill", topNContract, "帮我查询知乎top3", undefined, true),
+		/dispatcher 模型不可用/,
+	);
 });
 
 test("resolveRuntimeInputFromText uses complete defaults for empty headless input", async () => {
@@ -211,12 +246,12 @@ test("required gate: bare URL (local undefined) still routes to dispatcher", asy
 	}
 });
 
-test("required gate: dispatcher unavailable and partial missing required → throws in headless mode", async () => {
-	// dispatcher 不可用、local 只抽到 page 但缺 required 的 url → headless 抛错
-	// 修复前会静默返回 {page:2} 导致下游 worker 拿不到 url 而 hardcode/猜值
+test("dispatcher unavailable (no model/auth) → throws explicitly instead of silent fallback", async () => {
+	// ponytail: dispatcher 是唯一自然语言解析路径。模型/auth 不可用是配置错误,显式抛错,
+	// 不再静默退化(否则会重新长出字符串比对补丁)。这个 throw 比"缺 required"更早更准。
 	await assert.rejects(
 		async () => resolveRuntimeInputFromText({}, "# Skill", biliContract, "https://x.com, page=2", undefined, true),
-		/未能从输入解析出必填字段: url/,
+		/dispatcher 模型不可用/,
 	);
 });
 

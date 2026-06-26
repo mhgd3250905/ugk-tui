@@ -331,6 +331,103 @@ test("run_task remembers protected-tool grant across calls in the same session",
 	}
 });
 
+// ponytail: grant key 带 taskbook 工具集。报告场景:taskbook 编辑后新增了 mcp 工具,
+// 旧缓存只记了 cdp → 新工具集没授权过 → 重新确认。防止免确认下发新受保护工具。
+test("run_task re-confirms when a taskbook's protected-tool set changes", async () => {
+	const { pi, tools } = makePi(["read", "bash", "chrome_cdp", "alpha__echo"]);
+	const { cwd, ctx } = makeCtx();
+	let confirmCount = 0;
+	ctx.ui.confirm = () => {
+		confirmCount += 1;
+		return true;
+	};
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => workerOk("done"));
+	setTaskDispatcherForTests(async (_ctx, _skill, _contract, rawInput) => ({ text: rawInput }));
+	resetTaskProtectedToolGrantsForTests();
+	try {
+		// 第一版:只用 chrome_cdp
+		await saveTaskbook("project", cwd, "mixed-task", {
+			description: "cdp task",
+			spec,
+			skill: "Use chrome_cdp.",
+			verify: "process.exit(0);\n",
+			contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+		});
+		const tool = tools.find((item) => item.name === "run_task");
+		await tool.execute("call-1", { name: "mixed-task", input: "one" }, undefined, undefined, ctx);
+		assert.equal(confirmCount, 1, "首次 cdp-only 授权,弹一次");
+		// 第二次同工具集 → 命中缓存,不弹
+		await tool.execute("call-2", { name: "mixed-task", input: "two" }, undefined, undefined, ctx);
+		assert.equal(confirmCount, 1, "同工具集命中缓存,不弹");
+
+		// 编辑 taskbook:加上 mcp 工具 alpha__echo
+		await saveTaskbook("project", cwd, "mixed-task", {
+			description: "cdp + mcp task",
+			spec,
+			skill: "Use chrome_cdp and alpha__echo.",
+			verify: "process.exit(0);\n",
+			contract: { requiredTools: ["chrome_cdp", "alpha__echo"], artifacts: [] },
+		});
+		await tool.execute("call-3", { name: "mixed-task", input: "three" }, undefined, undefined, ctx);
+		assert.equal(confirmCount, 2, "工具集变了(cdp→cdp+mcp),必须重新确认");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		resetTaskProtectedToolGrantsForTests();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// ponytail: 只缓存真用 protected tool 的 taskbook。批次里夹带的纯 read taskbook 不入缓存,
+// 也不影响 grant 判定 —— 它本来就不需要授权。
+test("run_task batch only grants protected tools for taskbooks that actually use them", async () => {
+	const { pi, tools } = makePi(["read", "bash", "chrome_cdp"]);
+	const { cwd, ctx } = makeCtx();
+	let confirmCount = 0;
+	ctx.ui.confirm = () => {
+		confirmCount += 1;
+		return true;
+	};
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => workerOk("done"));
+	setTaskDispatcherForTests(async (_ctx, _skill, _contract, rawInput) => ({ text: rawInput }));
+	resetTaskProtectedToolGrantsForTests();
+	try {
+		await saveTaskbook("project", cwd, "cdp-task", {
+			description: "cdp task",
+			spec,
+			skill: "Use chrome_cdp.",
+			verify: "process.exit(0);\n",
+			contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+		});
+		await saveTaskbook("project", cwd, "plain-task", {
+			description: "plain read task",
+			spec,
+			skill: "Just read.",
+			verify: "process.exit(0);\n",
+			contract: { requiredTools: ["read"], artifacts: [] },
+		});
+		const tool = tools.find((item) => item.name === "run_task");
+		// parallel:cdp-task + plain-task 混批。confirm 只因 cdp-task 弹一次。
+		await tool.execute("call-1", {
+			tasks: [
+				{ name: "cdp-task", input: "a" },
+				{ name: "plain-task", input: "b" },
+			],
+		}, undefined, undefined, ctx);
+		assert.equal(confirmCount, 1, "混批弹一次 confirm(覆盖 cdp-task)");
+		// 再单独跑 plain-task:它不碰 protected tool → 不该弹 confirm
+		await tool.execute("call-2", { name: "plain-task", input: "c" }, undefined, undefined, ctx);
+		assert.equal(confirmCount, 1, "纯 read taskbook 不触发任何 protected-tool confirm");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		resetTaskProtectedToolGrantsForTests();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("run_task parallel isolates a single task's execution failure from the batch", async () => {
 	const { pi, tools } = makePi();
 	const { cwd, ctx } = makeCtx();

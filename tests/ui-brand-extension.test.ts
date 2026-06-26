@@ -313,7 +313,7 @@ test("ugk brand footer colors stateful fields by severity", async () => {
 		});
 		const text = footer.render(140).join("\n");
 
-		assert.match(text, /<error>❌ API not configured<\/error>/);
+		assert.match(text, /<error>🤖 ❌ API not configured<\/error>/);
 		assert.doesNotMatch(text, /<success>configured<\/success>/);
 		assert.match(text, /<error>bash unavailable<\/error>/);
 		assert.match(text, /<error>subagent not loaded<\/error>/);

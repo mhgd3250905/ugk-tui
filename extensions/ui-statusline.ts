@@ -16,7 +16,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		const theme = ctx.ui.theme;
-		ctx.ui.setStatus("turn-progress", theme.fg("dim", "就绪"));
+		ctx.ui.setStatus("turn-progress", theme.fg("success", "✅") + theme.fg("dim", " 就绪"));
 	});
 
 	pi.on("turn_start", async (_event, ctx) => {

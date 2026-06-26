@@ -72,8 +72,7 @@ const UGK_BLOCK_LOGO = [
 
 function hardTruncate(text: string, width: number): string {
 	if (width <= 0) return "";
-	const truncated = truncateToWidth(text, width, "");
-	return truncated.length <= width ? truncated : truncated.slice(0, width);
+	return truncateToWidth(text, width, "");
 }
 
 function padEndVisible(text: string, width: number): string {
@@ -208,14 +207,14 @@ export function buildUgkFooterLines(options: UgkFooterOptions): string[] {
 			? `?/${formatTokens(options.usage.contextWindow)}`
 			: `${options.usage.contextPercent.toFixed(1)}%/${formatTokens(options.usage.contextWindow)}`;
 	const usage = [
-		`↑${formatTokens(options.usage.input)}`,
-		`↓${formatTokens(options.usage.output)}`,
-		options.usage.cacheRead ? `R${formatTokens(options.usage.cacheRead)}` : "",
-		options.usage.cacheWrite ? `W${formatTokens(options.usage.cacheWrite)}` : "",
-		`$${options.usage.cost.toFixed(3)}`,
-		context,
+		`📥 ${formatTokens(options.usage.input)}`,
+		`📤 ${formatTokens(options.usage.output)}`,
+		options.usage.cacheRead ? `R ${formatTokens(options.usage.cacheRead)}` : "",
+		options.usage.cacheWrite ? `W ${formatTokens(options.usage.cacheWrite)}` : "",
+		`💰 $${options.usage.cost.toFixed(3)}`,
+		`🧠 ${context}`,
 	].filter(Boolean);
-	const model = options.thinkingLevel ? `${options.modelId} · ${options.thinkingLevel}` : options.modelId;
+	const model = options.thinkingLevel ? `🤖 ${options.modelId} · ${options.thinkingLevel}` : `🤖 ${options.modelId}`;
 
 	return [
 		hardTruncate(`ugk ${formatCwd(options.cwd)}${branch}`, options.width),

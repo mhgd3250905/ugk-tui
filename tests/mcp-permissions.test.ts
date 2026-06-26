@@ -9,6 +9,7 @@ import {
 	isTaskMcpToolPreauthorized,
 	setMcpPermissionMode,
 } from "../extensions/mcp/permissions.ts";
+import { createAutopilotState, installAutopilotState } from "../extensions/shared/autopilot.ts";
 
 test("createMcpPermissionState defaults to ask mode", () => {
 	const state = createMcpPermissionState();
@@ -195,4 +196,34 @@ test("clearMcpSessionAllow clears one server or all servers", () => {
 	clearMcpSessionAllow(state);
 
 	assert.equal(state.sessionAllowedServers.size, 0);
+});
+
+test("autopilot on suppresses MCP tool confirmation in ask mode", () => {
+	installAutopilotState(createAutopilotState(true));
+	try {
+		const state = createMcpPermissionState("ask");
+		const result = checkMcpToolPolicy(
+			state,
+			{ serverName: "alpha", toolName: "echo", reason: "execute alpha__echo" },
+			true,
+		);
+		assert.deepEqual(result, { allowed: true, requiresConfirmation: false });
+	} finally {
+		installAutopilotState(createAutopilotState(false));
+	}
+});
+
+test("autopilot does not unblock MCP tools when mode is off (permission off)", () => {
+	installAutopilotState(createAutopilotState(true));
+	try {
+		const state = createMcpPermissionState("off");
+		const result = checkMcpToolPolicy(
+			state,
+			{ serverName: "alpha", toolName: "echo", reason: "execute alpha__echo" },
+			true,
+		);
+		assert.equal(result.allowed, false);
+	} finally {
+		installAutopilotState(createAutopilotState(false));
+	}
 });

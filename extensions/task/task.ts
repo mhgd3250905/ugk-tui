@@ -56,6 +56,7 @@ import { dispatchTaskRunReviewer } from "./task-run-reviewer.ts";
 import { runVerify, type VerifyFailure } from "./task-verify.ts";
 import { dispatchWorker, type TaskWorkerResult } from "./task-worker.ts";
 import { mapWithConcurrencyLimit } from "../subagent-runtime.ts";
+import { isAutopilotOn } from "../shared/autopilot.ts";
 
 const TASK_STATE_TYPE = "task-state";
 const TASK_PLAN_CONTEXT_TYPE = "task-plan-context";
@@ -537,8 +538,10 @@ export async function resolveTaskWorkerEnv(
 	const taskbookNames = perTaskbook.map((entry) => entry.item.taskbook.name).join(", ");
 	// ponytail: 本会话已授权过全部这些 (taskbook,工具集) → 直接复用,不再弹 confirm。
 	// 批次里任一 taskbook 的工具集没授权过 → 弹一次(覆盖整个批次),通过后全部入缓存。
+	// autopilot on 时:这条"受保护工具授权"确认被短路为直接放行(见 shared/autopilot.ts),
+	// 仍属于可逆的工具级确认(授权只传 worker、不改全局、关 ugk 即忘),不涉及危险动作。
 	const allGranted = perTaskbook.every((entry) => protectedToolGrants.has(protectedToolGrantKey(entry.item, entry.tools)));
-	if (!allGranted) {
+	if (!allGranted && !isAutopilotOn()) {
 		const allowed = await ctx.ui?.confirm?.(
 			"允许本次 task 使用受保护工具?",
 			[
@@ -548,6 +551,8 @@ export async function resolveTaskWorkerEnv(
 			].join("\n"),
 		);
 		if (!allowed) return null;
+	}
+	if (!allGranted) {
 		for (const entry of perTaskbook) protectedToolGrants.add(protectedToolGrantKey(entry.item, entry.tools));
 	}
 	const chromeCdp = names.includes("chrome_cdp");
@@ -1618,9 +1623,10 @@ export function registerTask(pi: ExtensionAPI): void {
 		name: "run_task",
 		label: "Run Task",
 		description: [
-			"复用已通过机器验收的固定任务(taskbook)执行确定性工作。",
-			"Modes: single (name + input), parallel (tasks: [{name,input}] 数组,最多 8 项,自动并发 4)。",
+			"复用已通过机器验收的固定任务(taskbook)执行确定性工作。Modes: single (name + input), parallel (tasks: [{name,input}] 数组,最多 8 项,自动并发 4)。",
+			"想并行跑多个 task(如批量下载、多账号抓取、N 个独立输入),用 parallel 模式:run_task({tasks:[{name,input},...]})。",
 			"返回每个 task 的 PASS/FAIL(机器验收)、产物路径、outputDir。整体成败由你判断。",
+			"⚠️ 并行 task 必须用本工具的 parallel 模式,不要用 subagent 包 run_task —— subagent 的 worker 子进程会丢掉 task 的受保护工具授权(CDP/MCP),必然授权失败。例如同时下载 39 个视频:正确做法是 run_task({tasks:[{name:'bili-download',input:'视频1'},...]}) 一批并发,不是 subagent parallel 4 个 worker 各调 run_task。",
 		].join("\n"),
 		parameters: Type.Object({
 			name: Type.Optional(Type.String({ description: "taskbook 名(single 模式)" })),

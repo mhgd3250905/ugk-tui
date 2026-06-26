@@ -36,6 +36,8 @@ import registerMcp, { createMcpDoctorCheck } from "./mcp/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { renderTerminalTable } from "./terminal-table.ts";
+import { AUTOPILOT_PROMPT_SNIPPET, isAutopilotOn, setAutopilot } from "./shared/autopilot.ts";
+import { buildLanguagePromptSnippet, clearLanguage, getLanguage, setLanguage } from "./shared/language.ts";
 
 function isNaturalBareAtPrefix(lines: string[], cursorLine: number, cursorCol: number): boolean {
 	const currentLine = lines[cursorLine] || "";
@@ -65,7 +67,7 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const rows = [
 		["🧰 Tools", "✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ judge  ✅ mcp"],
 		["🤖 Agents", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries"],
-		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /judge  /cdp  /mcp  /ugk-ui"],
+		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /judge  /cdp  /mcp  /ugk-ui  /ugk-autopilot  /language"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		["🛡️ Guard", "dangerous bash gate enabled"],
 	] as const;
@@ -154,6 +156,90 @@ export default function (pi: ExtensionAPI) {
 		description: "Show ugk-pi-agent status",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(formatUgkStatusTable(getDeepSeekStatus()), "info");
+		},
+	});
+
+	// 2.0) /ugk-autopilot:统一工具确认总开关(①②类工具确认受管,危险命令门不受管)。
+	//   on  = 普通工具确认(CDP/MCP/未来工具)一律放行 + 注入"别问范围问题"指令(治 ③类)。
+	//   off = 恢复默认(工具各自回 ask)。
+	//   状态只在会话内存,关 ugk 即忘。危险动作(rm -rf 等)永远走人确认,autopilot 管不到。
+	pi.registerCommand("ugk-autopilot", {
+		description: "Toggle autopilot: auto-approve reversible tool confirmations",
+		handler: async (args, ctx) => {
+			const arg = (args || "").trim().toLowerCase();
+			if (arg === "on" || arg === "off") {
+				setAutopilot(arg === "on");
+				ctx.ui.notify(
+					`Autopilot: ${arg === "on" ? "ON" : "OFF"}\n` +
+						(arg === "on"
+							? "可逆的工具确认(CDP/MCP 等)自动放行;危险命令(rm -rf 等)仍归人。"
+							: "工具确认回到各工具自己的模式。"),
+					"info",
+				);
+				return;
+			}
+			if (arg === "status" || arg === "") {
+				ctx.ui.notify(`Autopilot: ${isAutopilotOn() ? "ON" : "OFF"}`, "info");
+				return;
+			}
+			ctx.ui.notify("Usage: /ugk-autopilot on|off|status", "warning");
+		},
+	});
+
+	// 2.0b) before_agent_start 注入动态指令(autopilot 范围问卷 + 用户语言偏好)。
+	//   一个钩子处理两段 prompt,比两个钩子少一次 systemPrompt 读写。
+	pi.on("before_agent_start", async (event: { systemPrompt?: string } = {}) => {
+		const snippets: string[] = [];
+		if (isAutopilotOn()) snippets.push(AUTOPILOT_PROMPT_SNIPPET);
+		const langSnippet = buildLanguagePromptSnippet(getLanguage());
+		if (langSnippet) snippets.push(langSnippet);
+		if (snippets.length === 0) return undefined;
+
+		const prompt = event.systemPrompt ?? "";
+		const toAdd = snippets.filter((s) => !prompt.includes(s));
+		if (toAdd.length === 0) return undefined;
+		return { systemPrompt: [prompt, "", ...toAdd].join("\n") };
+	});
+
+	// 2.0c) /language:用户语言偏好(跨会话持久,自由字符串)。
+	//   /language <语言>  = 设(如 /language English、/language 日本語)
+	//   /language status  = 看当前
+	//   /language clear   = 清除,回到 AGENTS.md 默认(优先中文)
+	//   无参 = 交互输入(支持时)
+	pi.registerCommand("language", {
+		description: "Set the language the agent speaks (persists across sessions)",
+		handler: async (args, ctx) => {
+			const raw = (args || "").trim();
+			const arg = raw.toLowerCase();
+
+			if (arg === "status" || (arg === "" && !ctx.ui?.input)) {
+				const current = getLanguage();
+				ctx.ui.notify(
+					current
+						? `当前语言偏好: ${current}\n(/language <语言> 修改,/language clear 清除回默认)`
+						: `当前语言偏好: 默认(优先中文)\n(/language <语言> 设置)`,
+					"info",
+				);
+				return;
+			}
+			if (arg === "clear") {
+				clearLanguage();
+				ctx.ui.notify("语言偏好已清除,回到默认(优先中文)。", "info");
+				return;
+			}
+			if (arg === "") {
+				// ponytail: 无参且有 input 能力时,交互问一句。避免命令解析对 input 能力的耦合。
+				const input = await ctx.ui.input("用什么语言与 agent 交流?", "如:English / 中文 / 日本語");
+				if (!input?.trim()) {
+					ctx.ui.notify("未设置,保持当前语言偏好。", "info");
+					return;
+				}
+				const set = setLanguage(input);
+				ctx.ui.notify(`语言偏好已设为: ${set}\n下个回合起生效。`, "info");
+				return;
+			}
+			const set = setLanguage(raw);
+			ctx.ui.notify(`语言偏好已设为: ${set}\n下个回合起生效。`, "info");
 		},
 	});
 

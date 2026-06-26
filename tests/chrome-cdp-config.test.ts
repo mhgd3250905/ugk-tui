@@ -14,6 +14,7 @@ import {
 	setChromeCdpPort,
 	type ChromeCdpPortDeps,
 } from "../extensions/chrome-cdp/config.ts";
+import { createAutopilotState, installAutopilotState } from "../extensions/shared/autopilot.ts";
 
 const noPersistDeps: ChromeCdpPortDeps = {
 	agentDir: "/fake/agent",
@@ -268,4 +269,51 @@ test("resolveChromeCdpTarget returns undefined when neither target nor session t
 
 	assert.equal(resolveChromeCdpTarget(state, { target: "explicit" }), "explicit");
 	assert.equal(resolveChromeCdpTarget(state, {}), undefined);
+});
+
+test("autopilot on suppresses CDP confirmation in ask mode", () => {
+	installAutopilotState(createAutopilotState(true));
+	try {
+		const state = createChromeCdpState({}, noPersistDeps);
+		const request = {
+			action: "navigate",
+			url: "https://private.example.com",
+			reason: "Requires the user's logged-in browser session",
+			normalAccessAttempted: true,
+		} as const;
+
+		assert.equal(checkChromeCdpPolicy(state, request).requiresConfirmation, false);
+	} finally {
+		installAutopilotState(createAutopilotState(false));
+	}
+});
+
+test("autopilot off keeps CDP confirmation in ask mode", () => {
+	installAutopilotState(createAutopilotState(false));
+	const state = createChromeCdpState({}, noPersistDeps);
+	const request = {
+		action: "navigate",
+		url: "https://private.example.com",
+		reason: "Requires the user's logged-in browser session",
+		normalAccessAttempted: true,
+	} as const;
+
+	assert.equal(checkChromeCdpPolicy(state, request).requiresConfirmation, true);
+});
+
+test("autopilot does not unblock CDP when mode is off", () => {
+	installAutopilotState(createAutopilotState(true));
+	try {
+		const state = createChromeCdpState({}, noPersistDeps);
+		setChromeCdpMode(state, "off");
+		const result = checkChromeCdpPolicy(state, {
+			action: "tabs",
+			reason: "Need logged-in Chrome session",
+			normalAccessAttempted: true,
+		});
+
+		assert.equal(result.allowed, false);
+	} finally {
+		installAutopilotState(createAutopilotState(false));
+	}
 });

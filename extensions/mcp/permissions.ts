@@ -1,4 +1,5 @@
 import type { McpConfigScope } from "./config.ts";
+import { suppressConfirmation } from "../shared/autopilot.ts";
 
 export type McpPermissionMode = "off" | "ask" | "on";
 
@@ -96,5 +97,6 @@ export function checkMcpToolPolicy(
 		return { allowed: true, requiresConfirmation: false };
 	}
 
-	return { allowed: true, requiresConfirmation: true };
+	// autopilot on 时,ask 模式的确认被短路为直接放行(见 shared/autopilot.ts)。
+	return { allowed: true, requiresConfirmation: suppressConfirmation(true) };
 }

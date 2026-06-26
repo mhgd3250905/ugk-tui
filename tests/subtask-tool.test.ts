@@ -10,6 +10,7 @@ import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts
 import { setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
 import { resetTaskProtectedToolGrantsForTests } from "../extensions/task/task.ts";
+import { createAutopilotState, installAutopilotState } from "../extensions/shared/autopilot.ts";
 
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 const testAgentDir = mkdtempSync(path.join(os.tmpdir(), "ugk-subtask-tool-agent-"));
@@ -462,6 +463,59 @@ test("run_task batch only grants protected tools for taskbooks that actually use
 		setTaskDispatcherForTests(undefined);
 		resetTaskProtectedToolGrantsForTests();
 		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// ponytail: autopilot ON 时,run_task 的"受保护工具授权"确认被短路为直接放行。
+// 这是第三条 autopilot 接入路径(CDP/MCP policy + run_task 受保护工具确认),与上面 off 路径互为镜像。
+test("run_task skips protected-tool confirm when autopilot is on", async () => {
+	installAutopilotState(createAutopilotState(true));
+	try {
+		const { pi, tools } = makePi(["read", "bash", "chrome_cdp"]);
+		const { cwd, ctx } = makeCtx();
+		let confirmCount = 0;
+		ctx.ui.confirm = () => {
+			confirmCount += 1;
+			return true;
+		};
+		registerTask(pi as any);
+		setTaskWorkerRunnerForTests(async () => workerOk("done"));
+		setTaskDispatcherForTests(async (_ctx, _skill, _contract, rawInput) => ({ text: rawInput }));
+		resetTaskProtectedToolGrantsForTests();
+		try {
+			await saveTaskbook("project", cwd, "protected-a", {
+				description: "protected a",
+				spec,
+				skill: "Use chrome_cdp.",
+				verify: "process.exit(0);\n",
+				contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+			});
+			await saveTaskbook("project", cwd, "protected-b", {
+				description: "protected b",
+				spec,
+				skill: "Use chrome_cdp.",
+				verify: "process.exit(0);\n",
+				contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+			});
+			const tool = tools.find((item) => item.name === "run_task");
+
+			const result = await tool.execute("call-1", {
+				tasks: [
+					{ name: "protected-a", input: "one" },
+					{ name: "protected-b", input: "two" },
+				],
+			}, undefined, undefined, ctx);
+
+			assert.equal(result.isError, undefined);
+			assert.equal(confirmCount, 0, "autopilot on 时受保护工具确认不该弹");
+		} finally {
+			setTaskWorkerRunnerForTests(undefined);
+			setTaskDispatcherForTests(undefined);
+			resetTaskProtectedToolGrantsForTests();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	} finally {
+		installAutopilotState(createAutopilotState(false));
 	}
 });
 

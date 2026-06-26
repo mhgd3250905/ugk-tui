@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { readSettingsJson, updateSettingsJson } from "../shared/settings-io.ts";
+import { suppressConfirmation } from "../shared/autopilot.ts";
 
 export type ChromeCdpMode = "off" | "ask" | "on";
 export type ChromeCdpAction = "status" | "tabs" | "launch" | "navigate" | "evaluate" | "screenshot";
@@ -141,6 +142,7 @@ export function checkChromeCdpPolicy(
 
 	return {
 		allowed: true,
-		requiresConfirmation: state.mode === "ask" && !state.sessionAllowed,
+		// autopilot on 时,ask 模式的确认被短路为直接放行(见 shared/autopilot.ts)。
+		requiresConfirmation: suppressConfirmation(state.mode === "ask" && !state.sessionAllowed),
 	};
 }

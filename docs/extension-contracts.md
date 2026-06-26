@@ -101,6 +101,36 @@ Windows 上 PowerShell 的 `Set-Content` / `Out-File` 默认写 UTF-8 BOM,而 No
 - [ ] 加了 `try/catch`?核对降级方向是否安全
 - [ ] 改了 task 核心函数签名/状态机?同步 `docs/design/subtask-extension-spec.md`
 - [ ] 改了 Judge agent 定义/taskbook schema?同步 `docs/judge.md`
+- [ ] 加了带确认的新工具?用 `suppressConfirmation()` 接入 autopilot(见 §7)
+
+---
+
+## 7. autopilot 统一工具确认总开关
+
+`/ugk-autopilot on|off|status` 是所有"工具级确认"的总开关。内核在 `extensions/shared/autopilot.ts`,全局单例,状态只在会话内存(关 ugk 即忘)。
+
+**管什么**:普通工具确认(CDP / MCP / 未来加的有副作用的工具)。autopilot on 时,这些工具的 `requiresConfirmation` 被短路为"直接放行"。
+
+**不管什么**:
+- **危险命令门(rm -rf / sudo / chmod 777)**:不接 autopilot,永远走人确认。这是用户硬要求。
+- **LLM 自发的 questionnaire(③类)**:靠 `before_agent_start` 注入 `AUTOPILOT_PROMPT_SNIPPET` 治,不是工具层能硬拦的。
+
+### 硬规则:新工具如何接入 autopilot
+
+新工具的 policy 函数末尾,把"需要确认"的判定包一层 `suppressConfirmation()`:
+
+```ts
+import { suppressConfirmation } from "../shared/autopilot.ts";
+// ...
+return {
+	allowed: true,
+	requiresConfirmation: suppressConfirmation(/* 原本的判定 */ state.mode === "ask" && !sessionAllowed),
+};
+```
+
+一行接入,**禁止**复制 ask/on/off 三态逻辑——autopilot 是统一的,不要每家自搞一套。测试用 `installAutopilotState(createAutopilotState(...))` 隔离单例。
+
+**绝对不能接入 autopilot 的**:删除级、花钱级、不可逆外部副作用的动作。这些永远归人。
 
 ---
 

@@ -54,3 +54,12 @@ screenshot
 ```
 
 `status` and `launch` do not require a reason or confirmation. Every other action should include a reason and whether ordinary access was attempted.
+
+## Parallel Safety
+
+When multiple task workers run in parallel and each uses `chrome_cdp`, the runtime gives every worker its own dedicated tab automatically (no need to pass `target`). Workers never collide on the same tab, so parallel downloads/scrapes produce correct, non-duplicated output.
+
+Internals: `extensions/shared/worker-lifecycle.ts` + `extensions/chrome-cdp/tab-session.ts` manage per-worker tab open/close. See `docs/design/2026-06-26-cdp-per-worker-tab-isolation.md`.
+
+This isolation covers the `chrome_cdp` tool path only. If a worker script bypasses the tool and talks to the CDP port directly (e.g. via `pychrome`/curl), it will not pick up the dedicated tab — taskbooks should require the `chrome_cdp` tool instead.
+

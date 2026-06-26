@@ -38,6 +38,7 @@
 - 默认 `ask` 模式,控制本地登录态 Chrome 前需说明原因并经用户确认
 - 仅用于 SSO/cookie/CAPTCHA/私有工作区/本地 Chrome 状态,不替代普通联网检索
 - CDP 未连接时用 `chrome_cdp action=launch`,不要用 bash 启动 Chrome
+- 并行 worker 各自动分到独立 CDP tab(runtime 管理,agent 无需指定 target,不会互相覆盖);taskbook 须用 `chrome_cdp` 工具而非 python/curl 直连端口,否则拿不到独立 tab
 
 ### MCP tools 接入
 

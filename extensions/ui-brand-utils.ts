@@ -91,7 +91,7 @@ function formatContextProgress(percent: number | null): string {
 	const cells = 8;
 	const clamped = Math.max(0, Math.min(100, percent ?? 0));
 	const filled = Math.round((clamped / 100) * cells);
-	return `${"■".repeat(filled)}${"□".repeat(cells - filled)}`;
+	return `${"█".repeat(filled)}${"▒".repeat(cells - filled)}`;
 }
 
 function formatCwd(cwd: string): string {

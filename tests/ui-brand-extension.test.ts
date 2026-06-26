@@ -333,3 +333,57 @@ test("ugk brand footer colors stateful fields by severity", async () => {
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 	}
 });
+
+test("ugk brand footer colors context progress by percentage", async () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand() {},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	let footerFactory: Function | undefined;
+	const contextUsage = { percent: 0, contextWindow: 1000000 };
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "mimo-v2.5-pro" },
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => [],
+			getBranch: () => [],
+		},
+		getContextUsage: () => contextUsage,
+		ui: {
+			setHeader: () => {},
+			setFooter: (factory: unknown) => {
+				footerFactory = factory as Function;
+			},
+			setTitle: () => {},
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await handlers.get("session_start")!({ reason: "startup" }, ctx);
+	const theme = {
+		fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+		bold: (text: string) => text,
+	};
+	const footer = footerFactory!({ requestRender() {} }, theme, {
+		getGitBranch: () => null,
+		getExtensionStatuses: () => new Map(),
+		onBranchChange: () => () => {},
+	});
+
+	assert.match(footer.render(140).join("\n"), /<success>▒▒▒▒▒▒▒▒<\/success>/);
+	contextUsage.percent = 75;
+	assert.match(footer.render(140).join("\n"), /<warning>██████▒▒<\/warning>/);
+	contextUsage.percent = 95;
+	assert.match(footer.render(140).join("\n"), /<error>████████<\/error>/);
+});

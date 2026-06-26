@@ -154,7 +154,7 @@ test("buildUgkFooterLines keeps useful session status and truncates to width", (
 	assert.match(lines[1], /↑127k/);
 	assert.match(lines[1], /↓24k/);
 	assert.match(lines[1], /💰 \$0\.000/);
-	assert.match(lines[1], /🧠 ■□□□□□□□ 9\.8%\/1\.0M/);
+	assert.match(lines[1], /🧠 █▒▒▒▒▒▒▒ 9\.8%\/1\.0M/);
 	assert.match(lines[1], /🤖 deepseek-v4-pro/);
 	assert.match(lines[1], /deepseek-v4-pro/);
 	assert.match(lines[1], /high/);
@@ -179,7 +179,7 @@ test("buildUgkFooterLines renders an empty context progress bar", () => {
 		width: 96,
 	});
 
-	assert.match(lines[1], /🧠 □□□□□□□□ 0\.0%\/1\.0M/);
+	assert.match(lines[1], /🧠 ▒▒▒▒▒▒▒▒ 0\.0%\/1\.0M/);
 });
 
 test("resolveUgkDisplayModelId hides DeepSeek model when API credentials are missing", () => {

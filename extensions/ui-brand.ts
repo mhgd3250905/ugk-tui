@@ -112,13 +112,28 @@ function colorStatefulText(text: string, theme: any): string {
 	}, text);
 }
 
+function classifyContextProgressTone(contextText: string): "success" | "warning" | "error" | "dim" {
+	const match = /([0-9]+(?:\.[0-9]+)?)%\//.exec(contextText);
+	if (!match) return "dim";
+	const percent = Number(match[1]);
+	if (percent >= 90) return "error";
+	if (percent >= 70) return "warning";
+	return "success";
+}
+
+function colorFooterUsageText(usage: string, theme: any): string {
+	const match = /^(.*?🧠 )([█▒]{8})( .*)$/.exec(usage);
+	if (!match) return theme.fg("dim", usage);
+	return `${theme.fg("dim", match[1])}${theme.fg(classifyContextProgressTone(match[3]), match[2])}${theme.fg("dim", match[3])}`;
+}
+
 function colorFooterUsageLine(line: string, theme: any): string {
 	const separator = "  ";
 	const index = line.lastIndexOf(separator);
 	if (index === -1) return theme.fg("dim", line);
 	const usage = line.slice(0, index);
 	const modelOrState = line.slice(index + separator.length);
-	return `${theme.fg("dim", usage)}${separator}${theme.fg(classifyUgkStatusTone(modelOrState), modelOrState)}`;
+	return `${colorFooterUsageText(usage, theme)}${separator}${theme.fg(classifyUgkStatusTone(modelOrState), modelOrState)}`;
 }
 
 function colorFooterStatusLine(statuses: string[], fallback: string, theme: any): string {

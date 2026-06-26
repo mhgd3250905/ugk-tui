@@ -1,5 +1,11 @@
 # `/task` 交互层重构(v2)
 
+> ⚠️ **本文"改动 4:dispatcher"的设计描述已过时(v2.1.1 起),关于 dispatcher 失败/降级的部分不再成立。**
+> - 本文 line ~213-214、~235、~434 描述 dispatcher "失败 fallback 到 questionnaire 收集"、"类似 extractRequirementsSpec 的三级 fallback"。
+> - v2.1.1 起,dispatcher 是唯一自然语言解析路径:`localRuntimeInput` 只接确定性结构化语法(JSON / field=value),自然语言/裸值一律走 dispatcher、无本地捷径;dispatcher 模型/auth 不可用时**显式抛错**(`dispatcher 模型不可用`),不再 `return undefined` 降级到逐字段 UI 问。
+> - 因此"dispatcher 失败 fallback""questionnaire fallback""三级 fallback"等描述**不再成立**。dispatcher 设计的权威来源是 `extensions/task/task-dispatcher.ts` + 本仓库 v2.1.1 提交记录。
+> - 文档其余部分(交互层重构、阶段过渡、save 走 questionnaire)不受影响。
+
 > **状态:已完成(2026-06-23)。** 6 个改动全部落地,当时基线 `npm test` 406/406 pass。核心承诺(用户零命令记忆、自然语言 input)由执行 agent + 审核 subagent 共同保证。当前实现以 `extensions/task/` 代码为准。详见本文末尾"实际修复结果"。
 >
 > **原始用途**:给执行 agent 的交接文档,执行交互层重构。本文自包含,包含完整 UGK `/task` 背景。

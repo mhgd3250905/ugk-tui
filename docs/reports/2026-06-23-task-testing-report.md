@@ -1,5 +1,11 @@
 # `/task` v2 测试报告
 
+> ⚠️ **本文多处涉及 dispatcher fallback 的描述与建议已过时(v2.1.1 起)。**
+> - 本文把"dispatcher 不走 fallback""auth 失败时 dispatcher 返回 undefined → 走 questionnaire fallback"作为验收点与建议(line ~16、~43-44、~92、~153)。
+> - v2.1.1 起,dispatcher 模型/auth 不可用时**显式抛错**(`dispatcher 模型不可用`),不再 `return undefined`、不再走 questionnaire/交互式 fallback。
+> - **特别警告 line ~92 的建议**("加一个 case:auth 失败时 dispatcher 返回 undefined → 走 questionnaire fallback"):这是 v2.1.1 明确反向废弃的行为,不要据此加测试。当前对应测试在 `tests/task-dispatcher.test.ts`,断言的是"auth 不可用 → 抛错"。
+> - 文档其余部分(测试基线、smoke 通过情况、其他盲区)作为历史记录保留。
+
 > **测试时间**:2026-06-23
 > **测试范围**:`/task` v2 重构后的完整流程验证(交接文档要求)
 > **测试方式**:静态代码审查 + 自动化测试基线 + smoke:task 真实 LLM 跑通

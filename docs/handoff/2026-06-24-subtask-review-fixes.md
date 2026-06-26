@@ -1,5 +1,11 @@
 # subtask 代码审核修改报告
 
+> ⚠️ **本文"问题 1"及所附代码片段已过时(v2.1.1 起)。**
+> - 本文记录并修复了"dispatcher 失败时弹交互式 `ctx.ui.input` 输入框",修复方式是给 `callDispatcher(...)` 加 `.catch(() => undefined)` 让其静默降级,再走 fallback 分支。
+> - v2.1.1 起,这个 `.catch(() => undefined)` **已被移除**:`callDispatcher` 在模型/auth 不可用时**显式抛错**(`dispatcher 模型不可用`),`resolveRuntimeInputFromText` 不再 catch、不再 fallback 到交互式 UI。`complete()` 运行时错误仍在 `callDispatcher` 内部 catch。
+> - 因此本文 line ~14、~32、~74 的 `callDispatcher(...).catch(() => undefined)` 代码片段与"弹交互式输入框"描述**均不再成立**。**不要照抄这些片段。** 权威实现见 `extensions/task/task-dispatcher.ts`。
+> - 文档其余部分(批量授权、注入、block 等)不受影响。
+
 > **交接对象**:subtask 第一版实现者。
 > **背景**:你的实现整体质量高(结构清晰、测试用了正确 mock 模式、批量授权/注入/block 都到位,7 个测试全过)。审核发现 **1 个必须修的实质问题 + 1 个建议的健壮性增强**。本文是修改清单。
 > **基线**:`npm test` 当前 449 pass / 0 fail。修改后应 ≥ 450,无回归。

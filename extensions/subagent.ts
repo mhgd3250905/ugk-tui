@@ -20,6 +20,7 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import type { WorkerLifecycle } from "./shared/worker-lifecycle.ts";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./subagent-agents.ts";
 import { getUgkBin } from "./device-env.ts";
 import { renderSubagentCall, renderSubagentResult } from "./subagent-rendering.ts";
@@ -93,6 +94,7 @@ export async function runSingleAgent(
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
 	extraEnv: Record<string, string | undefined> = {},
+	lifecycle?: WorkerLifecycle,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -140,6 +142,11 @@ export async function runSingleAgent(
 	};
 
 	try {
+		// ponytail: 通用 worker 资源钩子(如 per-worker CDP tab 隔离)。spawn 前开资源并注入 env。
+		// subagent 本身不认识任何具体资源类型 —— 钩子实现(chrome-cdp/tab-session.ts)决定开什么。
+		// beforeSpawn 抛错则阻止 spawn(资源没开成功不该起 worker)。
+		await lifecycle?.beforeSpawn?.(extraEnv);
+
 		if (agent.systemPrompt.trim()) {
 			const tmp = await writePromptToTempFile(agent.name, agent.systemPrompt);
 			tmpPromptDir = tmp.dir;
@@ -261,6 +268,9 @@ export async function runSingleAgent(
 		if (wasAborted) throw new Error("Subagent was aborted");
 		return currentResult;
 	} finally {
+		// ponytail: worker 进程 close 后回收资源(per-worker CDP tab 等)。
+		// finally 保证正常退出/abort/SIGKILL 三条路都执行。best-effort,吞错不阻塞。
+		await lifecycle?.afterClose?.().catch(() => {});
 		if (tmpPromptPath)
 			try {
 				fs.unlinkSync(tmpPromptPath);

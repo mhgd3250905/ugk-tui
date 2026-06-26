@@ -1,3 +1,4 @@
+import { peekWorkerLifecycleFactory } from "../shared/worker-lifecycle.ts";
 import { discoverAgents } from "../subagent-agents.ts";
 import { getFinalOutput, isFailedResult, type SingleResult, type UsageStats } from "../subagent-runtime.ts";
 import { runSingleAgent } from "../subagent.ts";
@@ -62,6 +63,13 @@ export async function dispatchWorker(
 ): Promise<TaskWorkerResult> {
 	const discovery = discoverAgents(opts.cwd, "both");
 	const runner = workerRunnerForTests ?? runSingleAgent;
+	// ponytail: 依赖反转 —— task/ 不能 import chrome-cdp/(架构守卫强制)。chrome-cdp 把 lifecycle
+	// 工厂注册到 shared/worker-lifecycle(组合根接线时),这里按 env 信号 peek 出来用。
+	// 只有会用 chrome_cdp 的 worker(env 带 UGK_TASK_ALLOW_CHROME_CDP)才开 tab;否则 undefined。
+	// subagent/parallel/checker/guide/reviewer 路径都不传 lifecycle,零行为变化。
+	const factory = peekWorkerLifecycleFactory();
+	const cdpPort = opts.env?.UGK_CDP_PORT ? Number(opts.env.UGK_CDP_PORT) : 9222;
+	const lifecycle = opts.env?.UGK_TASK_ALLOW_CHROME_CDP && factory ? factory(cdpPort) : undefined;
 	let result: SingleResult;
 	try {
 		result = await runner(
@@ -85,6 +93,7 @@ export async function dispatchWorker(
 				results,
 			}),
 			opts.env,
+			lifecycle,
 		);
 	} catch (error) {
 		// ponytail: runSingleAgent 在 signal abort 时 throw "Subagent was aborted"。

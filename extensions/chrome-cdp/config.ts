@@ -10,6 +10,9 @@ export interface ChromeCdpState {
 	sessionAllowed: boolean;
 	runtimePort?: number;
 	envPort?: number;
+	// ponytail: per-worker 会话 tab。worker 进程从 env UGK_CDP_TAB_ID 读到(main 进程的 tab-session.ts 注入),
+	// 作为 navigate/evaluate/screenshot 的默认 target,避免并行 worker 抢 tabs[0]。
+	sessionTabId?: string;
 }
 
 export interface ChromeCdpPolicyRequest {
@@ -71,6 +74,7 @@ export function createChromeCdpState(
 		sessionAllowed: env.UGK_TASK_ALLOW_CHROME_CDP === "1",
 		runtimePort: persistedPort,
 		envPort: parsePort(env.UGK_CDP_PORT),
+		sessionTabId: env.UGK_CDP_TAB_ID,
 	};
 }
 
@@ -97,6 +101,14 @@ export function setChromeCdpPort(state: ChromeCdpState, port: number, deps: Chro
 
 export function resolveChromeCdpPort(state: ChromeCdpState, params: { port?: number }): number {
 	return parsePort(params.port) ?? state.runtimePort ?? state.envPort ?? DEFAULT_PORT;
+}
+
+/**
+ * 解析最终 target。显式 params.target 永远压过会话 tab(不破坏 agent 主动指定 tab 的能力);
+ * 两者都没有时返回 undefined,client.ts 的 findTab 再 fallback 到 tabs[0](保持旧行为)。
+ */
+export function resolveChromeCdpTarget(state: ChromeCdpState, params: { target?: string }): string | undefined {
+	return params.target ?? state.sessionTabId;
 }
 
 export function checkChromeCdpPolicy(

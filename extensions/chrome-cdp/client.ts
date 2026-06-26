@@ -137,3 +137,22 @@ export async function captureChromeScreenshot(client: ChromeCdpClient, target: s
 	fs.writeFileSync(filePath, data);
 	return { path: filePath, bytes: data.length };
 }
+
+/**
+ * 新建一个 Chrome tab(Chrome 原生 HTTP 端点 PUT /json/new)。返回新 tab 描述符(含 id)。
+ * 用于 per-worker tab 隔离:每个 worker spawn 前开一个专属 tab,避免并行 worker 抢 tabs[0]。
+ */
+export async function createChromeTab(client: ChromeCdpClient, url?: string): Promise<ChromeTab> {
+	const route = url ? `/json/new?${encodeURIComponent(url)}` : "/json/new";
+	const response = await client.fetch(endpoint(client, route), { method: "PUT" });
+	if (!response.ok) throw new Error(`Chrome CDP /json/new returned HTTP ${response.status}`);
+	return (await response.json()) as ChromeTab;
+}
+
+/**
+ * 关闭一个 Chrome tab(Chrome 原生 HTTP 端点 GET /json/close/<id>)。best-effort。
+ * ponytail: 不检查返回。失败说明 tab 已没了或 Chrome 重启 —— 不该阻塞 worker 回收。
+ */
+export async function closeChromeTab(client: ChromeCdpClient, targetId: string): Promise<void> {
+	await client.fetch(endpoint(client, `/json/close/${targetId}`), { method: "GET" });
+}

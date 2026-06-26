@@ -14,6 +14,7 @@ import {
 	createChromeCdpState,
 	grantChromeCdpSessionAllow,
 	resolveChromeCdpPort,
+	resolveChromeCdpTarget,
 	setChromeCdpMode,
 	setChromeCdpPort,
 	type ChromeCdpAction,
@@ -21,6 +22,8 @@ import {
 } from "./config.ts";
 import { formatChromeCdpStatus, formatChromeTabs } from "./formatter.ts";
 import { launchChromeCdpAndWait } from "./launcher.ts";
+import { makeCdpTabLifecycle } from "./tab-session.ts";
+import { setWorkerLifecycleFactory } from "../shared/worker-lifecycle.ts";
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
 type ChromeCdpConfirmation = "allow-once" | "allow-session" | "deny";
@@ -163,6 +166,9 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 			}
 
 			const port = resolveChromeCdpPort(state, { port: params.port });
+			// ponytail: 显式 params.target 压过 worker 会话 tab;都没有则 undefined(→ client findTab fallback tabs[0])。
+			// 与 resolveChromeCdpPort 同形:统一在 execute 层解析,deps 实现不变。
+			const target = resolveChromeCdpTarget(state, { target: params.target });
 			if (action === "status") {
 				const status = await deps.getStatus(port);
 				return textResult(formatChromeCdpStatus(status), status as any);
@@ -176,17 +182,17 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 			}
 			if (action === "navigate") {
 				if (!params.url) return textResult("navigate requires url.", { ok: false });
-				const result = await deps.navigate(port, params.target, params.url);
+				const result = await deps.navigate(port, target, params.url);
 				return textResult(`Navigated Chrome tab to ${params.url}`, { ok: true, result });
 			}
 			if (action === "evaluate") {
 				if (!params.expression) return textResult("evaluate requires expression.", { ok: false });
-				const result = await deps.evaluate(port, params.target, params.expression);
+				const result = await deps.evaluate(port, target, params.expression);
 				return textResult(JSON.stringify(result, null, 2), { ok: true, result });
 			}
 			if (action === "screenshot") {
 				if (!params.path) return textResult("screenshot requires path.", { ok: false });
-				const result = await deps.screenshot(port, params.target, params.path);
+				const result = await deps.screenshot(port, target, params.path);
 				return textResult(`Saved Chrome screenshot to ${params.path}`, { ok: true, result });
 			}
 			return textResult(`Unknown chrome_cdp action: ${String(action)}`, { ok: false });
@@ -197,6 +203,9 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 export function registerChromeCdp(pi: ExtensionAPI, overrides: ChromeCdpDeps = {}): void {
 	const state = createChromeCdpState();
 	const deps = { ...defaultDeps(), ...overrides };
+	// ponytail: 依赖反转 —— chrome-cdp 把 per-worker tab 生命周期工厂注册到 shared 中立层,
+	// task-worker peek 出来用,无需 task/ import chrome-cdp/(架构守卫禁止)。组合根接线点。
+	setWorkerLifecycleFactory((port) => makeCdpTabLifecycle(port));
 
 	async function resolveCdpArgs(args: string, ctx: any): Promise<string | undefined> {
 		if (args.trim()) return args;

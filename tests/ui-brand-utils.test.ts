@@ -73,16 +73,16 @@ test("buildUgkLogoLines renders a compact block-character logo", () => {
 	const lines = buildUgkLogoLines(96);
 
 	assert.deepEqual(lines, [
-		"██ ██ ████ ██ ██",
-		"██ ██ ██   ███",
-		"██ ██ ██ █ ███",
-		"██ ██ ██ █ ██ ██",
-		" ███  ████ ██ ██",
+		"██  ██  █████  ██  ██",
+		"██  ██ ██      ██ ██ ",
+		"██  ██ ██  ███ ████  ",
+		"██  ██ ██   ██ ██ ██ ",
+		" ████   █████  ██  ██",
 	]);
 	assert.doesNotMatch(lines.join("\n"), /[▀▄]/);
 	for (const line of lines) {
 		assert.match(line, /█/);
-		assert.ok(visibleWidth(line) <= 17, `logo line is too wide: ${line}`);
+		assert.ok(visibleWidth(line) <= 22, `logo line is too wide: ${line}`);
 	}
 });
 

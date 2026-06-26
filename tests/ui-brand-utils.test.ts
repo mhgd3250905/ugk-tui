@@ -129,8 +129,8 @@ test("buildUgkFooterLines keeps useful session status and truncates to width", (
 	}
 	assert.match(lines[0], /ugk/);
 	assert.match(lines[0], /feature\/ui-optimization/);
-	assert.match(lines[1], /📥 127k/);
-	assert.match(lines[1], /📤 24k/);
+	assert.match(lines[1], /↑127k/);
+	assert.match(lines[1], /↓24k/);
 	assert.match(lines[1], /💰 \$0\.000/);
 	assert.match(lines[1], /🧠 9\.8%\/1\.0M/);
 	assert.match(lines[1], /🤖 deepseek-v4-pro/);

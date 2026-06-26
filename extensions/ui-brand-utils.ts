@@ -207,8 +207,8 @@ export function buildUgkFooterLines(options: UgkFooterOptions): string[] {
 			? `?/${formatTokens(options.usage.contextWindow)}`
 			: `${options.usage.contextPercent.toFixed(1)}%/${formatTokens(options.usage.contextWindow)}`;
 	const usage = [
-		`📥 ${formatTokens(options.usage.input)}`,
-		`📤 ${formatTokens(options.usage.output)}`,
+		`↑${formatTokens(options.usage.input)}`,
+		`↓${formatTokens(options.usage.output)}`,
 		options.usage.cacheRead ? `R ${formatTokens(options.usage.cacheRead)}` : "",
 		options.usage.cacheWrite ? `W ${formatTokens(options.usage.cacheWrite)}` : "",
 		`💰 $${options.usage.cost.toFixed(3)}`,

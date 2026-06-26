@@ -110,11 +110,40 @@ function localRuntimeInput(contract: unknown, rawInput: string): unknown | undef
 		if (match) entries[field] = parseScalar(match[1]);
 	}
 	if (Object.keys(entries).length > 0) return entries;
-	if (fields.length === 1 && /^topN$/i.test(fields[0])) {
-		const match = rawInput.match(/(?:top|前)\s*(\d+)/i) ?? rawInput.trim().match(/^(\d+)$/);
-		if (match) return { [fields[0]]: Number(match[1]) };
+	// ponytail: 单字段 contract 的裸值捷径 —— 输入就是一个 URL/路径 token 时,
+	// 无需 LLM dispatcher,整个输入即该字段值。这让 task 回到"一句话驱动":
+	// main 派 task 跟派 subagent 心智一致(一句话 + 具名 taskbook)。
+	// 只接"长得像 URL 或路径"的输入,不吞自然语言(无论中英文):
+	//   "https://..." / "/abs/path" / "rel/path.txt"  → 本地解析
+	//   "含糊不清的输入" / "下载这个视频"            → 仍走 dispatcher 提取
+	// 不用"有无空格"判断:中文句子无空格但仍是自然语言,会误吞。
+	// topN 是历史特例(从 "top3"/"前3"/裸数字里抽数字),保留数字语义。
+	if (fields.length === 1) {
+		const field = fields[0];
+		const trimmed = rawInput.trim();
+		if (trimmed) {
+			if (/^topN$/i.test(field)) {
+				const match = trimmed.match(/(?:top|前)\s*(\d+)/i) ?? trimmed.match(/^(\d+)$/);
+				if (match) return { [field]: Number(match[1]) };
+			} else if (!/\s/.test(trimmed) && looksLikeBareValue(trimmed)) {
+				return { [field]: trimmed };
+			}
+		}
 	}
 	return undefined;
+}
+
+// ponytail: 单字段裸值判定。配合"无空格"前置条件(单 token):
+//   - 有 scheme(http(s):// 或 foo://) → URL
+//   - 含路径分隔符且带扩展名 → 文件路径
+//   - 含 / 或 \ → 路径
+// 三个都不中 → 纯自然语言(中英文皆然),留给 dispatcher 提取。
+// 报告场景(bilibili_url = 裸 URL)在这里被接住;"含糊不清的输入"这种无 / 无扩展名的中文句
+// 不匹配 → 仍走 dispatcher。两个条件叠加:"把这个下下来 https://..."有空格被前置 !/\s/ 挡掉。
+function looksLikeBareValue(input: string): boolean {
+	if (/\bhttps?:\/\//i.test(input) || /^[a-z][a-z0-9+.-]*:\/\//i.test(input)) return true;
+	if (input.includes("/") && /\.[a-z0-9]+$/i.test(input)) return true; // 路径/文件,带扩展名
+	return /[\\/]/.test(input); // 含路径分隔符
 }
 
 function inputTitle(contract: unknown, field: string): string {

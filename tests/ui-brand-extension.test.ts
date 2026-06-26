@@ -90,6 +90,15 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	assert.match(header.render(80).join("\n"), PACKAGE_VERSION_PATTERN);
 	assert.match(footer.render(80).join("\n"), /feature\/ui-optimization/);
 	assert.match(footer.render(80).join("\n"), /第 1 轮完成/);
+
+	const coloredHeader = headerFactory!(tui, {
+		fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+		bold: (text: string) => `<b>${text}</b>`,
+	}).render(96).join("\n");
+	assert.match(coloredHeader, /<success>█+/);
+	assert.match(coloredHeader, /<b><success>◆ What's new<\/success><\/b>/);
+	assert.match(coloredHeader, /› <success>\/plan<\/success>/);
+	assert.doesNotMatch(coloredHeader, /^<b><success>│.*What's new/m);
 	header.dispose?.();
 });
 
@@ -313,7 +322,7 @@ test("ugk brand footer colors stateful fields by severity", async () => {
 		});
 		const text = footer.render(140).join("\n");
 
-		assert.match(text, /<error>❌ API not configured<\/error>/);
+		assert.match(text, /<error>🤖 ❌ API not configured<\/error>/);
 		assert.doesNotMatch(text, /<success>configured<\/success>/);
 		assert.match(text, /<error>bash unavailable<\/error>/);
 		assert.match(text, /<error>subagent not loaded<\/error>/);
@@ -324,4 +333,58 @@ test("ugk brand footer colors stateful fields by severity", async () => {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 	}
+});
+
+test("ugk brand footer colors context progress by percentage", async () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand() {},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	let footerFactory: Function | undefined;
+	const contextUsage = { percent: 0, contextWindow: 1000000 };
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "mimo-v2.5-pro" },
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => [],
+			getBranch: () => [],
+		},
+		getContextUsage: () => contextUsage,
+		ui: {
+			setHeader: () => {},
+			setFooter: (factory: unknown) => {
+				footerFactory = factory as Function;
+			},
+			setTitle: () => {},
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await handlers.get("session_start")!({ reason: "startup" }, ctx);
+	const theme = {
+		fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+		bold: (text: string) => text,
+	};
+	const footer = footerFactory!({ requestRender() {} }, theme, {
+		getGitBranch: () => null,
+		getExtensionStatuses: () => new Map(),
+		onBranchChange: () => () => {},
+	});
+
+	assert.match(footer.render(140).join("\n"), /<dim>▒▒▒▒▒▒▒▒<\/dim>/);
+	contextUsage.percent = 75;
+	assert.match(footer.render(140).join("\n"), /<warning>██████<\/warning><dim>▒▒<\/dim>/);
+	contextUsage.percent = 95;
+	assert.match(footer.render(140).join("\n"), /<error>████████<\/error>/);
 });

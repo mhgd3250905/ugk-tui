@@ -8,6 +8,10 @@ export function buildUgkCliArgs(userArgs, packageRoot) {
 	return [
 		...userArgs,
 		...(hasExplicitTheme ? [] : ["--theme", themePath]),
+		"--no-extensions",
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-themes",
 		"-e",
 		extPath,
 	];

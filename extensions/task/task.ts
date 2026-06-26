@@ -962,6 +962,7 @@ async function runTaskWithRetry(
 		signal?: AbortSignal;
 		maxRetry?: number;
 		onWorkerStart?: (attempt: number, feedback: unknown) => void;
+		onWorkerStarted?: (attempt: number, feedback: unknown) => void;
 		onWorkerUpdate?: (text: string) => void;
 		onVerifyStart?: (attempt: number) => void;
 	},
@@ -993,6 +994,7 @@ async function runTaskWithRetry(
 		opts.onWorkerStart?.(attempt + 1, feedback);
 		attempts = attempt + 1;
 		const workerStartMs = Date.now();
+		opts.onWorkerStarted?.(attempt + 1, feedback);
 		workerResult = await dispatchWorker({
 			skill: loaded.skill,
 			contract: loaded.contract,
@@ -1061,6 +1063,10 @@ async function executeSubtask(
 	const runDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${request.name}-${startedAt}-${Math.random().toString(36).slice(2, 8)}`);
 	const outputDir = path.join(runDir, "output");
 	await mkdir(outputDir, { recursive: true });
+	const maxRetry = 3;
+	const title = `⏳ run_task 已启动: ${request.name}`;
+	const progress: string[] = [];
+	setTaskRunWidget(ctx, [title, "正在解析输入..."]);
 	// ponytail: resolveRuntimeInput 的错误(如 dispatcher 缺必填字段)也要纳入单 task 隔离,
 	// 否则 parallel 模式下单个 task 的解析失败会上抛,穿过 mapWithConcurrencyLimit,
 	// 让整个 run_task 工具进 catch,返回 isError + 空 results —— 其他并发 task 的进度全丢。
@@ -1069,7 +1075,43 @@ async function executeSubtask(
 	let outcome: TaskRetryOutcome;
 	try {
 		runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, request.input, true);
-		outcome = await runTaskWithRetry(loaded, runtimeInput, outputDir, cwdOf(ctx), { env: workerEnv, signal });
+		outcome = await runTaskWithRetry(loaded, runtimeInput, outputDir, cwdOf(ctx), {
+			env: workerEnv,
+			signal,
+			maxRetry,
+			onWorkerStart: (attempt) => {
+				setTaskRunWidget(ctx, [
+					title,
+					`尝试 ${attempt}/${maxRetry + 1}`,
+					"正在装载 subagent(worker)...",
+				]);
+			},
+			onWorkerStarted: (attempt) => {
+				setTaskRunWidget(ctx, [
+					title,
+					`尝试 ${attempt}/${maxRetry + 1}`,
+					"subagent(worker) 执行中...",
+				]);
+			},
+			onWorkerUpdate: (text) => {
+				const added = appendUniqueProgressLines(progress, formatProgressLines(text));
+				if (added.length === 0) return;
+				setTaskRunWidget(ctx, [
+					title,
+					"subagent(worker) 执行中...",
+					"",
+					"最近进展:",
+					...progress.slice(-5).map((line, index) => `${index + 1}. ${line}`),
+				]);
+			},
+			onVerifyStart: (attempt) => {
+				setTaskRunWidget(ctx, [
+					title,
+					`尝试 ${attempt}/${maxRetry + 1}`,
+					"verify 执行中...",
+				]);
+			},
+		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		return {
@@ -1591,6 +1633,11 @@ export function registerTask(pi: ExtensionAPI): void {
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			try {
 				const parsed = parseRunTaskParams(params);
+				setTaskRunWidget(ctx, [
+					"⏳ run_task 已启动",
+					`任务数: ${parsed.tasks.length}`,
+					"正在装载 taskbook...",
+				]);
 				const loaded = await Promise.all(parsed.tasks.map((task) => loadSubtask(cwdOf(ctx), task.name)));
 				const workerEnv = await resolveTaskWorkerEnv(ctx, loaded, getActiveTaskTools());
 				if (workerEnv === null) throw new Error("run_task 需要受保护工具授权,但未获授权。");
@@ -1624,6 +1671,8 @@ export function registerTask(pi: ExtensionAPI): void {
 					details: { mode: "single", results: [] },
 					isError: true,
 				};
+			} finally {
+				setTaskRunWidget(ctx, undefined);
 			}
 		},
 	});

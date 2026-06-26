@@ -69,22 +69,25 @@ function hasSessionMessages(ctx: { sessionManager?: { getEntries?: () => unknown
 
 function colorHeaderLine(line: string, index: number, theme: any): string {
 	const trimmed = line.trimStart();
-	if (line.includes("█")) {
+	if (line.includes("█") && !trimmed.startsWith("│")) {
 		return theme.bold(theme.fg("success", line));
 	}
+	const logoColoredLine = line.replace(/█+/g, (block) => theme.bold(theme.fg("success", block)));
 	if (/[░▒▓]/.test(line) || trimmed.startsWith("╭")) {
 		return theme.fg("dim", line);
 	}
 	if (!line.trim()) return line;
 	if (/^[┌├└]/.test(trimmed)) {
-		return line
+		return logoColoredLine
 			.replace("ugk", theme.bold(theme.fg("success", "ugk")))
 			.replace("quick actions", theme.fg("success", "quick actions"))
 			.replace("model", theme.fg("success", "model"));
 	}
 	if (trimmed.startsWith("│")) {
-		const colored = line
+		const colored = logoColoredLine
 			.replace(/(workspace|agent|stack|model)/, theme.fg("dim", "$1"))
+			.replace("◆ Tips for getting started", theme.bold(theme.fg("success", "◆ Tips for getting started")))
+			.replace("◆ What's new", theme.bold(theme.fg("success", "◆ What's new")))
 			.replace("/plan", theme.fg("success", "/plan"))
 			.replace("/implement", theme.fg("success", "/implement"))
 			.replace("/check-env", theme.fg("success", "/check-env"))
@@ -109,13 +112,30 @@ function colorStatefulText(text: string, theme: any): string {
 	}, text);
 }
 
+function classifyContextProgressTone(contextText: string): "success" | "warning" | "error" | "dim" {
+	const match = /([0-9]+(?:\.[0-9]+)?)%\//.exec(contextText);
+	if (!match) return "dim";
+	const percent = Number(match[1]);
+	if (percent >= 90) return "error";
+	if (percent >= 70) return "warning";
+	return "success";
+}
+
+function colorFooterUsageText(usage: string, theme: any): string {
+	const match = /^(.*?🧠 )([█▒]{8})( .*)$/.exec(usage);
+	if (!match) return theme.fg("dim", usage);
+	const filled = match[2].match(/^█*/)?.[0] ?? "";
+	const empty = match[2].slice(filled.length);
+	return `${theme.fg("dim", match[1])}${filled ? theme.fg(classifyContextProgressTone(match[3]), filled) : ""}${empty ? theme.fg("dim", empty) : ""}${theme.fg("dim", match[3])}`;
+}
+
 function colorFooterUsageLine(line: string, theme: any): string {
 	const separator = "  ";
 	const index = line.lastIndexOf(separator);
 	if (index === -1) return theme.fg("dim", line);
 	const usage = line.slice(0, index);
 	const modelOrState = line.slice(index + separator.length);
-	return `${theme.fg("dim", usage)}${separator}${theme.fg(classifyUgkStatusTone(modelOrState), modelOrState)}`;
+	return `${colorFooterUsageText(usage, theme)}${separator}${theme.fg(classifyUgkStatusTone(modelOrState), modelOrState)}`;
 }
 
 function colorFooterStatusLine(statuses: string[], fallback: string, theme: any): string {

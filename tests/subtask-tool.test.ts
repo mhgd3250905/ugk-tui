@@ -181,6 +181,43 @@ test("run_task single returns machine-verifiable PASS and records the run", asyn
 	}
 });
 
+test("run_task single shows startup widget before worker output", async () => {
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	const widgetCalls: Array<{ key: string; lines: string[] | undefined }> = [];
+	ctx.ui.setWidget = (key: string, lines: string[] | undefined) => {
+		widgetCalls.push({ key, lines });
+	};
+	let sawWorkerStartup = false;
+	let sawWorkerRunning = false;
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => {
+		sawWorkerStartup = widgetCalls.some((call) =>
+			call.key === "task-run-view" &&
+			(call.lines ?? []).join("\n").includes("正在装载 subagent(worker)"));
+		sawWorkerRunning = widgetCalls.some((call) =>
+			call.key === "task-run-view" &&
+			(call.lines ?? []).join("\n").includes("subagent(worker) 执行中"));
+		return workerOk("done");
+	});
+	setTaskDispatcherForTests(async () => ({ text: "hello" }));
+	try {
+		await saveFixtureTask(cwd, "startup-widget");
+		const tool = tools.find((item) => item.name === "run_task");
+
+		await tool.execute("call-1", { name: "startup-widget", input: "hello" }, undefined, undefined, ctx);
+
+		assert.ok(widgetCalls.some((call) => (call.lines ?? []).join("\n").includes("run_task 已启动")));
+		assert.equal(sawWorkerStartup, true, "worker 启动前应已有装载提示");
+		assert.equal(sawWorkerRunning, true, "worker 已开始执行时不应继续停在装载提示");
+		assert.equal(widgetCalls.at(-1)?.lines, undefined, "run_task 结束后清掉 widget");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("run_task missing taskbook returns available task names as a tool error", async () => {
 	const { pi, tools } = makePi();
 	const { cwd, ctx } = makeCtx();

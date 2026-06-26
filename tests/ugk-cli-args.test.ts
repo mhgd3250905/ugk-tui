@@ -12,6 +12,7 @@ test("buildUgkCliArgs preloads the UGK theme before loading extensions", () => {
 		"deepseek-v4-pro",
 		"--theme",
 		path.join(packageRoot, "themes", "ugk-geek.json"),
+		"--no-extensions",
 		"-e",
 		path.join(packageRoot, "extensions", "index.ts"),
 	]);
@@ -25,6 +26,7 @@ test("buildUgkCliArgs preserves an explicit user theme", () => {
 	assert.deepEqual(args, [
 		"--theme",
 		customTheme,
+		"--no-extensions",
 		"-e",
 		path.join(packageRoot, "extensions", "index.ts"),
 	]);

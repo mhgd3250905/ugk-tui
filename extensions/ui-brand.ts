@@ -124,7 +124,9 @@ function classifyContextProgressTone(contextText: string): "success" | "warning"
 function colorFooterUsageText(usage: string, theme: any): string {
 	const match = /^(.*?🧠 )([█▒]{8})( .*)$/.exec(usage);
 	if (!match) return theme.fg("dim", usage);
-	return `${theme.fg("dim", match[1])}${theme.fg(classifyContextProgressTone(match[3]), match[2])}${theme.fg("dim", match[3])}`;
+	const filled = match[2].match(/^█*/)?.[0] ?? "";
+	const empty = match[2].slice(filled.length);
+	return `${theme.fg("dim", match[1])}${filled ? theme.fg(classifyContextProgressTone(match[3]), filled) : ""}${empty ? theme.fg("dim", empty) : ""}${theme.fg("dim", match[3])}`;
 }
 
 function colorFooterUsageLine(line: string, theme: any): string {

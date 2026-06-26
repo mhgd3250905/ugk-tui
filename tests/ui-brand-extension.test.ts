@@ -381,9 +381,9 @@ test("ugk brand footer colors context progress by percentage", async () => {
 		onBranchChange: () => () => {},
 	});
 
-	assert.match(footer.render(140).join("\n"), /<success>▒▒▒▒▒▒▒▒<\/success>/);
+	assert.match(footer.render(140).join("\n"), /<dim>▒▒▒▒▒▒▒▒<\/dim>/);
 	contextUsage.percent = 75;
-	assert.match(footer.render(140).join("\n"), /<warning>██████▒▒<\/warning>/);
+	assert.match(footer.render(140).join("\n"), /<warning>██████<\/warning><dim>▒▒<\/dim>/);
 	contextUsage.percent = 95;
 	assert.match(footer.render(140).join("\n"), /<error>████████<\/error>/);
 });

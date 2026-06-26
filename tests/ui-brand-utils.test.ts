@@ -154,11 +154,32 @@ test("buildUgkFooterLines keeps useful session status and truncates to width", (
 	assert.match(lines[1], /↑127k/);
 	assert.match(lines[1], /↓24k/);
 	assert.match(lines[1], /💰 \$0\.000/);
-	assert.match(lines[1], /🧠 9\.8%\/1\.0M/);
+	assert.match(lines[1], /🧠 ■□□□□□□□ 9\.8%\/1\.0M/);
 	assert.match(lines[1], /🤖 deepseek-v4-pro/);
 	assert.match(lines[1], /deepseek-v4-pro/);
 	assert.match(lines[1], /high/);
 	assert.match(lines[2], /第 3 轮完成/);
+});
+
+test("buildUgkFooterLines renders an empty context progress bar", () => {
+	const lines = buildUgkFooterLines({
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		branch: null,
+		modelId: "mimo-v2.5-pro",
+		statuses: ["就绪"],
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			cost: 0,
+			contextPercent: 0,
+			contextWindow: 1000000,
+		},
+		width: 96,
+	});
+
+	assert.match(lines[1], /🧠 □□□□□□□□ 0\.0%\/1\.0M/);
 });
 
 test("resolveUgkDisplayModelId hides DeepSeek model when API credentials are missing", () => {

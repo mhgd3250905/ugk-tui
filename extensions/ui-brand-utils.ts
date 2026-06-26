@@ -87,6 +87,13 @@ function formatTokens(count: number): string {
 	return `${(count / 1000000).toFixed(1)}M`;
 }
 
+function formatContextProgress(percent: number | null): string {
+	const cells = 8;
+	const clamped = Math.max(0, Math.min(100, percent ?? 0));
+	const filled = Math.round((clamped / 100) * cells);
+	return `${"■".repeat(filled)}${"□".repeat(cells - filled)}`;
+}
+
 function formatCwd(cwd: string): string {
 	const home = process.env.HOME || process.env.USERPROFILE;
 	if (home && cwd.startsWith(home)) {
@@ -246,7 +253,7 @@ export function buildUgkFooterLines(options: UgkFooterOptions): string[] {
 		options.usage.cacheRead ? `R ${formatTokens(options.usage.cacheRead)}` : "",
 		options.usage.cacheWrite ? `W ${formatTokens(options.usage.cacheWrite)}` : "",
 		`💰 $${options.usage.cost.toFixed(3)}`,
-		`🧠 ${context}`,
+		`🧠 ${formatContextProgress(options.usage.contextPercent)} ${context}`,
 	].filter(Boolean);
 	const model = options.thinkingLevel ? `🤖 ${options.modelId} · ${options.thinkingLevel}` : `🤖 ${options.modelId}`;
 

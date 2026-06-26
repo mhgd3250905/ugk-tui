@@ -1,3 +1,6 @@
+// task worker —— 单个 task 单元(单位 1)的执行体。
+// 并行是 run_task({tasks:[...]}) 工具层的事(task.ts 文件头红线②),这里只负责一次执行。
+// 不要在 worker 内引入"感知其他 worker / 跨 worker 协调"的逻辑 —— 那违反 task 原子单元语义。
 import { peekWorkerLifecycleFactory } from "../shared/worker-lifecycle.ts";
 import { discoverAgents } from "../subagent-agents.ts";
 import { getFinalOutput, isFailedResult, type SingleResult, type UsageStats } from "../subagent-runtime.ts";

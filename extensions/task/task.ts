@@ -1,3 +1,24 @@
+/**
+ * ⚠️ task 模块设计红线 —— 改这里前必读(改 description/并行逻辑尤甚)。
+ * 权威说明: docs/design/2026-06-26-task-atomic-unit-and-parallel-primitive.md
+ *
+ * 1. task = 原子单元。用户验收过的 task 对调用方是不可分割的"单位 1"。
+ *    内部做 1 步还是 100 步对调用方不可见。调用方不拆 task、不替它做拆分决策。
+ *
+ * 2. 并行编排是工具层能力,不是用户 skill 的责任。run_task 与 subagent 平级:
+ *    - single:  run_task({name, input})            ↔ subagent({agent, task})
+ *    - parallel:run_task({tasks:[{name,input}]})   ↔ subagent({tasks:[{agent,task}]})
+ *    想并行 N 个 task(N≤8),只有 run_task({tasks:[...]}) 一条正路。
+ *
+ * 3. 三条禁止(违反即 bug):
+ *    ① 不把"教 agent 并行"下放给用户 skill.md —— 换个偏科 task 就失效。
+ *    ② 不让 agent 绕 subagent 做并行 task —— subagent worker 会丢受保护工具授权
+ *       (buildSubagentChildEnv, subagent.ts:78-79),必授权失败。
+ *    ③ 不让 agent 用 bash/python 中转构造 JSON 喂 run_task —— 工具参数由 LLM 直接构造。
+ *
+ * 4. 发现性铁律:run_task 的 parallel 模式必须和 subagent 同等可见(写在 description
+ *    首行,不是藏在参数注释里)。发现性退化 = agent 绕路 = bug。
+ */
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
@@ -44,6 +65,8 @@ const TASK_PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnair
 const TASK_NORMAL_TOOLS = ["read", "bash", "edit", "write", "subagent"];
 const PREVIEW_TEXT_EXTENSIONS = new Set([".md", ".txt", ".json", ".csv", ".tsv", ".html", ".htm"]);
 const MAX_ARTIFACT_PREVIEW_CHARS = 12000;
+// 并发上限:并行 task 是工具层原语,见文件头红线①②③④ + docs/design/2026-06-26-task-atomic-unit-and-parallel-primitive.md §2.2
+// 改这两个常数前先确认没有破坏 run_task({tasks:[...]}) 与 subagent({tasks:[...]}) 的对偶语义。
 const SUBTASK_MAX = 8;
 const SUBTASK_CONCURRENCY = 4;
 

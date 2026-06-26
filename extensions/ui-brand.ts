@@ -69,22 +69,25 @@ function hasSessionMessages(ctx: { sessionManager?: { getEntries?: () => unknown
 
 function colorHeaderLine(line: string, index: number, theme: any): string {
 	const trimmed = line.trimStart();
-	if (line.includes("█")) {
+	if (line.includes("█") && !trimmed.startsWith("│")) {
 		return theme.bold(theme.fg("success", line));
 	}
+	const logoColoredLine = line.replace(/█+/g, (block) => theme.bold(theme.fg("success", block)));
 	if (/[░▒▓]/.test(line) || trimmed.startsWith("╭")) {
 		return theme.fg("dim", line);
 	}
 	if (!line.trim()) return line;
 	if (/^[┌├└]/.test(trimmed)) {
-		return line
+		return logoColoredLine
 			.replace("ugk", theme.bold(theme.fg("success", "ugk")))
 			.replace("quick actions", theme.fg("success", "quick actions"))
 			.replace("model", theme.fg("success", "model"));
 	}
 	if (trimmed.startsWith("│")) {
-		const colored = line
+		const colored = logoColoredLine
 			.replace(/(workspace|agent|stack|model)/, theme.fg("dim", "$1"))
+			.replace("Tips for getting started", theme.fg("success", "Tips for getting started"))
+			.replace("What's new", theme.fg("success", "What's new"))
 			.replace("/plan", theme.fg("success", "/plan"))
 			.replace("/implement", theme.fg("success", "/implement"))
 			.replace("/check-env", theme.fg("success", "/check-env"))

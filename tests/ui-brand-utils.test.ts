@@ -22,22 +22,25 @@ test("buildUgkHeaderLines brands startup without pi copy", () => {
 	const text = lines.join("\n");
 	assert.match(text, /█/);
 	assert.match(text, /┌─ ugk v1\.0\.0/);
-	assert.match(text, /│ workspace\s+ugk-tui/);
-	assert.match(text, /│ agent\s+terminal coding agent/);
-	assert.match(text, /├─ quick actions/);
-	assert.match(text, /│ model\s+deepseek-v4-pro\s+│/);
+	assert.match(text, /Welcome back/);
+	assert.match(text, /Tips for getting started/);
+	assert.match(text, /What's new/);
+	assert.match(text, /workspace\s+ugk-tui/);
+	assert.match(text, /model\s+deepseek-v4-pro/);
+	assert.match(text, /\/plan\s+draft before changing files/);
+	assert.doesNotMatch(text, /├─ quick actions/);
 	assert.doesNotMatch(text, /\n  deepseek-v4-pro/);
 	assert.match(text, /ugk v1\.0\.0/);
 	assert.match(text, /deepseek-v4-pro/);
 	assert.match(text, /\/plan/);
 	assert.doesNotMatch(text, /\bpi v/i);
 	for (const line of lines) {
-		assert.ok(line.length <= 96, `line exceeded width: ${line}`);
+		assert.ok(visibleWidth(line) <= 96, `line exceeded width: ${line}`);
 	}
 
 	const panelLines = lines.filter((line) => /^[┌│├└]/.test(line));
 	const panelWidths = new Set(panelLines.map((line) => visibleWidth(line)));
-	assert.deepEqual([...panelWidths], [64]);
+	assert.deepEqual([...panelWidths], [96]);
 });
 
 test("buildUgkHeaderLines keeps panel borders aligned for wide workspace names", () => {
@@ -50,9 +53,20 @@ test("buildUgkHeaderLines keeps panel borders aligned for wide workspace names",
 
 	const panelLines = lines.filter((line) => /^[┌│├└]/.test(line));
 	for (const line of panelLines) {
-		assert.equal(visibleWidth(line), 64, line);
+		assert.equal(visibleWidth(line), 96, line);
 	}
-	assert.match(panelLines.join("\n"), /│ workspace\s+TUI专区\s+│/);
+	assert.match(panelLines.join("\n"), /workspace\s+TUI专区/);
+});
+
+test("buildUgkHeaderLines does not leak ANSI resets when truncating cells", () => {
+	const text = buildUgkHeaderLines({
+		version: "1.0.0",
+		cwdName: "codex-code-audit-main-20260626",
+		modelId: "deepseek-v4-pro",
+		width: 80,
+	}).join("\n");
+
+	assert.doesNotMatch(text, /\x1b\[/);
 });
 
 test("buildUgkLogoLines renders a compact block-character logo", () => {
@@ -75,8 +89,9 @@ test("buildUgkStartupScreenLines fills the terminal viewport with character effe
 	});
 
 	assert.equal(lines.length, 19);
-	assert.match(lines.join("\n"), /UGK TERMINAL/);
-	assert.match(lines.join("\n"), /[░▒▓]/);
+	assert.match(lines.join("\n"), /Welcome back/);
+	assert.match(lines.join("\n"), /Tips for getting started/);
+	assert.match(lines.join("\n"), /What's new/);
 	assert.match(lines.join("\n"), /█/);
 	assert.match(lines.join("\n"), /\/plan/);
 	for (const line of lines) {

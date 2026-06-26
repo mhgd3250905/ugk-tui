@@ -90,6 +90,14 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	assert.match(header.render(80).join("\n"), PACKAGE_VERSION_PATTERN);
 	assert.match(footer.render(80).join("\n"), /feature\/ui-optimization/);
 	assert.match(footer.render(80).join("\n"), /第 1 轮完成/);
+
+	const coloredHeader = headerFactory!(tui, {
+		fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+		bold: (text: string) => `<b>${text}</b>`,
+	}).render(96).join("\n");
+	assert.match(coloredHeader, /<success>█+/);
+	assert.match(coloredHeader, /<success>What's new<\/success>/);
+	assert.doesNotMatch(coloredHeader, /^<b><success>│.*What's new/m);
 	header.dispose?.();
 });
 

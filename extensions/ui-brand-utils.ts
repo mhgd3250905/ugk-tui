@@ -72,7 +72,7 @@ const UGK_BLOCK_LOGO = [
 
 function hardTruncate(text: string, width: number): string {
 	if (width <= 0) return "";
-	return truncateToWidth(text, width, "");
+	return truncateToWidth(text, width, "").replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 function padEndVisible(text: string, width: number): string {
@@ -100,31 +100,19 @@ function panelWidth(width: number): number {
 	return Math.min(width, 64);
 }
 
-function centerLine(text: string, width: number): string {
-	const visible = text.length;
-	const leftPad = Math.max(0, Math.floor((width - visible) / 2));
-	return hardTruncate(`${" ".repeat(leftPad)}${text}`, width);
+function welcomePanelWidth(width: number): number {
+	if (width <= 0) return 0;
+	return Math.min(width, 120);
 }
 
-function decorativeRule(width: number, label: string): string {
-	const ruleWidth = panelWidth(width);
-	if (ruleWidth <= 0) return "";
-	const prefix = `╭─ ${label} `;
-	const suffix = "─╮";
-	const fill = "─".repeat(Math.max(0, ruleWidth - prefix.length - suffix.length));
-	return centerLine(`${prefix}${fill}${suffix}`, width);
-}
-
-function decorativeScanline(width: number): string {
-	const ruleWidth = panelWidth(width);
-	if (ruleWidth <= 0) return "";
-	const pattern = "░▒▓";
-	const repeated = pattern.repeat(Math.ceil(ruleWidth / pattern.length)).slice(0, ruleWidth);
-	return centerLine(repeated, width);
-}
-
-function centerBlock(lines: string[], width: number): string[] {
-	return lines.map((line) => centerLine(line, width));
+function fitVisible(text: string, width: number, align: "left" | "center" = "left"): string {
+	const clipped = hardTruncate(text, width);
+	const padding = Math.max(0, width - visibleWidth(clipped));
+	if (align === "center") {
+		const left = Math.floor(padding / 2);
+		return `${" ".repeat(left)}${clipped}${" ".repeat(padding - left)}`;
+	}
+	return `${clipped}${" ".repeat(padding)}`;
 }
 
 function panelRule(left: string, label: string, right: string, width: number): string {
@@ -151,6 +139,24 @@ function panelRow(label: string, value: string, width: number): string {
 	return hardTruncate(`│ ${padEndVisible(body, bodyWidth)} │`, width);
 }
 
+function welcomePanelRule(label: string, width: number): string {
+	const rowWidth = welcomePanelWidth(width);
+	if (rowWidth <= 0) return "";
+	const prefix = `┌─ ${label} `;
+	return `${prefix}${"─".repeat(Math.max(0, rowWidth - visibleWidth(prefix) - 1))}┐`;
+}
+
+function welcomePanelEdge(width: number): string {
+	const rowWidth = welcomePanelWidth(width);
+	if (rowWidth <= 0) return "";
+	return `└${"─".repeat(Math.max(0, rowWidth - 2))}┘`;
+}
+
+function welcomePanelRow(left: string, right: string, rowWidth: number, leftWidth: number): string {
+	const rightWidth = Math.max(0, rowWidth - leftWidth - 7);
+	return `│ ${fitVisible(left, leftWidth)} │ ${fitVisible(right, rightWidth)} │`;
+}
+
 export function buildUgkLogoLines(width: number): string[] {
 	return UGK_BLOCK_LOGO.map((line) => hardTruncate(line, width));
 }
@@ -169,30 +175,57 @@ function buildUgkInfoPanelLines(options: UgkHeaderOptions): string[] {
 	];
 }
 
-export function buildUgkHeaderLines(options: UgkHeaderOptions): string[] {
-	return [
-		...buildUgkLogoLines(options.width),
+function buildUgkWelcomePanelLines(options: UgkHeaderOptions): string[] {
+	const rowWidth = welcomePanelWidth(options.width);
+	if (rowWidth < 72) {
+		return [
+			...buildUgkLogoLines(options.width),
+			"",
+			...buildUgkInfoPanelLines(options),
+		];
+	}
+
+	const model = options.modelId || "model not selected";
+	const leftWidth = Math.max(28, Math.floor((rowWidth - 7) * 0.45));
+	const leftRows = [
+		"Welcome back.",
 		"",
-		...buildUgkInfoPanelLines(options),
+		...UGK_BLOCK_LOGO.map((line) => fitVisible(line, leftWidth, "center")),
+		"",
+		`workspace  ${options.cwdName}`,
+		`model      ${model}`,
+	];
+	const rightRows = [
+		"Tips for getting started",
+		"/plan      draft before changing files",
+		"/implement run the guided pipeline",
+		"/check-env verify local tools",
+		"",
+		"What's new",
+		"task runs show worker progress",
+		"footer shows usage and ready state",
+		"@agent delegates focused work",
+	];
+
+	const rowCount = Math.max(leftRows.length, rightRows.length);
+	return [
+		welcomePanelRule(`ugk v${options.version}`, options.width),
+		...Array.from({ length: rowCount }, (_, i) => welcomePanelRow(leftRows[i] ?? "", rightRows[i] ?? "", rowWidth, leftWidth)),
+		welcomePanelEdge(options.width),
 	];
 }
 
+export function buildUgkHeaderLines(options: UgkHeaderOptions): string[] {
+	return buildUgkWelcomePanelLines(options);
+}
+
 export function buildUgkStartupScreenLines(options: UgkStartupScreenOptions): string[] {
-	if (options.width < 48 || options.rows < 18) {
+	if (options.width < 72 || options.rows < 16) {
 		return buildUgkHeaderLines(options);
 	}
 
 	const targetRows = Math.max(12, options.rows - 5);
-	const content = [
-		decorativeRule(options.width, "UGK TERMINAL"),
-		decorativeScanline(options.width),
-		"",
-		...centerBlock(buildUgkLogoLines(options.width), options.width),
-		"",
-		...centerBlock(buildUgkInfoPanelLines(options), options.width),
-		"",
-		centerLine("ready  //  local tools guarded  //  cdp ask mode", options.width),
-	];
+	const content = buildUgkHeaderLines(options);
 
 	const missing = Math.max(0, targetRows - content.length);
 	const topPadding = Math.floor(missing / 2);

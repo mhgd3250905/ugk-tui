@@ -44,10 +44,14 @@ function tabLog(line: string): void {
 export interface CdpTabLifecycleDeps {
 	// ponytail: 可选 DI,供测试注入 fake fetch。生产路径不传,走全局 fetch(与 client.ts 一致)。
 	fetch?: typeof fetch;
+	// ponytail: 可选日志注入(测试默认禁用,避免污染生产 cdp-tab.log)。
+	log?: (line: string) => void;
 }
 
 export function makeCdpTabLifecycle(port: number, deps: CdpTabLifecycleDeps = {}): WorkerLifecycle {
 	const client = () => createChromeCdpClient({ port, fetch: deps.fetch });
+	// 测试传 deps.log=()=>{} 禁用日志;生产不传 → tabLog(写文件,默认开)。
+	const log = deps.log ?? tabLog;
 	let tabId: string | undefined;
 	return {
 		async beforeSpawn(env) {
@@ -56,12 +60,12 @@ export function makeCdpTabLifecycle(port: number, deps: CdpTabLifecycleDeps = {}
 				const tab = await createChromeTab(client(), "about:blank");
 				tabId = tab.id;
 				env.UGK_CDP_TAB_ID = tabId;
-				tabLog(`OPEN  port=${port} tab=${tabId} url=about:blank`);
+				log(`OPEN  port=${port} tab=${tabId} url=about:blank`);
 			} catch (error) {
 				// ponytail: 把含糊的底层错(fetch failed / ECONNREFUSED)翻译成可操作的提示。
 				// Chrome 没起是最高频原因 —— 直接告诉用户 /cdp launch。
 				const msg = error instanceof Error ? error.message : String(error);
-				tabLog(`ERROR port=${port} stage=open msg=${msg}`);
+				log(`ERROR port=${port} stage=open msg=${msg}`);
 				const hint = /fetch failed|ECONNREFUSED|Failed to fetch|NetworkError/i.test(msg)
 					? `Chrome CDP 未连接(port ${port})。请先运行 /cdp launch 启动带调试端口的 Chrome。`
 					: `CDP 开 tab 失败(port ${port}): ${msg}`;
@@ -75,11 +79,11 @@ export function makeCdpTabLifecycle(port: number, deps: CdpTabLifecycleDeps = {}
 			tabId = undefined;
 			try {
 				await closeChromeTab(client(), closingTabId);
-				tabLog(`CLOSE port=${port} tab=${closingTabId} ok`);
+				log(`CLOSE port=${port} tab=${closingTabId} ok`);
 			} catch (error) {
 				// ponytail: close 是 best-effort。失败说明 tab 已没了或 Chrome 重启 —— 不阻塞 worker 回收,但记下来。
 				const msg = error instanceof Error ? error.message : String(error);
-				tabLog(`WARN  port=${port} tab=${closingTabId} close-failed msg=${msg}`);
+				log(`WARN  port=${port} tab=${closingTabId} close-failed msg=${msg}`);
 			}
 		},
 	};

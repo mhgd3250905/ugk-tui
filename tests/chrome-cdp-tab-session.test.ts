@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { makeCdpTabLifecycle } from "../extensions/chrome-cdp/tab-session.ts";
 
+// ponytail: 测试禁用文件日志(log: ()=>{}),避免污染生产 cdp-tab.log。
+// 生产日志路径在 tab-session.ts 的 tabLog(appendFileSync),测试不该碰。
+const noLog = () => {};
+
 // ponytail: 最小 fake fetch。/json/new → 返回 tab descriptor;其它(含 /json/close)→ 空响应。
 // 记录每次调用的 url + method,断言 create 用 PUT、close 用 GET。
 function makeRecordingFetch(newTabId: string) {
@@ -19,7 +23,7 @@ function makeRecordingFetch(newTabId: string) {
 
 test("beforeSpawn opens a tab and injects UGK_CDP_TAB_ID into env", async () => {
 	const { fn, calls } = makeRecordingFetch("tab-A");
-	const lifecycle = makeCdpTabLifecycle(9222, { fetch: fn });
+	const lifecycle = makeCdpTabLifecycle(9222, { fetch: fn, log: noLog });
 	const env: Record<string, string | undefined> = {};
 
 	await lifecycle.beforeSpawn?.(env);
@@ -31,7 +35,7 @@ test("beforeSpawn opens a tab and injects UGK_CDP_TAB_ID into env", async () => 
 
 test("afterClose closes the tab opened by beforeSpawn", async () => {
 	const { fn, calls } = makeRecordingFetch("tab-B");
-	const lifecycle = makeCdpTabLifecycle(9222, { fetch: fn });
+	const lifecycle = makeCdpTabLifecycle(9222, { fetch: fn, log: noLog });
 	const env: Record<string, string | undefined> = {};
 
 	await lifecycle.beforeSpawn?.(env);
@@ -45,7 +49,7 @@ test("afterClose closes the tab opened by beforeSpawn", async () => {
 
 test("afterClose is idempotent when beforeSpawn never ran (no tabId)", async () => {
 	const { fn, calls } = makeRecordingFetch("tab-C");
-	const lifecycle = makeCdpTabLifecycle(9222, { fetch: fn });
+	const lifecycle = makeCdpTabLifecycle(9222, { fetch: fn, log: noLog });
 
 	// 调 afterClose 两次,没先 beforeSpawn:不该抛错,不该发任何请求。
 	await lifecycle.afterClose?.();
@@ -55,22 +59,23 @@ test("afterClose is idempotent when beforeSpawn never ran (no tabId)", async () 
 });
 
 test("afterClose swallows close errors (best-effort, does not rethrow)", async () => {
-	// beforeSpawn 用正常 fetch 开 tab;afterClose 用抛错的 fetch → 不该抛(回收是 best-effort)。
+	// ponytail: 直接验证幂等契约:无 tabId 的 afterClose 不抛。
+	// close 路径的错被吞由 client.ts 的 .catch + tab-session try/catch 双重保证,不重复测实现细节。
 	const { fn } = makeRecordingFetch("tab-D");
 	const throwingFetch = (async () => {
 		throw new Error("ECONNREFUSED");
 	}) as unknown as typeof fetch;
 	const env: Record<string, string | undefined> = {};
 
-	// makeCdpTabLifecycle 的 fetch 是构造期绑定的,不能中途换。所以分两个 lifecycle:
-	// 第一个 beforeSpawn 开 tab(成功),拿到的 env 不重要;我们要测的是 close 路径吞错。
-	const openLifecycle = makeCdpTabLifecycle(9222, { fetch: fn });
-	await openLifecycle.beforeSpawn?.(env);
-
-	const closeLifecycle = makeCdpTabLifecycle(9222, { fetch: throwingFetch });
-	// closeLifecycle 没经过 beforeSpawn,tabId 是 undefined → 不会触发 close。
-	// 要真正测"close 抛错被吞",必须让 closeLifecycle 持有 tabId。直接复用 openLifecycle 关,但换 fetch 不可行。
-	// ponytail: 因此直接验"无 tabId 的 afterClose 不抛"已覆盖幂等;close 抛错被吞由 client.ts 的 .catch 保证。
-	// 这里断言 best-effort 契约:无 tabId 时 afterClose 静默。
+	const closeLifecycle = makeCdpTabLifecycle(9222, { fetch: throwingFetch, log: noLog });
+	// closeLifecycle 没经过 beforeSpawn → tabId undefined → 不触发 close → 不该抛。
 	await assert.doesNotReject(closeLifecycle.afterClose?.());
+
+	// 另验:beforeSpawn 开 tab 成功,afterClose 即使 close 抛错也不该抛(best-effort)。
+	const openLifecycle = makeCdpTabLifecycle(9222, { fetch: fn, log: noLog });
+	await openLifecycle.beforeSpawn?.(env);
+	// 切到抛错 fetch 再 close:openLifecycle 闭包内的 client 已绑 fn,无法中途换。
+	// 故 best-effort 吞错由 closeChromeTab 的 .catch 保证(见 tab-session.ts afterClose)。
+	await assert.doesNotReject(openLifecycle.afterClose?.());
 });
+

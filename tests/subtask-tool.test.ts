@@ -9,6 +9,7 @@ import { buildTaskbookPrompt } from "../extensions/task/task-registry.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
 import { setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
+import { resetTaskProtectedToolGrantsForTests } from "../extensions/task/task.ts";
 
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 const testAgentDir = mkdtempSync(path.join(os.tmpdir(), "ugk-subtask-tool-agent-"));
@@ -280,6 +281,52 @@ test("run_task parallel confirms protected tools once for the batch", async () =
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// ponytail: 会话级授权缓存。报告场景:main 反复 run_task 同一个 cdp taskbook 下视频,
+// 每次都弹"允许受保护工具"打断用户。修复:本会话授权过该 taskbook 后不再弹。
+test("run_task remembers protected-tool grant across calls in the same session", async () => {
+	const { pi, tools } = makePi(["read", "bash", "chrome_cdp"]);
+	const { cwd, ctx } = makeCtx();
+	let confirmCount = 0;
+	ctx.ui.confirm = () => {
+		confirmCount += 1;
+		return true;
+	};
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => workerOk("done"));
+	setTaskDispatcherForTests(async (_ctx, _skill, _contract, rawInput) => ({ text: rawInput }));
+	resetTaskProtectedToolGrantsForTests();
+	try {
+		await saveTaskbook("project", cwd, "cdp-task", {
+			description: "cdp task",
+			spec,
+			skill: "Use chrome_cdp.",
+			verify: "process.exit(0);\n",
+			contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+		});
+		const tool = tools.find((item) => item.name === "run_task");
+
+		// 第一次:弹 confirm,授权入缓存
+		await tool.execute("call-1", { name: "cdp-task", input: "one" }, undefined, undefined, ctx);
+		assert.equal(confirmCount, 1, "首次调用弹一次 confirm");
+		// 第二次:同 taskbook,本会话已授权 → 不再弹
+		await tool.execute("call-2", { name: "cdp-task", input: "two" }, undefined, undefined, ctx);
+		assert.equal(confirmCount, 1, "同 taskbook 第二次调用不该再弹 confirm");
+		// 第三次:parallel 也复用缓存,不弹
+		await tool.execute("call-3", {
+			tasks: [
+				{ name: "cdp-task", input: "a" },
+				{ name: "cdp-task", input: "b" },
+			],
+		}, undefined, undefined, ctx);
+		assert.equal(confirmCount, 1, "parallel 复用缓存,不弹 confirm");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		resetTaskProtectedToolGrantsForTests();
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });

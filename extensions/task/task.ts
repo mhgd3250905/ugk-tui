@@ -90,6 +90,15 @@ type TaskProgressDetails = {
 let activeTaskRun: ActiveTaskRun | undefined;
 let lastTaskRunReview: LastTaskRunReview | undefined;
 let taskRunPromiseForTests: Promise<void> = Promise.resolve();
+// ponytail: 会话级受保护工具授权缓存。用户在本次会话授权过某 taskbook 用受保护工具
+// (chrome_cdp/mcp),后续 run_task / /task run 不再弹 confirm。报告场景:下 40 个视频时
+// main 反复 run_task bilibili-downloader,每次都弹"允许受保护工具"打断用户。
+// 粒度=taskbook 名:授权是"这个 taskbook 本会话可信",不是"这次调用"。
+const protectedToolGrants = new Set<string>();
+
+export function resetTaskProtectedToolGrantsForTests(): void {
+	protectedToolGrants.clear();
+}
 
 export function waitForTaskRunForTests(): Promise<void> {
 	return taskRunPromiseForTests;
@@ -496,16 +505,23 @@ export async function resolveTaskWorkerEnv(
 		...protectedTools.mcpTools,
 	];
 	if (names.length === 0) return {};
-	const taskbookNames = (Array.isArray(loaded) ? loaded : [loaded]).map((item) => item.taskbook.name).join(", ");
-	const allowed = await ctx.ui?.confirm?.(
-		"允许本次 task 使用受保护工具?",
-		[
-			`taskbook "${taskbookNames}" 声明会使用: ${names.join(", ")}`,
-			"",
-			"授权只传给本次 worker 子进程,不改变 /cdp 或 /mcp 的全局模式。",
-		].join("\n"),
-	);
-	if (!allowed) return null;
+	const taskbooks = Array.isArray(loaded) ? loaded : [loaded];
+	const taskbookNames = taskbooks.map((item) => item.taskbook.name).join(", ");
+	// ponytail: 本会话已授权过全部这些 taskbook → 直接复用,不再弹 confirm。
+	// 批次里只要有任一 taskbook 没授权过,仍弹一次(确认覆盖整个批次),通过后全部入缓存。
+	const allGranted = taskbooks.every((item) => protectedToolGrants.has(item.taskbook.name));
+	if (!allGranted) {
+		const allowed = await ctx.ui?.confirm?.(
+			"允许本次 task 使用受保护工具?",
+			[
+				`taskbook "${taskbookNames}" 声明会使用: ${names.join(", ")}`,
+				"",
+				"授权只传给 worker 子进程,不改变 /cdp 或 /mcp 的全局模式。本会话内同一 taskbook 不再询问。",
+			].join("\n"),
+		);
+		if (!allowed) return null;
+		for (const item of taskbooks) protectedToolGrants.add(item.taskbook.name);
+	}
 	return {
 		...(protectedTools.chromeCdp ? { UGK_TASK_ALLOW_CHROME_CDP: "1" } : {}),
 		...(protectedTools.chromeCdp && process.env.UGK_CDP_PORT ? { UGK_CDP_PORT: process.env.UGK_CDP_PORT } : {}),

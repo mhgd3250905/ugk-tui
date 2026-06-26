@@ -189,11 +189,15 @@ test("run_task single shows startup widget before worker output", async () => {
 		widgetCalls.push({ key, lines });
 	};
 	let sawWorkerStartup = false;
+	let sawWorkerRunning = false;
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async () => {
 		sawWorkerStartup = widgetCalls.some((call) =>
 			call.key === "task-run-view" &&
 			(call.lines ?? []).join("\n").includes("正在装载 subagent(worker)"));
+		sawWorkerRunning = widgetCalls.some((call) =>
+			call.key === "task-run-view" &&
+			(call.lines ?? []).join("\n").includes("subagent(worker) 执行中"));
 		return workerOk("done");
 	});
 	setTaskDispatcherForTests(async () => ({ text: "hello" }));
@@ -205,6 +209,7 @@ test("run_task single shows startup widget before worker output", async () => {
 
 		assert.ok(widgetCalls.some((call) => (call.lines ?? []).join("\n").includes("run_task 已启动")));
 		assert.equal(sawWorkerStartup, true, "worker 启动前应已有装载提示");
+		assert.equal(sawWorkerRunning, true, "worker 已开始执行时不应继续停在装载提示");
 		assert.equal(widgetCalls.at(-1)?.lines, undefined, "run_task 结束后清掉 widget");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);

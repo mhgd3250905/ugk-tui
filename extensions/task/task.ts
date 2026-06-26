@@ -939,6 +939,7 @@ async function runTaskWithRetry(
 		signal?: AbortSignal;
 		maxRetry?: number;
 		onWorkerStart?: (attempt: number, feedback: unknown) => void;
+		onWorkerStarted?: (attempt: number, feedback: unknown) => void;
 		onWorkerUpdate?: (text: string) => void;
 		onVerifyStart?: (attempt: number) => void;
 	},
@@ -970,6 +971,7 @@ async function runTaskWithRetry(
 		opts.onWorkerStart?.(attempt + 1, feedback);
 		attempts = attempt + 1;
 		const workerStartMs = Date.now();
+		opts.onWorkerStarted?.(attempt + 1, feedback);
 		workerResult = await dispatchWorker({
 			skill: loaded.skill,
 			contract: loaded.contract,
@@ -1059,6 +1061,13 @@ async function executeSubtask(
 					title,
 					`尝试 ${attempt}/${maxRetry + 1}`,
 					"正在装载 subagent(worker)...",
+				]);
+			},
+			onWorkerStarted: (attempt) => {
+				setTaskRunWidget(ctx, [
+					title,
+					`尝试 ${attempt}/${maxRetry + 1}`,
+					"subagent(worker) 执行中...",
 				]);
 			},
 			onWorkerUpdate: (text) => {

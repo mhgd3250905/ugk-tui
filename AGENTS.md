@@ -66,7 +66,7 @@
 ### ugk 品牌 UI
 
 - `/ugk-ui on|off|status` 可运行中切换
-- 默认低刺激荧光绿主题
+- 默认低刺激荧光绿主题;另有 16 个社区主题(atom/catppuccin/dracula/gruvbox/nord/solarized)
 
 ### slash 命令
 

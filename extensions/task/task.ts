@@ -1737,15 +1737,27 @@ export function registerTask(pi: ExtensionAPI): void {
 					? await ctx.ui.input("你觉得刚刚的运行结果有什么问题吗?", "")
 					: "";
 				if (userObservation === undefined) return;
-				setTaskRunWidget(ctx, [
+				// ponytail: 复盘时把 reviewer 的思考过程流式刷到 widget,复用 worker 的
+				// formatProgressLines/appendUniqueProgressLines,避免干等静态"分析中"文案。
+				const reviewProgress: string[] = [];
+				const refreshReviewWidget = () => setTaskRunWidget(ctx, [
 					`📋 正在复盘 taskbook "${lastTaskRunReview.taskbookName}"...`,
-					"reviewer 分析中,请稍候",
+					...(reviewProgress.length > 0 ? reviewProgress : ["reviewer 分析中..."]),
 				]);
+				refreshReviewWidget();
 				try {
 					const result = await dispatchTaskRunReviewer({
 						runContext: lastTaskRunReview.content,
 						userObservation,
-					}, { cwd: cwdOf(ctx) });
+					}, {
+						cwd: cwdOf(ctx),
+						onUpdate: (partial) => {
+							const text = partial.content?.[0]?.text;
+							if (typeof text !== "string" || !text.trim()) return;
+							const added = appendUniqueProgressLines(reviewProgress, formatProgressLines(text));
+							if (added.length > 0) refreshReviewWidget();
+						},
+					});
 					sendTaskMessage(pi, ctx, result.summary, result.ok ? "info" : "warning");
 				} finally {
 					setTaskRunWidget(ctx, undefined);

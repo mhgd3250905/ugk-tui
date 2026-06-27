@@ -1,6 +1,6 @@
 import { discoverAgents } from "../subagent-agents.ts";
 import { getFinalOutput, isFailedResult, type SingleResult } from "../subagent-runtime.ts";
-import { runSingleAgent } from "../subagent.ts";
+import { runSingleAgent, type OnUpdateCallback } from "../subagent.ts";
 
 export interface TaskRunReviewerInput {
 	runContext: string;
@@ -40,7 +40,7 @@ export function buildTaskRunReviewerPrompt(input: TaskRunReviewerInput): string 
 
 export async function dispatchTaskRunReviewer(
 	input: TaskRunReviewerInput,
-	opts: { cwd: string; signal?: AbortSignal },
+	opts: { cwd: string; signal?: AbortSignal; onUpdate?: OnUpdateCallback },
 ): Promise<TaskRunReviewerResult> {
 	const discovery = discoverAgents(opts.cwd, "both");
 	const runner = reviewerRunnerForTests ?? runSingleAgent;
@@ -52,7 +52,7 @@ export async function dispatchTaskRunReviewer(
 		opts.cwd,
 		undefined,
 		opts.signal,
-		undefined,
+		opts.onUpdate,
 		(results) => ({
 			mode: "single",
 			agentScope: "both",

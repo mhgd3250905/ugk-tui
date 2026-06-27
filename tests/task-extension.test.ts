@@ -1604,12 +1604,17 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
 		} as any;
 	});
-	setTaskRunReviewerRunnerForTests(async (_defaultCwd, _agents, agentName, task) => {
-		reviewerPrompt = task;
+	setTaskRunReviewerRunnerForTests(async (...args: any[]) => {
+		reviewerPrompt = args[3];
+		// ponytail: 模拟 reviewer 流式吐思考过程,验证复盘点 onUpdate 透传 + widget 流式刷新
+		args[7]?.({
+			content: [{ type: "text", text: "正在分析 worker 的执行路径..." }],
+			details: { mode: "single", agentScope: "both", projectAgentsDir: null, results: [] },
+		});
 		return {
-			agent: agentName,
+			agent: args[2],
 			agentSource: "user",
-			task,
+			task: args[3],
 			exitCode: 0,
 			messages: [{ role: "assistant", content: [{ type: "text", text: "复盘结论：worker 一开始没有按 CDP 步骤执行。" }] }],
 			stderr: "",
@@ -1661,6 +1666,8 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 
 		assert.ok(selections.at(-1)?.options.includes("复盘上次运行"));
 		assert.ok(widgetCalls.some((call) => (call.lines?.join("\n") ?? "").includes("正在复盘")));
+		// ponytail: 验证 reviewer 思考过程流式刷到了 widget(不再干等静态文案)
+		assert.ok(widgetCalls.some((call) => (call.lines?.join("\n") ?? "").includes("正在分析 worker 的执行路径")));
 		assert.equal(userMessages.length, 0);
 		assert.match(reviewerPrompt, /TASK RUN REVIEW/);
 		assert.match(reviewerPrompt, /runner-progress/);

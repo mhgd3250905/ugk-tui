@@ -69,7 +69,7 @@ export function getPiInvocation(args: string[]): { command: string; args: string
 	return { command: bin, args, useShell: process.platform === "win32" };
 }
 
-type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
+export type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
 export function buildSubagentChildEnv(
 	extraEnv: Record<string, string | undefined> = {},

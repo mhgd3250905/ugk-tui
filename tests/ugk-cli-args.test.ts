@@ -4,7 +4,7 @@ import path from "node:path";
 import { buildUgkCliArgs } from "../bin/ugk-cli-args.js";
 
 test("buildUgkCliArgs isolates pi resource discovery before loading UGK", () => {
-	const packageRoot = path.resolve("D:\\AII\\ugk-tui");
+	const packageRoot = path.resolve();
 	const args = buildUgkCliArgs(["--model", "deepseek-v4-pro"], packageRoot);
 
 	assert.deepEqual(args, [
@@ -22,7 +22,7 @@ test("buildUgkCliArgs isolates pi resource discovery before loading UGK", () => 
 });
 
 test("buildUgkCliArgs preserves an explicit user theme", () => {
-	const packageRoot = path.resolve("D:\\AII\\ugk-tui");
+	const packageRoot = path.resolve();
 	const customTheme = path.join(packageRoot, "themes", "custom.json");
 	const args = buildUgkCliArgs(["--theme", customTheme], packageRoot);
 

@@ -228,8 +228,13 @@ function getTextContent(message: any): string {
 		.join("\n");
 }
 
-function isCancelledAssistantText(text: string): boolean {
-	return /\bOperation aborted\b|User cancelled the questionnaire/i.test(text);
+// ponytail: abort 的可靠信号是结构化的 stopReason,不是 assistant 文本。ESC 走
+// handleRunFailure,产出的 assistant content 是空串,文本正则永远匹配不到——所以
+// task 把它误判成"没输出合法 spec",发 followUp 让 agent 重跑(pi 的 _handlePostAgentRun
+// 会自动 drain 队列续命),ESC 退出不了。优先看 stopReason,文本回退只兜 questionnaire 取消。
+function isCancelledAssistant(message: any): boolean {
+	if (message?.stopReason === "aborted") return true;
+	return /\bOperation aborted\b|User cancelled the questionnaire/i.test(getTextContent(message));
 }
 
 function isTaskPlanContextMessage(message: any): boolean {
@@ -1970,11 +1975,11 @@ export function registerTask(pi: ExtensionAPI): void {
 		const lastAssistant = [...event.messages].reverse().find(isAssistantMessage);
 		if (!lastAssistant) return;
 		if (state.phase === "reviewing") {
-			const text = getTextContent(lastAssistant);
-			if (isCancelledAssistantText(text)) {
+			if (isCancelledAssistant(lastAssistant)) {
 				ctx.ui.notify("Task review cancelled; reviewing remains active.", "info");
 				return;
 			}
+			const text = getTextContent(lastAssistant);
 			const result = extractTaskReviewResult(text);
 			if (!result) {
 				ctx.ui.notify("Task review did not find skill/verify/contract JSON yet.", "warning");
@@ -2002,11 +2007,11 @@ export function registerTask(pi: ExtensionAPI): void {
 			await promptTaskMenu(ctx);
 			return;
 		}
-		const text = getTextContent(lastAssistant);
-		if (isCancelledAssistantText(text)) {
+		if (isCancelledAssistant(lastAssistant)) {
 			ctx.ui.notify("Task planning cancelled; planning remains active.", "info");
 			return;
 		}
+		const text = getTextContent(lastAssistant);
 		const spec = extractRequirementsSpec(text);
 		if (!spec) {
 			ctx.ui.notify("Task planning did not find a complete RequirementsSpec yet.", "warning");

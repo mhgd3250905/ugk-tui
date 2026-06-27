@@ -722,6 +722,60 @@ test("/task planning questionnaire cancellation does not trigger spec retry loop
 	assert.match(notifications.at(-1)?.message ?? "", /cancelled/);
 });
 
+// ponytail: ESC abort 的真实产物是空 content + stopReason:"aborted"(pi 的
+// handleRunFailure 写死)。文本正则永远匹配不到空串,task 会误判成没产出 spec,
+// 发 followUp 让 pi 的 _handlePostAgentRun 自动续命 —— ESC 退出不了 planning。
+// 这个测试断言 stopReason 被识别为中断,不发 followUp(userMessages.length === 0)。
+test("/task planning ESC abort (empty content + stopReason aborted) does not trigger spec retry loop", async () => {
+	const { pi, handlers, userMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterPlanning(createTaskState()),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+	const entriesBefore = entries.length;
+
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: "" }],
+			stopReason: "aborted",
+		}],
+	}, ctx);
+
+	assert.equal(userMessages.length, 0, "ESC abort must not queue a followUp that revives the agent");
+	assert.equal(entries.length, entriesBefore);
+	assert.match(notifications.at(-1)?.message ?? "", /cancelled/);
+});
+
+test("/task reviewing ESC abort (empty content + stopReason aborted) does not trigger review retry loop", async () => {
+	const { pi, handlers, userMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterReviewing(startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)), "run-dir"), "done"),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+	const entriesBefore = entries.length;
+
+	await handlers.get("agent_end")![0]({
+		messages: [{
+			role: "assistant",
+			content: [{ type: "text", text: "" }],
+			stopReason: "aborted",
+		}],
+	}, ctx);
+
+	assert.equal(userMessages.length, 0, "ESC abort must not queue a followUp that revives the agent");
+	assert.equal(entries.length, entriesBefore);
+	assert.match(notifications.at(-1)?.message ?? "", /cancelled/);
+});
+
 test("/task save without review questionnaire asks reviewer to run the design gates", async () => {
 	const { pi, commands, handlers, userMessages } = makePi();
 	const { ctx, notifications } = makeCtx();

@@ -21,8 +21,8 @@ import path from "node:path";
 import type { WorkerLifecycle } from "../shared/worker-lifecycle.ts";
 import { closeChromeTab, createChromeCdpClient, createChromeTab } from "./client.ts";
 
-// ponytail: 照项目现有模式(judge-driver.ts 的 live.log)—— appendFileSync + 时间戳前缀。
-// 写到 agent 目录下,跨 run 保留,worker 子进程也能写(同一文件系统)。
+// ponytail: 简单 appendFileSync + 时间戳前缀,够用。写到 agent 目录下,跨 run 保留,
+// worker 子进程也能写(同一文件系统)。要并发/轮转再升级。
 function cdpTabLogPath(): string {
 	const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 	return path.join(agentDir, "logs", "cdp-tab.log");

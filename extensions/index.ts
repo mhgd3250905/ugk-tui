@@ -26,6 +26,7 @@ import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
 import registerTask from "./task/task.ts";
+import registerQuestionnaire from "./questionnaire.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
 import { createCoreDoctorChecks } from "./doctor/checks.ts";
@@ -104,6 +105,10 @@ export default function (pi: ExtensionAPI) {
 
 	// 1.3b) plan-mode:只读探索模式(/plan 切换,bash 白名单,计划提取+进度跟踪)
 	registerPlanMode(pi);
+
+	// 1.3c) questionnaire:通用多选问卷工具(让 agent 向用户提问)。原属 judge 目录,
+	// judge 删除后独立出来 —— 它是通用能力,不只 judge 用。
+	registerQuestionnaire(pi);
 
 	// 1.3b.3) task:固定任务 taskbook 创造/复用系统
 	registerTask(pi);

@@ -38,7 +38,7 @@ function compactUsage(usage: UsageStats): TaskWorkerResult["usage"] {
 	};
 }
 
-export function buildTaskWorkerPrompt(input: TaskWorkerInput): string {
+export function buildTaskWorkerPrompt(input: TaskWorkerInput, taskDir?: string): string {
 	return [
 		"你是 /task worker。按 skill 和 contract 完成一次 one-step 任务。",
 		"",
@@ -47,6 +47,9 @@ export function buildTaskWorkerPrompt(input: TaskWorkerInput): string {
 		"- 严格按 contract.artifacts 命名产物",
 		"- 只看 skill + contract,不要猜测隐藏验收标准",
 		"- 完成后输出简短产出摘要",
+		// ponytail: 仅在已落盘 taskbook 的 run 里注入 TASK_DIR(创建自证阶段无 taskDir)。
+		// taskbook 可带 scripts/ 子目录,worker 用 $TASK_DIR 定位自带脚本,不必临时现写。
+		taskDir ? `- 自带脚本在 $TASK_DIR/scripts/(环境变量 TASK_DIR=${taskDir}),skill.md 里引用的脚本优先从这里调用` : "",
 		input.feedback ? `- 上一轮失败反馈: ${JSON.stringify(input.feedback, null, "\t")}` : "",
 		"",
 		"## skill.md",
@@ -79,7 +82,7 @@ export async function dispatchWorker(
 			opts.cwd,
 			discovery.agents,
 			"worker",
-			buildTaskWorkerPrompt(input),
+			buildTaskWorkerPrompt(input, opts.env?.TASK_DIR),
 			opts.cwd,
 			undefined,
 			opts.signal,

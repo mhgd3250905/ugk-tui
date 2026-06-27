@@ -1057,7 +1057,8 @@ async function runTaskWithRetry(
 			feedback,
 		}, {
 			cwd,
-			env: opts.env,
+			// ponytail: 注入 TASK_DIR,让 worker 能调用 taskbook 自带的 scripts/(python "$TASK_DIR/scripts/xxx.py")
+			env: { ...opts.env, TASK_DIR: loaded.dir },
 			signal: opts.signal,
 			onUpdate: wrappedOnWorkerUpdate,
 		});
@@ -1071,7 +1072,7 @@ async function runTaskWithRetry(
 
 		opts.onVerifyStart?.(attempt + 1);
 		const verifyStartMs = Date.now();
-		verifyResult = await runVerify({ verifyPath, outputDir, input: runtimeInput });
+		verifyResult = await runVerify({ verifyPath, outputDir, input: runtimeInput, taskDir: loaded.dir });
 		verifyMs += Date.now() - verifyStartMs;
 		if (verifyResult.passed) break;
 

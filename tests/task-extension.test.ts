@@ -1953,7 +1953,9 @@ test("/task run does not preauthorize tools mentioned only in contract artifact 
 		await waitForTaskRunForTests();
 
 		assert.equal(confirmCalled, false);
-		assert.deepEqual(receivedEnv, {});
+		// ponytail: env 应只含 TASK_DIR(运行时注入),不含工具授权(artifact 名不算工具)
+		assert.equal(receivedEnv?.UGK_TASK_PROTECTED_TOOLS_GRANT, undefined);
+		assert.ok(receivedEnv?.TASK_DIR, "TASK_DIR 应被注入");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);

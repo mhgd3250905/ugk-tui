@@ -21,6 +21,17 @@ taskbook 只有两个 scope，目录就是固定的，别猜、别 find：
 - 创建前先 `ls ~/.pi/agent/tasks/` 看已有样本（照一个真实样本改，比凭空捏造靠谱）。
 - **不要**放到 `~/.agents/`、`~/.pi/agent/skills/`、或任何 `skills/` 目录下——那是 skill 的地方，不是 taskbook 的。taskbook 和 skill 是两回事。
 
+## 自带脚本（scripts/ 子目录，可选）
+
+如果你已有成熟脚本（Python/Node/Shell 都行），想让它随 taskbook 走、worker 直接调用：
+
+- 放到 taskbook 目录下的 **`scripts/` 子目录**，如 `~/.pi/agent/tasks/x-searcher/scripts/x_search.py`
+- worker 运行时环境变量 **`TASK_DIR`** 会被注入为 taskbook 绝对路径
+- skill.md 里这样引用：`python "$TASK_DIR/scripts/x_search.py" "{keyword}"`（**别写相对路径或裸文件名**，worker 在用户 cwd 执行，找不到）
+- verify.mjs 同样能读 `$TASK_DIR/scripts/`（如需跑脚本生成预期值对比）
+
+**不带脚本**的 taskbook 不用建 `scripts/`，零侵入。带脚本时五件套 + `scripts/` 共存，`loadTaskbook` 不读 scripts 内容（worker 自己调），只需路径约定。
+
 ## 五件套格式（照真实样本）
 
 一个 taskbook 是一个目录，下面五个文件，缺一不可。字段都从真实运行过的 taskbook 提取，照着填：
@@ -121,3 +132,4 @@ if (failures.length > 0) {
 - ❌ 读 ugk-core 的 `task-guide.ts` 想搞懂"怎么创建" —— 那是"导览**已有** taskbook"的，不是创建指南。
 - ❌ 凭空捏造五件套格式 —— 先 `ls ~/.pi/agent/tasks/` 找真实样本。
 - ❌ 把 taskbook 放进 skills/ 目录 —— skill 和 taskbook 是两个系统，位置不同。
+- ❌ skill.md 里写裸脚本名（如 `python foo.py`）却不在 taskbook 自带 —— worker 在用户 cwd 跑，找不到。要么把脚本放进 `scripts/` 用 `$TASK_DIR/scripts/foo.py` 引用，要么让 worker 自己现写。

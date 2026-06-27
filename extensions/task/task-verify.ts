@@ -54,6 +54,7 @@ export async function runVerify(opts: {
 	outputDir: string;
 	input: unknown;
 	timeoutMs?: number;
+	taskDir?: string;
 }): Promise<VerifyResult> {
 	const startedAt = Date.now();
 	const child = spawn(process.execPath, [opts.verifyPath], {
@@ -61,6 +62,8 @@ export async function runVerify(opts: {
 			...process.env,
 			TASK_OUTPUT_DIR: opts.outputDir,
 			TASK_INPUT: JSON.stringify(opts.input),
+			// ponytail: 对称注入 TASK_DIR,让 verify 能引用 taskbook 自带 scripts/(如跑脚本生成预期值对比)
+			...(opts.taskDir ? { TASK_DIR: opts.taskDir } : {}),
 		},
 		stdio: ["ignore", "pipe", "pipe"],
 	});

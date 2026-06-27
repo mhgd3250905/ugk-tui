@@ -23,6 +23,28 @@ test("buildTaskWorkerPrompt injects skill contract runtime input outputDir and f
 	assert.doesNotMatch(prompt, /verify\.mjs/);
 });
 
+test("buildTaskWorkerPrompt 注入 TASK_DIR 提示当且仅当传入 taskDir", () => {
+	// ponytail: 验证 scripts/ 自带脚本机制——已落盘 taskbook 的 run 注入 TASK_DIR 提示,创建自证阶段不注入
+	const withDir = buildTaskWorkerPrompt({
+		skill: "# Skill",
+		contract: { artifacts: [] },
+		runtimeInput: {},
+		outputDir: "E:/out",
+		feedback: [],
+	}, "E:/tasks/foo");
+	assert.match(withDir, /TASK_DIR=E:\/tasks\/foo/);
+	assert.match(withDir, /scripts\//);
+
+	const withoutDir = buildTaskWorkerPrompt({
+		skill: "# Skill",
+		contract: { artifacts: [] },
+		runtimeInput: {},
+		outputDir: "E:/out",
+		feedback: [],
+	});
+	assert.doesNotMatch(withoutDir, /TASK_DIR/);
+});
+
 test("dispatchWorker maps subagent result to task worker result", async () => {
 	let receivedTask = "";
 	setTaskWorkerRunnerForTests(async (_defaultCwd, _agents, agentName, task) => {

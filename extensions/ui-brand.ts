@@ -10,6 +10,7 @@ import {
 	buildUgkStartupScreenLines,
 	classifyUgkStatusTone,
 	resolveUgkDisplayModelId,
+	UGK_BLOCK_LOGO_TONES,
 	type UgkFooterUsage,
 } from "./ui-brand-utils.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
@@ -82,13 +83,12 @@ function hasSessionMessages(ctx: { sessionManager?: { getEntries?: () => unknown
 	return entries.length > 0;
 }
 
+// ponytail: tone 规则来自 ui-brand-utils 的 UGK_BLOCK_LOGO_TONES,改 logo 时同处维护,
+// 不再两处维护(PR#18 shrink 项)。逻辑与原硬编码 includes 完全等价——首个命中的 marker 决定 tone。
 function logoTone(line: string): string | undefined {
-	if (line.includes("██╗   ██╗")) return "error";
-	if (line.includes("██║   ██║██╔════╝")) return "error";
-	if (line.includes("██║   ██║██║  ███╗")) return "warning";
-	if (line.includes("██║   ██║██║   ██║")) return "accent";
-	if (line.includes("╚██████╔╝")) return "success";
-	if (line.includes("╚═════╝")) return "accent";
+	for (const { marker, tone } of UGK_BLOCK_LOGO_TONES) {
+		if (line.includes(marker)) return tone;
+	}
 	return undefined;
 }
 

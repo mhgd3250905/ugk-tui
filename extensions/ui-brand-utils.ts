@@ -62,7 +62,20 @@ export function classifyUgkStatusTone(text: string): UgkStatusTone {
 	return "dim";
 }
 
-const UGK_BLOCK_LOGO = [
+// ponytail: logo 文本 + 着色标记(人工挑选的稳定区分子串 + tone),改 logo 时同处维护。
+// marker 是每行能区分其他行的最短片段,不是自动可提取的——区分度藏在行中间特定位置。
+// 曾试 split(/\s/)[0] 自动提取,但行1/2/3 都得 "██║" 无法区分,作废。原硬编码搬过来,零行为变化。
+// 子串匹配仍受窄终端截断影响(已知天花板),根治需按渲染行索引定位,代价过大暂不做。
+export const UGK_BLOCK_LOGO_TONES = [
+	{ marker: "██╗   ██╗", tone: "error" },
+	{ marker: "██║   ██║██╔════╝", tone: "error" },
+	{ marker: "██║   ██║██║  ███╗", tone: "warning" },
+	{ marker: "██║   ██║██║   ██║", tone: "accent" },
+	{ marker: "╚██████╔╝", tone: "success" },
+	{ marker: "╚═════╝", tone: "accent" },
+];
+
+export const UGK_BLOCK_LOGO = [
 	"██╗   ██╗ ██████╗ ██╗  ██╗",
 	"██║   ██║██╔════╝ ██║ ██╔╝",
 	"██║   ██║██║  ███╗█████╔╝ ",

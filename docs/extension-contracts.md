@@ -44,7 +44,7 @@ Windows 上 PowerShell 的 `Set-Content` / `Out-File` 默认写 UTF-8 BOM,而 No
 | `settings.json` | ui-brand / doctor-checks / chrome-cdp-config / bin-ugk-startup-settings |
 | `auth.json` | deepseek-status |
 | `mcp.json` / `.mcp.json` / `.mcp.local.json` | mcp/config |
-| taskbook 的 `spec.json` / `contract.json` | task/task-book / judge/taskbook |
+| taskbook 的 `spec.json` / `contract.json` | task/task-book |
 
 ### 硬规则
 - 读上述任何文件,**禁止裸 `JSON.parse`**。
@@ -100,7 +100,6 @@ Windows 上 PowerShell 的 `Set-Content` / `Out-File` 默认写 UTF-8 BOM,而 No
 - [ ] 用了 `ctx.sessionManager`?核对方法在 Pick 列表内
 - [ ] 加了 `try/catch`?核对降级方向是否安全
 - [ ] 改了 task 核心函数签名/状态机?同步 `docs/design/subtask-extension-spec.md`
-- [ ] 改了 Judge agent 定义/taskbook schema?同步 `docs/judge.md`
 - [ ] 加了带确认的新工具?用 `suppressConfirmation()` 接入 autopilot(见 §7)
 
 ---

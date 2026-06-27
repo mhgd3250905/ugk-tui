@@ -25,7 +25,6 @@ import registerUiStatusline from "./ui-statusline.ts";
 import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
-import registerJudge from "./judge/judge.ts";
 import registerTask from "./task/task.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
@@ -63,9 +62,9 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
 	const apiSummary = deepseekStatus.replace(/^deepseek:\s*/, "DeepSeek ");
 	const rows = [
-		["🧰 Tools", "✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ judge  ✅ mcp"],
+		["🧰 Tools", "✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ mcp"],
 		["🤖 Agents", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries"],
-		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /judge  /cdp  /mcp  /ugk-ui  /ugk-autopilot  /language"],
+		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /cdp  /mcp  /ugk-ui  /ugk-autopilot  /language"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		["🛡️ Guard", "dangerous bash gate enabled"],
 	] as const;
@@ -105,9 +104,6 @@ export default function (pi: ExtensionAPI) {
 
 	// 1.3b) plan-mode:只读探索模式(/plan 切换,bash 白名单,计划提取+进度跟踪)
 	registerPlanMode(pi);
-
-	// 1.3b.2) judge:需求对齐骨架(/judge 只读澄清 + driver stub)
-	registerJudge(pi);
 
 	// 1.3b.3) task:固定任务 taskbook 创造/复用系统
 	registerTask(pi);

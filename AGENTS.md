@@ -24,7 +24,6 @@
 - `subagent` — 子代理委派(single/parallel/chain 三模式,隔离 context 只回摘要)
 - `cron` — 定时任务管理(status/list/add/remove/history)
 - `chrome_cdp` — 受保护的本地登录态 Chrome 控制(status/launch/tabs/navigate/evaluate/screenshot,默认 ask-gated)
-- `judge` — 实时监督模式:对齐 RequirementsSpec,委派 Driver 执行,在关键节点放行/纠偏/终止/最终验收
 - `mcp` — MCP stdio client:连接外部 MCP server,把 tools 注册为 `server__tool`(scope 合并:install < user < project < local,同名 server 高 scope 完全覆盖低 scope)
 - `run_task` — subtask 工具:让 main agent 复用已机器验收的 taskbook,返回 PASS/FAIL + 产物路径。**两条铁律:需求驱动(任务确定才匹配 taskbook);责任归 LLM(dispatcher 翻译失败直接报错,headless 不弹 UI)。task 是最小单位,不可嵌套。**
 
@@ -57,12 +56,6 @@
 - **不管危险动作**:删除级(rm -rf 等)、花钱、不可逆外部副作用永远走人确认
 - 状态只在会话内存,关掉 ugk 即忘(临时放飞用,不持久)
 
-### Judge 实时监督模式
-
-- `/judge` 打开菜单;`/judge toggle` 开关
-- 三阶段:aligning(对齐 Spec) → driving(Driver 执行 + Judge 监督) → delivering(验收)
-- Driver 完成必须调用 `judge_complete`;Judge 对照 `RequirementsSpec.acceptance` 做最终 PASS/FAIL
-
 ### task 固定任务委托系统
 
 - `/task` 打开菜单(中文,零命令记忆);`/task list|show|new|run|edit|rename|save|delete|toggle|exit`
@@ -84,7 +77,6 @@
 - `/cdp` — 管理 Chrome CDP
 - `/mcp` — 管理 MCP server
 - `/task` — 固定任务委托
-- `/judge` — 实时监督
 - `/plan` — 只读计划模式
 - `/ugk-ui` — 开关品牌 UI
 - `/ugk-autopilot` — 工具确认总开关(自动放行可逆确认,危险动作仍归人)
@@ -104,7 +96,7 @@
 
 UGK 的 skill 只有两个来源,都在 ugk 安装目录下:
 
-1. **系统自带**(`<ugk>/skills/`):ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/bash-guide/skill-guide/skill-creator/docx 等,跟包走,更新覆盖。
+1. **系统自带**(`<ugk>/skills/`):ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/bash-guide/skill-guide/skill-creator 等,跟包走,更新覆盖。
 2. **用户 skill**(`<ugk>/user-skills/`):用户手动安装或创建,跟着 ugk 安装目录走,在任何文件夹运行 ugk 都用同一批。
 
 外部目录(`~/.agents/skills`、`~/.pi/agent/skills`、`<cwd>/.pi/skills` 等)被 ugk 的 `!skills/**` 排除,不会加载。创建/安装新 skill 一律到 `<ugk>/user-skills/<name>/`,来源是多 skill 包仓库时打平安装(只取每个 skill 包本体,丢弃仓库包裹层),详见 skill-guide。

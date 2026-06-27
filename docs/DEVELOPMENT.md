@@ -8,7 +8,6 @@
 ## 0. 必读文档
 
 - **`docs/extension-contracts.md`** — 扩展开发硬规则(覆盖 pi 内置工具的隐式注入契约、读 pi 管理 JSON 的 BOM 规则、sessionManager 能力边界等)。改 `extensions/` 或 `bin/` 前必读。
-- **`docs/judge.md`** — Judge 监督模式 + 任务书章节
 - **`docs/design/task-extension-spec.md`** — task 四阶段设计契约
 - **`docs/design/subtask-extension-spec.md`** — run_task 编排设计
 
@@ -68,7 +67,6 @@
 
 | 改动 | 必须同步 |
 |---|---|
-| Judge/Driver agent 定义、taskbook schema | `docs/judge.md` 任务书章节 |
 | task 模块核心函数签名、task 状态机 | `docs/design/subtask-extension-spec.md` |
 | task 四阶段创造/复用流程 | `docs/design/task-extension-spec.md` |
 | 扩展开发(覆盖原生工具/读 pi 文件/sessionManager) | `docs/extension-contracts.md` |

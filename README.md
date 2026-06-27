@@ -2,7 +2,7 @@
 
 **ugk** — 一个开箱即用的终端编码 agent。一条命令安装,打 `ugk` 即用。
 
-> 基于 [pi](https://github.com/earendil-works/pi) 构建,但用户无需关心 pi——`npm i -g ugk-agent` 装完就拥有全部能力(投屏、子代理、定时任务、plan 模式、judge 委托验收、MCP tools 接入等)。
+> 基于 [pi](https://github.com/earendil-works/pi) 构建,但用户无需关心 pi——`npm i -g ugk-agent` 装完就拥有全部能力(投屏、子代理、定时任务、plan 模式、MCP tools 接入等)。
 
 ---
 
@@ -90,7 +90,6 @@ cp agents/*.md ~/.pi/agent/agents/
 | `@scout 列出项目目录` | 调 `subagent` 委派 scout(需先装预设 agent) |
 | `/subagent` | 列出所有 subagent,选择后设置该 subagent 的模型 |
 | `/plan` | 切换只读探索模式 |
-| `/judge` | 查看 judge 委托验收菜单 |
 | `/mcp status` | 查看已配置/已连接的 MCP server |
 | `rm -rf /tmp/test` | 触发权限门(弹确认) |
 
@@ -115,7 +114,6 @@ ugk --model deepseek-reasoner
 - `/subagent` — 查看 subagent 并设置单个 subagent 的模型
 - `/implement 加个 Redis 缓存` — scout→planner→worker 全链路
 - `/plan` — 先只读规划再执行
-- `/judge` — 打开 judge 委托验收菜单
 - `/mcp status` — 查看外部 MCP tools 连接状态
 
 ---
@@ -204,7 +202,6 @@ UGK_CLEAR_STARTUP=0 ugk
 | `/ugk-ui` | 开关 ugk 品牌 UI |
 | `/plan` | 切换 plan-mode 只读探索模式(或 Ctrl+Alt+P) |
 | `/todos` | 查看 plan-mode 计划进度 |
-| `/judge` | 管理 judge 委托验收、live.log 过程终端和 driver 运行状态 |
 | `/task` | 固定任务委托(taskbook 创造/复用/编排) |
 | `/implement` | scout→planner→worker 全链路实现 |
 | `/scout-and-plan` | scout→planner(只到方案) |
@@ -275,19 +272,6 @@ install/user scope 视为 UGK 级可信配置,默认直接连接;project/local s
 
 `/mcp reload` 会断开并重连 server。pi 当前没有 unregisterTool,所以消失 server 的旧工具会从 active tools 下线;如果 stale 工具被调用,会返回 server disconnected,不会自动重连。`/doctor` 的 MCP 项只读配置和当前 registry 状态,不会 spawn 任意 MCP server。详见 `skills/mcp-guide/SKILL.md`。
 
-### Judge 委托验收
-
-`/judge` 用于把任务交给 driver 执行,由 judge 按验收标准判定 PASS/FAIL。judge 不是替代 `/plan` 的只读规划模式,而是面向明确验收标准的委托执行模式。运行过程写入 `.judge/judge-*/live.log`,Windows 上可通过 `/judge check-bash-window` 检查外部 bash 日志窗口是否能持续显示更新。
-
-```text
-/judge
-/judge toggle
-/judge check-bash-window
-/judge ack
-```
-
-详见项目仓库的 [`docs/judge.md`](https://github.com/mhgd3250905/ugk-tui/blob/main/docs/judge.md)。
-
 ### cron 定时服务(独立常驻进程)
 
 ```bash
@@ -318,7 +302,6 @@ npm run cron:start   # 启动常驻服务(127.0.0.1:17741)
 | `chrome-cdp-guide` | 本地登录态 Chrome/CDP 使用边界与安全流程 |
 | `mcp-guide` | MCP server 配置、权限、命令和排障指南 |
 | `skill-creator` | 创建、改进和评测 agent skill(来自 Anthropic skills, Apache-2.0) |
-| `docx` | 创建、读取、编辑 Word `.docx` 文档(来自 Anthropic skills,见随包 LICENSE.txt) |
 
 ### 权限门
 
@@ -342,7 +325,6 @@ ugk-core/
 │   ├── cron.ts + cron-contract.ts  # cron 工具 + 共享类型
 │   ├── subagent.ts + subagent-runtime/rendering/agents.ts  # 子代理委派
 │   ├── plan-mode.ts + plan-mode-utils/state.ts  # plan 模式
-│   ├── judge/               # Judge 委托验收模式
 │   ├── chrome-cdp/          # 本地登录态 Chrome CDP 控制
 │   ├── mcp/                 # MCP stdio client、registry、tools、permissions、/mcp
 │   └── ui-*.ts               # UI 美化(品牌层含 header/footer/title+spinner、状态条)
@@ -351,7 +333,7 @@ ugk-core/
 ├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)
 │   ├── scout.md planner.md reviewer.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
-│   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/skill-creator/docx
+│   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/skill-creator
 ├── themes/                   # ugk-geek 默认主题
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)
 └── tests/                    # Node test runner 逻辑覆盖
@@ -392,7 +374,7 @@ A: `ugk` 首次启动会默认在 `~/.pi/agent/settings.json` 写入:
 }
 ```
 
-`clearStartupScreen` 会让新会话启动页清理当前终端视口并占满终端高度。`skills` 会隐藏 `~/.agents/skills` 下的用户全局 skills,避免系统里装过的个人 skill 干扰 ugk。ugk 通过扩展注入的 `adb-guide` / `scrcpy-guide` / `subagent-guide` / `cron-guide` / `chrome-cdp-guide` / `ugk-guide` / `skill-creator` / `docx` 仍会加载。
+`clearStartupScreen` 会让新会话启动页清理当前终端视口并占满终端高度。`skills` 会隐藏 `~/.agents/skills` 下的用户全局 skills,避免系统里装过的个人 skill 干扰 ugk。ugk 通过扩展注入的 `adb-guide` / `scrcpy-guide` / `subagent-guide` / `cron-guide` / `chrome-cdp-guide` / `ugk-guide` / `skill-creator` 仍会加载。
 
 已有用户如果之前手动配置过 `clearStartupScreen` 或 `skills`,ugk 不会覆盖;需要启用默认行为时可手动补上对应字段。
 

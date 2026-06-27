@@ -1652,6 +1652,8 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 
 		ctx.ui.select = (title: string, options: string[]) => {
 			selections.push({ title, options });
+			// ponytail: 复盘汇报后新增的"让 reviewer 直接修"选项,此测试保持原语义选结束
+			if (options.includes("结束复盘")) return "结束复盘";
 			return "复盘上次运行";
 		};
 		ctx.ui.input = () => undefined;
@@ -1664,7 +1666,8 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 		ctx.ui.input = () => "一开始没有按 skill 里的 CDP 方法做";
 		await commands.get("task").handler("", ctx);
 
-		assert.ok(selections.at(-1)?.options.includes("复盘上次运行"));
+		// ponytail: 复盘成功后新增了"让 reviewer 直接修"select,at(-1) 不再是主菜单,改 some 查找
+		assert.ok(selections.some((s) => s.options.includes("复盘上次运行")));
 		assert.ok(widgetCalls.some((call) => (call.lines?.join("\n") ?? "").includes("正在复盘")));
 		// ponytail: 验证 reviewer 思考过程流式刷到了 widget(不再干等静态文案)
 		assert.ok(widgetCalls.some((call) => (call.lines?.join("\n") ?? "").includes("正在分析 worker 的执行路径")));
@@ -1679,6 +1682,58 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 		assert.deepEqual(reviewMessage?.options, { triggerTurn: false });
 		assert.match(reviewMessage?.message.content ?? "", /复盘结论/);
 		assert.doesNotMatch(notifications.at(-1)?.message ?? "", /复盘结论/);
+	} finally {
+		setTaskRunReviewerRunnerForTests(undefined);
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test('/task review-last-run 选「让 reviewer 直接修」则用 summary 当指令进 edit', async () => {
+	const { pi, commands, userMessages, sentMessages } = makePi();
+	const { cwd, ctx, selections } = makeCtx();
+	registerTask(pi as any);
+	// worker 产出合法产物 verify 一次过 让 run 落 pass 以触发复盘上次运行
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		args[7]?.({ content: [{ type: "text", text: "执行中" }], details: { mode: "single", agentScope: "both", projectAgentsDir: null, results: [] } });
+		return { agent: "worker", agentSource: "user", task: "t", exitCode: 0, messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }], stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 } } as any;
+	});
+	// reviewer 复盘吐出明确诊断加建议的 summary
+	setTaskRunReviewerRunnerForTests(async (...args: any[]) => {
+		args[7]?.({ content: [{ type: "text", text: "分析中" }], details: { mode: "single", agentScope: "both", projectAgentsDir: null, results: [] } });
+		return { agent: args[2], agentSource: "user", task: args[3], exitCode: 0, messages: [{ role: "assistant", content: [{ type: "text", text: "修复建议：把 vendored scripts 复制到 taskbook 目录。" }] }], stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 } } as any;
+	});
+	setTaskDispatcherForTests(async () => ({}));
+	try {
+		await saveTaskbook("project", cwd, "fix-from-review", {
+			description: "fix from review",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { artifacts: [] },
+		});
+		await commands.get("task").handler("run fix-from-review", ctx);
+		await waitForTaskRunForTests();
+
+		// 进入复盘 用户观察加复盘后选「让 reviewer 直接修」
+		ctx.ui.input = () => "结果有问题";
+		ctx.ui.select = (title: string, options: string[]) => {
+			selections.push({ title, options });
+			if (options.includes("让 reviewer 直接修")) return "让 reviewer 直接修";
+			return "复盘上次运行";
+		};
+		await commands.get("task").handler("", ctx);
+
+		// 断言 复盘汇报后给出了「让 reviewer 直接修」选项
+		assert.ok(selections.some((s) => s.options.includes("让 reviewer 直接修")));
+		// 选中后 startTaskbookEdit 用 summary 当 UserEditRequest 发 task-review-prompt 给主 agent
+		const editPrompt = sentMessages.find((m) => m.message?.customType === "task-review-prompt"
+			&& typeof m.message?.content === "string"
+			&& m.message.content.includes("UserEditRequest:"));
+		assert.ok(editPrompt, "应有含 UserEditRequest 的 task-review-prompt 消息");
+		assert.match(editPrompt!.message.content, /修复建议：把 vendored scripts 复制到 taskbook 目录/);
+		assert.equal(userMessages.length, 0);
 	} finally {
 		setTaskRunReviewerRunnerForTests(undefined);
 		setTaskWorkerRunnerForTests(undefined);

@@ -1759,6 +1759,20 @@ export function registerTask(pi: ExtensionAPI): void {
 						},
 					});
 					sendTaskMessage(pi, ctx, result.summary, result.ok ? "info" : "warning");
+					// ponytail: reviewer 刚诊断完最懂怎么修,别让人回 /task edit 把诊断再说一遍。
+					// 复盘成功时直接问一句,选"让 reviewer 修"就用 summary 当修改指令进 edit,
+					// 形成 reviewer 自诊断→自我修复闭环。
+					if (result.ok && ctx.ui?.select) {
+						const next = await ctx.ui.select("复盘完成", ["让 reviewer 直接修", "仅查看建议", "结束复盘"]);
+						if (next === "让 reviewer 直接修") {
+							const loaded = await loadTaskbook(cwdOf(ctx), lastTaskRunReview.taskbookName);
+							if (loaded) {
+								await startTaskbookEdit(ctx, loaded, result.summary);
+								return;
+							}
+							ctx.ui.notify(`taskbook "${lastTaskRunReview.taskbookName}" 加载失败,请手动 /task edit。`, "warning");
+						}
+					}
 				} finally {
 					setTaskRunWidget(ctx, undefined);
 				}

@@ -776,6 +776,144 @@ test("/task reviewing ESC abort (empty content + stopReason aborted) does not tr
 	assert.match(notifications.at(-1)?.message ?? "", /cancelled/);
 });
 
+// ponytail: questionnaire 被用户取消是 tool result(不是 abort),assistant 之后会正常
+// 输出"已取消,等你指示"然后停。若 task 仍按 !spec 发 followUp,pi 会自动续命重跑问卷,
+// agent 也因 prompt 强制调问卷而照办 —— ESC 取消问卷退出不了。这里断言:最后一条是
+// cancelled 的 questionnaire tool result 时,task 停下交还控制权,不发 followUp。
+test("/task planning questionnaire cancellation stops instead of followUp-reviving the agent", async () => {
+	const { pi, handlers, userMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterPlanning(createTaskState()),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+	const entriesBefore = entries.length;
+
+	// 真实消息序列:assistant 调问卷 → 问卷被取消(tool result)→ assistant 说"已取消"并停。
+	await handlers.get("agent_end")![0]({
+		messages: [
+			{ role: "assistant", content: [{ type: "text", text: "Let me confirm assumptions." }] },
+			{ role: "toolResult", content: [{ type: "text", text: "User cancelled the questionnaire" }] },
+			{ role: "assistant", content: [{ type: "text", text: "好的，已取消。你随时可以重新发起。" }] },
+		],
+	}, ctx);
+
+	assert.equal(userMessages.length, 0, "questionnaire cancellation must not queue a followUp that revives the agent");
+	assert.equal(entries.length, entriesBefore);
+	assert.match(notifications.at(-1)?.message ?? "", /取消/);
+});
+
+test("/task reviewing questionnaire cancellation stops instead of followUp-reviving the agent", async () => {
+	const { pi, handlers, userMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterReviewing(startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)), "run-dir"), "done"),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+	const entriesBefore = entries.length;
+
+	await handlers.get("agent_end")![0]({
+		messages: [
+			{ role: "assistant", content: [{ type: "text", text: "Let me confirm the skill design." }] },
+			{ role: "toolResult", content: [{ type: "text", text: "User cancelled the questionnaire" }] },
+			{ role: "assistant", content: [{ type: "text", text: "好的，已取消。等你下一步指示。" }] },
+		],
+	}, ctx);
+
+	assert.equal(userMessages.length, 0, "questionnaire cancellation must not queue a followUp that revives the agent");
+	assert.equal(entries.length, entriesBefore);
+	assert.match(notifications.at(-1)?.message ?? "", /取消/);
+});
+
+// ponytail: task 周期隔离。上个 task 的问答(问卷答案、Spec)不能污染新建 task 的 agent
+// 上下文。退出 task 时注入 task-context-end"止"边界,filterTaskContextMessages 成对滤掉
+// (起 ... 止)之间的已结束周期;用户退出后的闲聊在止之后,不属任何周期,保留。
+
+test("/task new after a previous exited task strips the previous task's Q&A but keeps post-exit chat", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx); // 进入 planning(state.phase=planning)
+
+	const planCtx1 = { role: "custom", customType: "task-plan-context", content: "old" };
+	const qa1 = { role: "assistant", content: [{ type: "text", text: "上个 task 的问卷问答" }] };
+	const exitBoundary = { role: "custom", customType: "task-context-end", content: "task session ended" };
+	const chat = { role: "user", content: [{ type: "text", text: "退出后用户探寻实现可能的闲聊" }] };
+	const planCtx2 = { role: "custom", customType: "task-plan-context", content: "new" };
+	const qa2 = { role: "assistant", content: [{ type: "text", text: "新 task 的问答" }] };
+
+	const filtered = await handlers.get("context")![0]({
+		messages: [planCtx1, qa1, exitBoundary, chat, planCtx2, qa2],
+	}, ctx);
+
+	// 上个 task 的 plan-ctx + 问答 + 止边界 整段滤掉;闲聊 + 新 task 内容保留。
+	assert.deepEqual(filtered.messages, [chat, planCtx2, qa2]);
+});
+
+test("/task new first time (no prior exit) keeps the current planning cycle intact", async () => {
+	const { pi, commands, handlers } = makePi();
+	const { ctx } = makeCtx();
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx);
+
+	const planCtx = { role: "custom", customType: "task-plan-context", content: "new" };
+	const qa = { role: "assistant", content: [{ type: "text", text: "当前 task 问答" }] };
+	const filtered = await handlers.get("context")![0]({ messages: [planCtx, qa] }, ctx);
+
+	// 未闭合的周期 = 当前进行中的 task,全保留。
+	assert.deepEqual(filtered.messages, [planCtx, qa]);
+});
+
+test("/task reviewing isolates prior reviewing cycles symmetrically", async () => {
+	const { pi, handlers } = makePi();
+	const { ctx } = makeCtx();
+	registerTask(pi as any);
+
+	// 用 session_start 恢复到 reviewing 态。
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterReviewing(startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)), "run-dir"), "done"),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+
+	const reviewCtx1 = { role: "custom", customType: "task-review-context", content: "old" };
+	const qa1 = { role: "assistant", content: [{ type: "text", text: "上个 review 的问答" }] };
+	const exitBoundary = { role: "custom", customType: "task-context-end", content: "task session ended" };
+	const chat = { role: "user", content: [{ type: "text", text: "闲聊" }] };
+	const reviewCtx2 = { role: "custom", customType: "task-review-context", content: "new" };
+	const filtered = await handlers.get("context")![0]({
+		messages: [reviewCtx1, qa1, exitBoundary, chat, reviewCtx2],
+	}, ctx);
+
+	assert.deepEqual(filtered.messages, [chat, reviewCtx2]);
+});
+
+test("/task exit injects a silent task-context-end boundary marker", async () => {
+	const { pi, commands, sentMessages } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	await commands.get("task").handler("new", ctx);
+	const sentBefore = sentMessages.length;
+	await commands.get("task").handler("exit", ctx);
+
+	const boundary = sentMessages.at(-1);
+	assert.ok(boundary, "exit 应注入一条 task-context-end 边界消息");
+	assert.equal(boundary.message.customType, "task-context-end");
+	assert.equal(boundary.message.display, false);
+	assert.equal(boundary.options?.triggerTurn, false);
+	assert.equal(sentMessages.length, sentBefore + 1, "exit 只注入一条边界,不多发");
+	assert.match(notifications.at(-1)?.message ?? "", /Task disabled/);
+});
+
 test("/task save without review questionnaire asks reviewer to run the design gates", async () => {
 	const { pi, commands, handlers, userMessages } = makePi();
 	const { ctx, notifications } = makeCtx();

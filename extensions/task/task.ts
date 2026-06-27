@@ -62,6 +62,11 @@ const TASK_STATE_TYPE = "task-state";
 const TASK_PLAN_CONTEXT_TYPE = "task-plan-context";
 const TASK_REVIEW_CONTEXT_TYPE = "task-review-context";
 const TASK_REVIEW_PROMPT_TYPE = "task-review-prompt";
+// ponytail: task 周期"止"边界。退出 task 时注入(display:false 静默),标记"上个 task
+// 的对话到此为止"。filterTaskContextMessages 用它成对定位"已结束的 task 周期"并整体滤掉,
+// 避免上个 task 的问卷答案/Spec 污染新建 task 的 agent 上下文。用户退出后的闲聊在它之后,
+// 不属任何周期,保留。跨 session 复活(appendCustomMessageEntry 持久化)。
+const TASK_CONTEXT_END_TYPE = "task-context-end";
 const TASK_PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const TASK_NORMAL_TOOLS = ["read", "bash", "edit", "write", "subagent"];
 const PREVIEW_TEXT_EXTENSIONS = new Set([".md", ".txt", ".json", ".csv", ".tsv", ".html", ".htm"]);
@@ -237,6 +242,19 @@ function isCancelledAssistant(message: any): boolean {
 	return /\bOperation aborted\b|User cancelled the questionnaire/i.test(getTextContent(message));
 }
 
+// ponytail: questionnaire 被用户取消 ≠ agent 没本事吐 spec。取消是 tool result(不是
+// abort 信号),assistant 之后会正常输出"已取消,等你指示"。若 task 仍按 !spec 分支发
+// followUp,pi 会自动续命重跑问卷(agent 也会因 prompt 强制调问卷而照办)—— 又死循环。
+// 这里识别"最后一条 tool result 是 questionnaire 取消",让 task 同样停下交还控制权。
+function lastMessageIsQuestionnaireCancellation(messages: any[]): boolean {
+	const lastToolResult = [...messages].reverse().find((message) => message?.role === "toolResult");
+	if (!lastToolResult) return false;
+	const text = Array.isArray(lastToolResult.content)
+		? lastToolResult.content.filter((block: any) => block.type === "text").map((block: any) => block.text).join("\n")
+		: "";
+	return /\bUser cancelled the questionnaire\b/i.test(text);
+}
+
 function isTaskPlanContextMessage(message: any): boolean {
 	return message?.role === "custom" && message.customType === TASK_PLAN_CONTEXT_TYPE;
 }
@@ -245,29 +263,50 @@ function isTaskReviewContextMessage(message: any): boolean {
 	return message?.role === "custom" && message.customType === TASK_REVIEW_CONTEXT_TYPE;
 }
 
+function isTaskContextEndMessage(message: any): boolean {
+	return message?.role === "custom" && message.customType === TASK_CONTEXT_END_TYPE;
+}
+
+// 起边界:planning 阶段认 plan-context,reviewing 阶段认 review-context。
+function isTaskStartBoundary(message: any, phase: TaskState["phase"]): boolean {
+	return phase === "planning" ? isTaskPlanContextMessage(message) : isTaskReviewContextMessage(message);
+}
+
 function filterTaskContextMessages(messages: any[], state: TaskState): any[] {
+	// ponytail: 非 task 阶段,清掉所有 task 标记(本阶段的起、对方阶段的起、所有止)。
 	if (state.phase !== "planning" && state.phase !== "reviewing") {
-		return messages.filter((message) => !isTaskPlanContextMessage(message) && !isTaskReviewContextMessage(message));
+		return messages.filter((message) =>
+			!isTaskPlanContextMessage(message) && !isTaskReviewContextMessage(message) && !isTaskContextEndMessage(message));
 	}
-	if (state.phase === "reviewing") {
-		let keepIndex = -1;
-		for (let index = messages.length - 1; index >= 0; index -= 1) {
-			if (isTaskReviewContextMessage(messages[index])) {
-				keepIndex = index;
-				break;
+	// planning/reviewing:按 task 周期分段。
+	// 起边界:本阶段认本阶段的 context(plan-ctx 或 review-ctx);对方阶段的 context 一律滤掉。
+	// 止边界:task-context-end。
+	// 规则:成对的(起 ... 止)之间(含起止本身)整体滤掉 = 已结束的 task 周期。
+	//       最后一段未闭合的(起 ... 无止)= 当前进行中的 task,保留。
+	//       止之后、下一起之前的消息(用户退出 task 后的闲聊)= 不属任何周期,保留。
+	const keep = new Array(messages.length).fill(true);
+	let pendingStart = -1; // 当前未闭合"起"的 index
+	for (let index = 0; index < messages.length; index += 1) {
+		const message = messages[index];
+		if (isTaskContextEndMessage(message)) {
+			if (pendingStart >= 0) {
+				// 闭合:起...止 整段滤掉(已结束的 task 周期)
+				for (let j = pendingStart; j <= index; j += 1) keep[j] = false;
+				pendingStart = -1;
+			} else {
+				keep[index] = false; // 孤立的止(session 恢复残留),滤掉自身
 			}
-		}
-		return messages.filter((message, index) =>
-			!isTaskPlanContextMessage(message) && (!isTaskReviewContextMessage(message) || index === keepIndex));
-	}
-	let keepIndex = -1;
-	for (let index = messages.length - 1; index >= 0; index -= 1) {
-		if (isTaskPlanContextMessage(messages[index])) {
-			keepIndex = index;
-			break;
+		} else if (isTaskStartBoundary(message, state.phase)) {
+			// 同一周期内多次注入起边界(每轮 before_agent_start 都注入一条),旧的该清掉避免重复。
+			// 注意:只滤起边界本身,它之后的对话内容仍属本周期,保留(除非被止闭合)。
+			if (pendingStart >= 0) keep[pendingStart] = false;
+			pendingStart = index; // 新起覆盖
+		} else if (state.phase === "planning" ? isTaskReviewContextMessage(message) : isTaskPlanContextMessage(message)) {
+			keep[index] = false; // 对方阶段的起边界,滤掉
 		}
 	}
-	return messages.filter((message, index) => !isTaskPlanContextMessage(message) || index === keepIndex);
+	// ponytail: 循环结束 pendingStart >= 0 的未闭合段 = 当前 task,保留(默认 keep=true)。
+	return messages.filter((_, index) => keep[index]);
 }
 
 function restoreTaskState(data: unknown): TaskState | undefined {
@@ -1815,6 +1854,9 @@ export function registerTask(pi: ExtensionAPI): void {
 				persistState();
 				setTaskStatus(ctx, undefined);
 				restoreActiveTools();
+				// 打"止"边界:把即将结束的 task 周期闭合,新建 task 时 filterTaskContextMessages
+				// 会据此滤掉这段问答。display:false 静默,triggerTurn:false 不触发新轮次。
+				pi.sendMessage?.({ customType: TASK_CONTEXT_END_TYPE, content: "task session ended", display: false }, { triggerTurn: false });
 				ctx.ui.notify("Task disabled.", "info");
 				return;
 			}
@@ -1979,6 +2021,10 @@ export function registerTask(pi: ExtensionAPI): void {
 				ctx.ui.notify("Task review cancelled; reviewing remains active.", "info");
 				return;
 			}
+			if (lastMessageIsQuestionnaireCancellation(event.messages)) {
+				ctx.ui.notify("问卷已取消。reviewing 仍在进行,等你下一步指示或重新发起。", "info");
+				return;
+			}
 			const text = getTextContent(lastAssistant);
 			const result = extractTaskReviewResult(text);
 			if (!result) {
@@ -2009,6 +2055,10 @@ export function registerTask(pi: ExtensionAPI): void {
 		}
 		if (isCancelledAssistant(lastAssistant)) {
 			ctx.ui.notify("Task planning cancelled; planning remains active.", "info");
+			return;
+		}
+		if (lastMessageIsQuestionnaireCancellation(event.messages)) {
+			ctx.ui.notify("问卷已取消。planning 仍在进行,等你下一步指示或重新发起。", "info");
 			return;
 		}
 		const text = getTextContent(lastAssistant);

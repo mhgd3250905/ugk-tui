@@ -25,6 +25,8 @@ The questionnaire must present YOUR assumed defaults for each applicable dimensi
 
 If you emit the RequirementsSpec JSON WITHOUT having called the questionnaire tool in this phase, the runtime will reject execution and force you back to planning. Do not try to skip the questionnaire by declaring the task "clear" or "no clarification needed".
 
+If the user CANCELS the questionnaire (tool result says cancelled): a cancellation means the user does not want to answer the questionnaire right now — respect it. DO NOT immediately re-issue a fresh questionnaire. Acknowledge in one short sentence, then STOP and wait for the user's next instruction. Do not loop, do not guess the answers yourself, do not emit the Spec unconfirmed. The user will either restart the questionnaire or give you new direction.
+
 When requirements are aligned (after the questionnaire), your final assistant message must include parseable JSON only in this shape:
 
 \`\`\`json

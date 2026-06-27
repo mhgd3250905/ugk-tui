@@ -96,6 +96,9 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 		bold: (text: string) => `<b>${text}</b>`,
 	}).render(96).join("\n");
 	assert.match(coloredHeader, /<success>█+/);
+	assert.match(coloredHeader, /<b><error>██╗<\/error><\/b>/);
+	assert.match(coloredHeader, /<b><accent>██║<\/accent><\/b>/);
+	assert.match(coloredHeader, /<b><cyan>╚═════╝<\/cyan><\/b>/);
 	assert.match(coloredHeader, /<b><success>◆ What's new<\/success><\/b>/);
 	assert.match(coloredHeader, /› <success>\/plan<\/success>/);
 	assert.doesNotMatch(coloredHeader, /^<b><success>│.*What's new/m);

@@ -78,12 +78,28 @@ function hasSessionMessages(ctx: { sessionManager?: { getEntries?: () => unknown
 	return entries.length > 0;
 }
 
+function logoTone(line: string): string | undefined {
+	if (line.includes("██╗   ██╗")) return "error";
+	if (line.includes("██║   ██║██╔════╝")) return "error";
+	if (line.includes("██║   ██║██║  ███╗")) return "warning";
+	if (line.includes("██║   ██║██║   ██║")) return "accent";
+	if (line.includes("╚██████╔╝")) return "success";
+	if (line.includes("╚═════╝")) return "cyan";
+	return undefined;
+}
+
+function colorLogoGlyphs(line: string, theme: any): string {
+	const tone = logoTone(line);
+	if (!tone) return line.replace(/█+/g, (block) => theme.bold(theme.fg("success", block)));
+	return line.replace(/[█╗║╔╝╚═]+/g, (glyphs) => theme.bold(theme.fg(tone, glyphs)));
+}
+
 function colorHeaderLine(line: string, index: number, theme: any): string {
 	const trimmed = line.trimStart();
-	if (line.includes("█") && !trimmed.startsWith("│")) {
-		return theme.bold(theme.fg("success", line));
+	if (logoTone(line) && !trimmed.startsWith("│")) {
+		return colorLogoGlyphs(line, theme);
 	}
-	const logoColoredLine = line.replace(/█+/g, (block) => theme.bold(theme.fg("success", block)));
+	const logoColoredLine = colorLogoGlyphs(line, theme);
 	if (/[░▒▓]/.test(line) || trimmed.startsWith("╭")) {
 		return theme.fg("dim", line);
 	}

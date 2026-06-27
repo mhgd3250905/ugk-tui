@@ -84,7 +84,7 @@ function logoTone(line: string): string | undefined {
 	if (line.includes("██║   ██║██║  ███╗")) return "warning";
 	if (line.includes("██║   ██║██║   ██║")) return "accent";
 	if (line.includes("╚██████╔╝")) return "success";
-	if (line.includes("╚═════╝")) return "cyan";
+	if (line.includes("╚═════╝")) return "accent";
 	return undefined;
 }
 

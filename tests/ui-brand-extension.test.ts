@@ -92,13 +92,16 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	assert.match(footer.render(80).join("\n"), /第 1 轮完成/);
 
 	const coloredHeader = headerFactory!(tui, {
-		fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+		fg: (color: string, text: string) => {
+			assert.ok(["success", "error", "warning", "accent", "dim", "muted"].includes(color), `unknown color ${color}`);
+			return `<${color}>${text}</${color}>`;
+		},
 		bold: (text: string) => `<b>${text}</b>`,
 	}).render(96).join("\n");
 	assert.match(coloredHeader, /<success>█+/);
 	assert.match(coloredHeader, /<b><error>██╗<\/error><\/b>/);
 	assert.match(coloredHeader, /<b><accent>██║<\/accent><\/b>/);
-	assert.match(coloredHeader, /<b><cyan>╚═════╝<\/cyan><\/b>/);
+	assert.match(coloredHeader, /<b><accent>╚═════╝<\/accent><\/b>/);
 	assert.match(coloredHeader, /<b><success>◆ What's new<\/success><\/b>/);
 	assert.match(coloredHeader, /› <success>\/plan<\/success>/);
 	assert.doesNotMatch(coloredHeader, /^<b><success>│.*What's new/m);

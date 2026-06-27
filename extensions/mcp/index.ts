@@ -45,7 +45,10 @@ const MCP_ALLOW_ONCE = "Allow once";
 const MCP_ALLOW_SESSION = "Allow for this session";
 const MCP_DENY = "Deny";
 const CLEANUP_REASONS = new Set(["quit", "reload", "new", "resume", "fork"]);
-const STARTUP_REASONS = new Set(["startup", "reload"]);
+// ponytail: 全部 pi session_start reason 都触发 MCP 连接。原白名单只含 startup/reload,
+// 导致 resume(恢复会话,最常见的"重启 ugk")/new/fork 时 MCP 不自动加载,必须手动 /mcp reload。
+// shutdown→start 是成对的,切换会话先断开(见 CLEANUP_REASONS)再重连,逻辑自洽。
+const STARTUP_REASONS = new Set(["startup", "reload", "new", "resume", "fork"]);
 
 export type McpExtensionState = McpCommandState & {
 	registry: McpRegistry;

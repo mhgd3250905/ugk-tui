@@ -143,6 +143,28 @@ test("session_start connects configured MCP servers and registers tools", async 
 	await waitForNoProcess(/mcp-stub-server\.mjs/);
 });
 
+// ponytail: 锁死修复 —— resume/new/fork 也必须连 MCP(原白名单只含 startup/reload,
+// 导致恢复会话/新建会话时 MCP 不加载,必须手动 /mcp reload)。
+for (const reason of ["resume", "new", "fork"] as const) {
+	test(`session_start with reason "${reason}" connects MCP servers (not just startup/reload)`, async () => {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), `ugk-mcp-${reason}-`));
+		writeProjectConfig(cwd, {
+			alpha: { command: process.execPath, args: [stubServerPath] },
+		});
+		const pi = makePi(["local_tool"]);
+		const ctx = makeCtx(cwd);
+		const state = registerMcpForTest(pi);
+
+		await emit(pi, "session_start", { reason }, ctx);
+
+		assert.equal(pi.registeredTools.has("alpha__echo"), true, `${reason} 应触发 MCP 连接`);
+		assert.equal(state.failedServers?.size ?? 0, 0);
+
+		await emit(pi, "session_shutdown", { reason: "quit" }, ctx);
+		await waitForNoProcess(/mcp-stub-server\.mjs/);
+	});
+}
+
 test("session_start loads install-scope MCP servers from the UGK package root", async () => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-install-cwd-"));
 	const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-install-package-"));

@@ -112,11 +112,11 @@ if (failures.length > 0) {
 
 ## 标准创建流程（5 步，替代满仓乱扫）
 
-1. **读源能力** — 读要封装的 skill/脚本本体，搞懂它接受什么、产出什么。只读这一个目录，别扩散。
+1. **读源能力** — 读要封装的 skill/脚本本体，搞懂它接受什么、产出什么。只读这一个目录，别扩散。**如果源是现成脚本（.py/.mjs/.sh），记下它——稍后复制进 taskbook 的 `scripts/` 子目录让 worker 直接调用，别让 worker 现写一份。**
 2. **定参数** — 哪些值每次运行会变？把它们定为 `contract.json` 的 `runtimeInput`。固定值写进脚本/spec，别参数化。
-3. **照样本写五件套** — `ls ~/.pi/agent/tasks/` 找一个**真实样本**对照，按上面格式填五个文件。
+3. **照样本写五件套** — `ls ~/.pi/agent/tasks/` 找一个**真实样本**对照，按上面格式填五个文件。**有现成脚本就一并建 `scripts/` 子目录把脚本放进去，skill.md 里用 `$TASK_DIR/scripts/xxx` 引用**（见上方"自带脚本"段）。
 4. **手验 verify.mjs** — 自己设 `TASK_INPUT` / `TASK_OUTPUT_DIR` 环境变量跑一遍 verify，确认它真能判对错。这步省不得，验收脚本错了 task 永远过不了或假通过。
-5. **落盘 + 试跑** — 五件套写到 scope 目录，`/task run <name> <自然语言输入>` 试一次，看 PASS。
+5. **落盘 + 试跑** — 五件套（+ scripts/）写到 scope 目录，`/task run <name> <自然语言输入>` 试一次，看 PASS。
 
 ## 铁律
 

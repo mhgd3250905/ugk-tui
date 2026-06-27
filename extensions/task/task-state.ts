@@ -19,6 +19,14 @@ export interface ExecuteProcessEntry {
 	timestamp: string;
 }
 
+// ponytail: 持久化的"上次 run 复盘上下文",镜像内存里的 lastTaskRunReview。
+// 存 content 而非 runDir 再重建——report 是给 reviewer 的文本,存它重进直接用,
+// 比从 runDir 反查产物+重建 report 简单得多(后者要 loaded taskbook + formatRunResult)。
+export interface LastRunReview {
+	taskbookName: string;
+	content: string;
+}
+
 export interface TaskState {
 	phase: TaskPhase;
 	spec: RequirementsSpec | null;
@@ -33,6 +41,7 @@ export interface TaskState {
 	executeProcessLog: ExecuteProcessEntry[];
 	reviewResult?: TaskReviewResult;
 	pendingTransition?: TaskPendingTransition;
+	lastRunReview?: LastRunReview;
 }
 
 export function createTaskState(): TaskState {
@@ -66,6 +75,7 @@ export function enterPlanning(state: TaskState): TaskState {
 		executeProcessLog: [],
 		reviewResult: undefined,
 		pendingTransition: undefined,
+		lastRunReview: undefined,
 	};
 }
 

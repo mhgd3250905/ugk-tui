@@ -1440,7 +1440,7 @@ test("/task menu selects taskbook name for show edit delete and run", async () =
 });
 
 test("/task run executes worker, verify, and records a pass run", async () => {
-	const { pi, commands, sentMessages } = makePi();
+	const { pi, commands, sentMessages, entries } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async () => ({
@@ -1469,6 +1469,10 @@ test("/task run executes worker, verify, and records a pass run", async () => {
 		assert.match(latestTaskMessage(sentMessages), /PASS/);
 		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
 		assert.deepEqual(loaded?.taskbook.runs.at(-1)?.input, { url: "https://x" });
+		// ponytail: run 后 lastRunReview 应持久化进 task-state entry,让退出重进能恢复复盘
+		const stateEntry = [...entries].reverse().find((e) => e.customType === "task-state");
+		assert.equal(stateEntry?.data?.lastRunReview?.taskbookName, "runner");
+		assert.match(stateEntry?.data?.lastRunReview?.content ?? "", /TASK RUN REVIEW/);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
@@ -1851,6 +1855,9 @@ test("/task run user abort (worker throws) reports stopped, not exception", asyn
 		assert.ok(notifications.some((item) => /已请求停止/.test(item.message)), "应发出停止请求通知");
 		assert.ok(notifications.some((item) => /已停止 taskbook/.test(item.message)), "应走已停止分支");
 		assert.ok(!notifications.some((item) => /运行异常/.test(item.message)), "不应报运行异常");
+		// ponytail: abort 后应补记一条 fail run 到 taskbook,否则中断 run 成孤儿历史不全
+		const afterAbort = await loadTaskbook(cwd, "runner-throw-abort");
+		assert.ok(afterAbort?.taskbook.runs.some((r) => r.status === "fail"), "abort 应在 taskbook 补记 fail run");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);

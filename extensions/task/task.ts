@@ -43,6 +43,7 @@ import {
 	setTaskSpec,
 	setTaskReviewResult,
 	startExecuting,
+	type LastRunReview,
 	type TaskPhase,
 	type TaskState,
 } from "./task-state.ts";
@@ -335,6 +336,11 @@ function restoreTaskState(data: unknown): TaskState | undefined {
 		executeProcessLog: Array.isArray(record.executeProcessLog) ? record.executeProcessLog as TaskState["executeProcessLog"] : [],
 		pendingTransition: record.pendingTransition === "execute" || record.pendingTransition === "review" || record.pendingTransition === "save" || record.pendingTransition === "repair"
 			? record.pendingTransition
+			: undefined,
+		lastRunReview: record.lastRunReview && typeof record.lastRunReview === "object"
+			&& typeof (record.lastRunReview as LastRunReview).taskbookName === "string"
+			&& typeof (record.lastRunReview as LastRunReview).content === "string"
+			? record.lastRunReview as LastRunReview
 			: undefined,
 	};
 }
@@ -1248,6 +1254,7 @@ async function handleTaskRun(
 	rawInput: string,
 	onFail?: (failure: TaskRunFailure) => void,
 	activeTools: string[] = TASK_NORMAL_TOOLS,
+	onReviewReady?: (review: LastRunReview) => void,
 ): Promise<void> {
 	if (activeTaskRun) {
 		ctx.ui.notify(`taskbook "${activeTaskRun.taskbookName}" 正在运行。可用 /task stop 中断。`, "warning");
@@ -1321,10 +1328,23 @@ async function handleTaskRun(
 		const duration = (Date.now() - startedAt) / 1000;
 		const passed = workerResult.ok && verifyResult.passed;
 
-		// abort:用户主动 /task stop 中断,不算失败,不发 onFail
+		// abort:用户主动 /task stop 中断,不算失败,不发 onFail。但补记一条 run,
+		// 让中断的 run 进 taskbook 历史(否则复盘数据不全——失败/中断的 run 散落在
+		// .tasks/runs/ 成孤儿,taskbook 历史不认它)。status 记 fail(没成功),区别在
+		// 不调 onFail 不触发修复流程。
 		if (!workerResult.ok && outcome.aborted) {
+			await appendRunToTaskbook(loaded.scope, cwdOf(ctx), finalName, {
+				timestamp: new Date().toISOString(),
+				status: "fail",
+				input: runtimeInput,
+				exitCode: 1,
+				verifyFailures: [],
+				duration,
+				phases: outcome.phases,
+			});
 			const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, false, attempts, duration, runState.progress, runState.notes, outcome.phases);
 			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
+			onReviewReady?.(lastTaskRunReview);
 			ctx.ui.notify(`已停止 taskbook "${finalName}" 运行。下一步可用 /task 选择"复盘上次运行"。`, "info");
 			return;
 		}
@@ -1341,6 +1361,7 @@ async function handleTaskRun(
 			});
 			const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, true, attempts, duration, runState.progress, runState.notes, outcome.phases);
 			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
+			onReviewReady?.(lastTaskRunReview);
 			sendTaskProgressMessage(pi, { taskbookName: finalName, status: "PASS", lines: runState.progress });
 			sendTaskMessage(pi, ctx, report, "info");
 			return;
@@ -1363,6 +1384,7 @@ async function handleTaskRun(
 		});
 		const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, false, attempts, duration, runState.progress, runState.notes, outcome.phases);
 		lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
+		onReviewReady?.(lastTaskRunReview);
 		sendTaskProgressMessage(pi, { taskbookName: finalName, status: "FAIL", lines: runState.progress });
 		onFail?.({
 			taskbookName: finalName,
@@ -1871,7 +1893,12 @@ export function registerTask(pi: ExtensionAPI): void {
 				}, "repair");
 				persistState();
 				setTaskStatus(ctx, "📋 task");
-			}, typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS);
+			}, typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS, (review) => {
+				// ponytail: run 结束(含 abort/pass/fail)后把 lastRunReview 持久化进 state,
+				// 让退出重进后 /task 仍能"复盘上次运行"。
+				state = { ...state, lastRunReview: review };
+				persistState();
+			});
 			if (action === "delete") return await handleTaskDelete(ctx, name, tokens);
 			if (action === "rename") return await handleTaskRename(ctx, name, tokens);
 			if (action === "stop" || action === "exit" || action === "toggle" || action === "abort") {
@@ -1901,6 +1928,9 @@ export function registerTask(pi: ExtensionAPI): void {
 			const restored = restoreTaskState(entry.data);
 			if (!restored) break;
 			state = restored;
+			// ponytail: 从持久化的 state 恢复内存里的 lastTaskRunReview,让退出重进后
+			// /task 菜单仍能显示"复盘上次运行"。content 直接复用,不用从 runDir 重建。
+			if (state.lastRunReview) lastTaskRunReview = state.lastRunReview;
 			if (isActivePhase(state.phase) || state.pendingTransition === "repair") {
 				restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
 				if (state.phase === "planning") pi.setActiveTools?.(TASK_PLANNING_TOOLS);

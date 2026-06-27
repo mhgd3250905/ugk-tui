@@ -46,7 +46,7 @@ export interface ChromeCdpDeps {
 	getStatus?: (port: number) => Promise<Awaited<ReturnType<typeof getChromeCdpStatus>>>;
 	listTabs?: (port: number) => Promise<ChromeTab[]>;
 	navigate?: (port: number, target: string | undefined, url: string) => Promise<unknown>;
-	evaluate?: (port: number, target: string | undefined, expression: string) => Promise<unknown>;
+	evaluate?: (port: number, target: string | undefined, expression: string, timeoutMs?: number) => Promise<unknown>;
 	screenshot?: (port: number, target: string | undefined, path: string) => Promise<unknown>;
 	launch?: (port: number) => Promise<string>;
 }
@@ -59,8 +59,8 @@ function defaultDeps(): Required<ChromeCdpDeps> {
 		getStatus: async (port) => getChromeCdpStatus(createChromeCdpClient({ port })),
 		listTabs: async (port) => listChromeTabs(createChromeCdpClient({ port })),
 		navigate: async (port, target, url) => navigateChromeTab(createChromeCdpClient({ port }), target, url),
-		evaluate: async (port, target, expression) =>
-			evaluateChromeExpression(createChromeCdpClient({ port }), target, expression),
+		evaluate: async (port, target, expression, timeoutMs) =>
+			evaluateChromeExpression(createChromeCdpClient({ port }), target, expression, timeoutMs),
 		screenshot: async (port, target, filePath) =>
 			captureChromeScreenshot(createChromeCdpClient({ port }), target, filePath),
 		launch: async (port) => launchChromeCdpAndWait(port),
@@ -140,6 +140,12 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 			target: Type.Optional(Type.String({ description: "Tab id, URL substring, or title substring." })),
 			url: Type.Optional(Type.String({ description: "URL for navigate." })),
 			expression: Type.Optional(Type.String({ description: "JavaScript expression for evaluate." })),
+			timeoutMs: Type.Optional(
+				Type.Number({
+					description:
+						"Optional. CDP response timeout in ms for evaluate. Defaults to 10000. Pass a larger value (e.g. 90000) when the expression runs a long in-page async loop (scroll-and-collect, polling) so the whole loop completes in one call instead of timing out. Other actions ignore this.",
+				}),
+			),
 			path: Type.Optional(Type.String({ description: "Output path for screenshot PNG." })),
 			reason: Type.String({ description: "Why CDP is needed for this operation." }),
 			normalAccessAttempted: Type.Boolean({
@@ -187,7 +193,7 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 			}
 			if (action === "evaluate") {
 				if (!params.expression) return textResult("evaluate requires expression.", { ok: false });
-				const result = await deps.evaluate(port, target, params.expression);
+				const result = await deps.evaluate(port, target, params.expression, params.timeoutMs);
 				return textResult(JSON.stringify(result, null, 2), { ok: true, result });
 			}
 			if (action === "screenshot") {

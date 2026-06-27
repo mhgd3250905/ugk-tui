@@ -75,6 +75,7 @@ function sendCdpCommand(
 	webSocketUrl: string,
 	method: string,
 	params: Record<string, unknown>,
+	timeoutMs = 10000,
 ): Promise<any> {
 	return new Promise((resolve, reject) => {
 		const socket = new WebSocketCtor(webSocketUrl);
@@ -84,7 +85,7 @@ function sendCdpCommand(
 				socket.close();
 			} catch {}
 			reject(new Error(`Timed out waiting for CDP response: ${method}`));
-		}, 10000);
+		}, timeoutMs);
 
 		socket.onopen = () => {
 			socket.send(JSON.stringify({ id, method, params }));
@@ -116,13 +117,23 @@ export async function evaluateChromeExpression(
 	client: ChromeCdpClient,
 	target: string | undefined,
 	expression: string,
+	timeoutMs?: number,
 ) {
 	const tab = await findTab(client, target);
-	const result = await sendCdpCommand(client.WebSocket, tab.webSocketDebuggerUrl!, "Runtime.evaluate", {
-		expression,
-		returnByValue: true,
-		awaitPromise: true,
-	});
+	const result = await sendCdpCommand(
+		client.WebSocket,
+		tab.webSocketDebuggerUrl!,
+		"Runtime.evaluate",
+		{
+			expression,
+			returnByValue: true,
+			awaitPromise: true,
+		},
+		// ponytail: evaluate 含 awaitPromise:true,页面内 async(反爬 sleep/滚动循环)也受此超时罩着。
+		// 默认 10s 对短操作够用;长循环(30 轮滚动抓取)显式传大值,让整个循环在一个 evaluate 内跑完。
+		// 不设上限——调用方负责合理值(CDP 本身有连接级超时兜底)。
+		timeoutMs,
+	);
 	return result.result;
 }
 

@@ -128,6 +128,38 @@ test("evaluateChromeExpression sends Runtime.evaluate and returns value", async 
 	});
 });
 
+// ponytail: timeoutMs 透传验证。长循环(滚动抓取)需要大超时,默认 10s 会打断页面内 async。
+// 用永不响应的 fake 模拟卡死,确认默认 10s 和传入值都能 reject(透传生效)。
+class SilentWebSocket {
+	readonly url: string;
+	onopen: (() => void) | null = null;
+	onmessage: ((event: { data: string }) => void) | null = null;
+	onerror: ((event: unknown) => void) | null = null;
+	onclose: (() => void) | null = null;
+	constructor(url: string) {
+		this.url = url;
+		queueMicrotask(() => this.onopen?.());
+	}
+	send() { /* 故意不响应,触发超时 */ }
+	close() { this.onclose?.(); }
+}
+
+test("evaluateChromeExpression 默认超时 10s,传入 timeoutMs 生效", async () => {
+	const client = createChromeCdpClient({
+		port: 9222,
+		fetch: makeFetch(sampleTabs),
+		WebSocket: SilentWebSocket as any,
+	});
+
+	// 传入 50ms 超时,确认被透传并触发 reject(而非等默认 10s)
+	const start = Date.now();
+	await assert.rejects(
+		evaluateChromeExpression(client, "tab-1", "long loop", 50),
+		/Timed out waiting for CDP response/,
+	);
+	assert.ok(Date.now() - start < 1000, "应在传入的 50ms 附近超时,而非等 10s 默认值");
+});
+
 test("captureChromeScreenshot writes screenshot bytes to disk", async () => {
 	FakeWebSocket.sent = [];
 	FakeWebSocket.response = { id: 1, result: { data: Buffer.from("png").toString("base64") } };

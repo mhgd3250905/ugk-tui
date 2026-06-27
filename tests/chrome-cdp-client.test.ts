@@ -128,8 +128,8 @@ test("evaluateChromeExpression sends Runtime.evaluate and returns value", async 
 	});
 });
 
-// ponytail: timeoutMs 透传验证。长循环(滚动抓取)需要大超时,默认 10s 会打断页面内 async。
-// 用永不响应的 fake 模拟卡死,确认默认 10s 和传入值都能 reject(透传生效)。
+// ponytail: timeoutMs 透传 + 钳位验证。client.ts 钳位到 1s~5min:
+// 防负数/0 立即触发(下限),防 LLM 传天文数字挂起(上限)。用永不响应的 fake 模拟卡死。
 class SilentWebSocket {
 	readonly url: string;
 	onopen: (() => void) | null = null;
@@ -144,20 +144,21 @@ class SilentWebSocket {
 	close() { this.onclose?.(); }
 }
 
-test("evaluateChromeExpression 默认超时 10s,传入 timeoutMs 生效", async () => {
+test("evaluateChromeExpression timeoutMs 透传且钳位到 1s~5min", async () => {
 	const client = createChromeCdpClient({
 		port: 9222,
 		fetch: makeFetch(sampleTabs),
 		WebSocket: SilentWebSocket as any,
 	});
 
-	// 传入 50ms 超时,确认被透传并触发 reject(而非等默认 10s)
+	// 传合法值 1100ms:应在该值附近超时(证明透传,而非默认 10s,也没被异常钳到下限)
 	const start = Date.now();
 	await assert.rejects(
-		evaluateChromeExpression(client, "tab-1", "long loop", 50),
+		evaluateChromeExpression(client, "tab-1", "loop", 1100),
 		/Timed out waiting for CDP response/,
 	);
-	assert.ok(Date.now() - start < 1000, "应在传入的 50ms 附近超时,而非等 10s 默认值");
+	const elapsed = Date.now() - start;
+	assert.ok(elapsed >= 1000 && elapsed < 3000, `1100ms 应在 1~3s 超时,实际 ${elapsed}ms`);
 });
 
 test("captureChromeScreenshot writes screenshot bytes to disk", async () => {

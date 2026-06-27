@@ -77,6 +77,9 @@ function sendCdpCommand(
 	params: Record<string, unknown>,
 	timeoutMs = 10000,
 ): Promise<any> {
+	// ponytail: 钳位 1s~5min。下限防 0/负数立即触发(等于没超时保护);上限防 LLM 乱传
+	// 天文数字让 evaluate 长时间挂起占用 CDP tab/worker 进程。5min 够任何滚动循环。
+	const clampedTimeoutMs = Math.min(Math.max(timeoutMs, 1000), 300000);
 	return new Promise((resolve, reject) => {
 		const socket = new WebSocketCtor(webSocketUrl);
 		const id = 1;
@@ -85,7 +88,7 @@ function sendCdpCommand(
 				socket.close();
 			} catch {}
 			reject(new Error(`Timed out waiting for CDP response: ${method}`));
-		}, timeoutMs);
+		}, clampedTimeoutMs);
 
 		socket.onopen = () => {
 			socket.send(JSON.stringify({ id, method, params }));

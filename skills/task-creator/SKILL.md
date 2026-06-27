@@ -32,6 +32,33 @@ taskbook 只有两个 scope，目录就是固定的，别猜、别 find：
 
 **不带脚本**的 taskbook 不用建 `scripts/`，零侵入。带脚本时五件套 + `scripts/` 共存，`loadTaskbook` 不读 scripts 内容（worker 自己调），只需路径约定。
 
+## skill vs task：别复刻，要调用
+
+skill 和 task 是两层，别混：
+
+- **skill** = 解决一类问题的能力，独立装在 `<ugk>/skills/`（系统自带，跟包走）或 `<ugk>/user-skills/<name>/`（你装的），被任何 agent/task 复用
+- **task** = 固定参数化任务的复用入口（外部输入 + 机器验收），它的活儿是**调用**能力，不是复制能力
+
+**关键事实：worker 子进程已经能加载所有已安装的 skill。** worker 跑起来时，已装 skill 会出现在它的可用能力里（系统自带的 + user-skills 都能看到）。所以：
+
+- **把 skill 转成 task 时，默认让 task 调用 skill，不要把 skill 的脚本/逻辑复制进 taskbook 重写。**
+- task 的 skill.md 只写"调用 `<skill名>` 完成 `<目标>`"，加运行参数，不抄 skill 的实现。
+- 如果被调用的 skill 需要 `chrome_cdp` / MCP 工具，在 task 的 `contract.requiredTools` 里**显式声明**——这是 worker 工具授权门和 CDP tab 隔离的数据源，写了才生效（否则 skill 的 CDP 调用会打到未隔离的共享 tab，污染数据）。
+
+### 迁移旧 skill（含本地不兼容配置）的标准动作
+
+源 skill 往往带别的环境的配置（Docker sidecar 桥接、`/app/runtime/` 路径、`CLAUDE_*` env）。**先把 skill 改造成本机能用、再让 task 调用它**，而不是把逻辑塞进 taskbook 重写：
+
+1. 把 skill 装进 `<ugk>/user-skills/<name>/`（系统自带 skill 跟包走，别动）
+2. 改造不兼容部分（grep 出来逐个换）：
+   - Docker/web-access 桥接（`host-bridge.mjs`、`127.0.0.1:3456`、`docker:chrome`）→ 换成 `chrome_cdp` 工具
+   - 容器硬编码路径（`/app/runtime/...`）→ 换成 `$TASK_DIR`（taskbook 脚本）或相对路径
+   - 其他 agent 的 env（`CLAUDE_AGENT_ID`、`WEB_ACCESS_*`）→ 用标准 env 或去掉
+3. 验证改造后的 skill 本身能跑（直接触发它试一次）
+4. 再创建 task 调用它，`contract.requiredTools` 声明 skill 用到的受保护工具
+
+只有当 skill 的逻辑**几乎全不兼容、改造成本超过重写**时，才退回上一节的 `scripts/` 自带脚本方案。
+
 ## 五件套格式（照真实样本）
 
 一个 taskbook 是一个目录，下面五个文件，缺一不可。字段都从真实运行过的 taskbook 提取，照着填：
@@ -132,4 +159,5 @@ if (failures.length > 0) {
 - ❌ 读 ugk-core 的 `task-guide.ts` 想搞懂"怎么创建" —— 那是"导览**已有** taskbook"的，不是创建指南。
 - ❌ 凭空捏造五件套格式 —— 先 `ls ~/.pi/agent/tasks/` 找真实样本。
 - ❌ 把 taskbook 放进 skills/ 目录 —— skill 和 taskbook 是两个系统，位置不同。
+- ❌ 把 skill 的脚本/逻辑复制进 taskbook 重写 —— worker 已能加载已装 skill，应让 task 调用 skill，别复刻。只有当 skill 几乎全不兼容、重写更划算时才退回 `scripts/` 自带脚本。
 - ❌ skill.md 里写裸脚本名（如 `python foo.py`）却不在 taskbook 自带 —— worker 在用户 cwd 跑，找不到。要么把脚本放进 `scripts/` 用 `$TASK_DIR/scripts/foo.py` 引用，要么让 worker 自己现写。

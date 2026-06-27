@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
@@ -45,13 +45,17 @@ function formatTitle(pi: ExtensionAPI, cwd: string): string {
 	return session ? `ugk - ${session} - ${cwdName}` : `ugk - ${cwdName}`;
 }
 
+function getTitleCwd(ctx: ExtensionContext): string {
+	return ctx.sessionManager?.getCwd?.() ?? ctx.cwd ?? process.cwd();
+}
+
 // ponytail: spinner 动画从 ui-titlebar 并入(修 title 抢占 bug)。ugk 品牌标题优先,
 // 工作态前缀盲文帧、idle 态恢复静态 ugk 标题;off 时 stop,不抢 title。
 const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 80;
 
-function formatSpinningTitle(pi: ExtensionAPI, frame: string): string {
-	const cwdName = path.basename(process.cwd());
+function formatSpinningTitle(pi: ExtensionAPI, frame: string, cwd: string): string {
+	const cwdName = path.basename(cwd);
 	const session = pi.getSessionName();
 	return session ? `${frame} ugk - ${session} - ${cwdName}` : `${frame} ugk - ${cwdName}`;
 }
@@ -175,7 +179,7 @@ interface BrandUiSessionSource {
 	modelId?: string;
 	modelContextWindow?: number;
 	thinkingLevel?: string;
-	contextUsage?: { percent?: number; contextWindow?: number };
+	getContextUsage?: () => ContextUsage | undefined;
 	sessionManager?: {
 		getCwd?: () => string;
 		getEntries?: () => unknown[];
@@ -189,7 +193,7 @@ function createBrandUiSessionSource(ctx: ExtensionContext): BrandUiSessionSource
 		modelId: ctx.model?.id,
 		modelContextWindow: ctx.model?.contextWindow,
 		thinkingLevel: (ctx as any).session?.state?.thinkingLevel,
-		contextUsage: ctx.getContextUsage?.(),
+		getContextUsage: ctx.getContextUsage?.bind(ctx),
 		sessionManager: ctx.sessionManager,
 	};
 }
@@ -241,7 +245,12 @@ function collectUsage(source: BrandUiSessionSource): UgkFooterUsage {
 		cacheWrite += message.usage.cacheWrite || 0;
 		cost += message.usage.cost?.total || 0;
 	}
-	const context = source.contextUsage;
+	let context: ContextUsage | undefined;
+	try {
+		context = source.getContextUsage?.();
+	} catch {
+		context = undefined;
+	}
 	return {
 		input,
 		output,
@@ -323,7 +332,7 @@ export default function registerUgkBrandUi(pi: ExtensionAPI): void {
 		spinnerFrame = 0;
 		if (enabled) {
 			try {
-				ctx.ui.setTitle(formatTitle(pi, process.cwd()));
+				ctx.ui.setTitle(formatTitle(pi, getTitleCwd(ctx)));
 			} catch {
 				// session 可能在 replacement/reload 拆除时已 stale。
 			}
@@ -336,7 +345,7 @@ export default function registerUgkBrandUi(pi: ExtensionAPI): void {
 		spinnerTimer = setInterval(() => {
 			try {
 				const frame = BRAILLE_FRAMES[spinnerFrame % BRAILLE_FRAMES.length];
-				ctx.ui.setTitle(formatSpinningTitle(pi, frame));
+				ctx.ui.setTitle(formatSpinningTitle(pi, frame, getTitleCwd(ctx)));
 				spinnerFrame++;
 			} catch {
 				if (spinnerTimer) {

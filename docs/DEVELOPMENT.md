@@ -31,6 +31,7 @@
 - `installUgkSessionViewPatch` — session 视图/autocomplete
 - `installUgkPackageUpdatePatch` — 压制 `pi update` 提示
 - `installUgkExtensionOverlayPatch` — 扩展 overlay 打开时暂停 `Working...` spinner,消除 questionnaire 等输入框闪烁
+- `installUgkEditorBorderGlyphPatch` — 编辑器边框虚线化
 
 **注意**:pi 升级后每个 patch 的 descriptor/方法检查可能失效,需回归。
 

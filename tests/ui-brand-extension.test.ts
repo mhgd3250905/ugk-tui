@@ -108,7 +108,7 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	header.dispose?.();
 });
 
-test("ugk brand header and footer do not read extension ctx during render", async () => {
+test("ugk brand header and footer tolerate stale extension ctx during render", async () => {
 	const handlers = new Map<string, Function>();
 	const pi = {
 		on(event: string, handler: Function) {
@@ -137,7 +137,10 @@ test("ugk brand header and footer do not read extension ctx during render", asyn
 				getBranch: () => [],
 			};
 		},
-		getContextUsage: () => ({ percent: 0, contextWindow: 1000000 }),
+		getContextUsage() {
+			if (stale) throw new Error("This extension ctx is stale after session replacement or reload.");
+			return { percent: 0, contextWindow: 1000000 };
+		},
 		ui: {
 			setHeader: (factory: unknown) => {
 				headerFactory = factory as Function;
@@ -393,4 +396,52 @@ test("ugk brand footer colors context progress by percentage", async () => {
 	assert.match(footer.render(140).join("\n"), /<warning>██████<\/warning><dim>▒▒<\/dim>/);
 	contextUsage.percent = 95;
 	assert.match(footer.render(140).join("\n"), /<error>████████<\/error>/);
+});
+
+test("ugk brand footer refreshes context usage on each render", async () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand() {},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	let footerFactory: Function | undefined;
+	let percent = 0;
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "mimo-v2.5-pro", contextWindow: 1000000 },
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => [],
+			getBranch: () => [],
+		},
+		getContextUsage: () => ({ percent, contextWindow: 1000000 }),
+		ui: {
+			setHeader: () => {},
+			setFooter: (factory: unknown) => {
+				footerFactory = factory as Function;
+			},
+			setTitle: () => {},
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await handlers.get("session_start")!({ reason: "startup" }, ctx);
+	const footer = footerFactory!({ requestRender() {} }, { fg: (_color: string, text: string) => text }, {
+		getGitBranch: () => null,
+		getExtensionStatuses: () => new Map(),
+		onBranchChange: () => () => {},
+	});
+
+	assert.match(footer.render(140).join("\n"), /0\.0%\/1\.0M/);
+	percent = 42.5;
+	assert.match(footer.render(140).join("\n"), /42\.5%\/1\.0M/);
 });

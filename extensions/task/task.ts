@@ -245,14 +245,13 @@ function isCancelledAssistant(message: any): boolean {
 // ponytail: questionnaire 被用户取消 ≠ agent 没本事吐 spec。取消是 tool result(不是
 // abort 信号),assistant 之后会正常输出"已取消,等你指示"。若 task 仍按 !spec 分支发
 // followUp,pi 会自动续命重跑问卷(agent 也会因 prompt 强制调问卷而照办)—— 又死循环。
-// 这里识别"最后一条 tool result 是 questionnaire 取消",让 task 同样停下交还控制权。
-function lastMessageIsQuestionnaireCancellation(messages: any[]): boolean {
-	const lastToolResult = [...messages].reverse().find((message) => message?.role === "toolResult");
-	if (!lastToolResult) return false;
-	const text = Array.isArray(lastToolResult.content)
-		? lastToolResult.content.filter((block: any) => block.type === "text").map((block: any) => block.text).join("\n")
-		: "";
-	return /\bUser cancelled the questionnaire\b/i.test(text);
+// 这里识别"本次 turn 里有 questionnaire 取消",让 task 停下交还控制权。
+// ponytail: 取消是不可恢复语义——一旦取消,本次 turn 产物就该作废。所以扫整条序列找
+// 取消信号,而不是只看"最后一条 toolResult"。否则取消后 agent 再调一个 tool(read 等),
+// 新 toolResult 会把取消的盖掉,task 又误判成"没产物该重试",死循环原样复发。
+function hasQuestionnaireCancellation(messages: any[]): boolean {
+	return messages.some((message) =>
+		message?.role === "toolResult" && /\bUser cancelled the questionnaire\b/i.test(getTextContent(message)));
 }
 
 function isTaskPlanContextMessage(message: any): boolean {
@@ -2021,7 +2020,7 @@ export function registerTask(pi: ExtensionAPI): void {
 				ctx.ui.notify("Task review cancelled; reviewing remains active.", "info");
 				return;
 			}
-			if (lastMessageIsQuestionnaireCancellation(event.messages)) {
+			if (hasQuestionnaireCancellation(event.messages)) {
 				ctx.ui.notify("问卷已取消。reviewing 仍在进行,等你下一步指示或重新发起。", "info");
 				return;
 			}
@@ -2057,7 +2056,7 @@ export function registerTask(pi: ExtensionAPI): void {
 			ctx.ui.notify("Task planning cancelled; planning remains active.", "info");
 			return;
 		}
-		if (lastMessageIsQuestionnaireCancellation(event.messages)) {
+		if (hasQuestionnaireCancellation(event.messages)) {
 			ctx.ui.notify("问卷已取消。planning 仍在进行,等你下一步指示或重新发起。", "info");
 			return;
 		}

@@ -831,9 +831,61 @@ test("/task reviewing questionnaire cancellation stops instead of followUp-reviv
 	assert.match(notifications.at(-1)?.message ?? "", /取消/);
 });
 
-// ponytail: task 周期隔离。上个 task 的问答(问卷答案、Spec)不能污染新建 task 的 agent
-// 上下文。退出 task 时注入 task-context-end"止"边界,filterTaskContextMessages 成对滤掉
-// (起 ... 止)之间的已结束周期;用户退出后的闲聊在止之后,不属任何周期,保留。
+// ponytail: 取消问卷后,agent 可能再调别的 tool(如 read 探索)再停下。旧的"只看最后一条
+// toolResult"判定会被 read 的 toolResult 盖掉取消信号,误判"没产物该重试",死循环复发。
+// 改成扫整条序列找取消信号后,这种场景必须正确停下。
+test("/task planning questionnaire cancellation still recognized when a later tool masks it", async () => {
+	const { pi, handlers, userMessages, entries } = makePi();
+	const { ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterPlanning(createTaskState()),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+	const entriesBefore = entries.length;
+
+	// 取消问卷 → agent 又调 read(产生新 toolResult,掩盖取消信号)→ agent 停下。
+	await handlers.get("agent_end")![0]({
+		messages: [
+			{ role: "assistant", content: [{ type: "text", text: "Let me confirm." }] },
+			{ role: "toolResult", content: [{ type: "text", text: "User cancelled the questionnaire" }] },
+			{ role: "assistant", content: [{ type: "text", text: "已取消,我先 read 一下相关文件。" }] },
+			{ role: "toolResult", content: [{ type: "text", text: "file contents here" }] },
+			{ role: "assistant", content: [{ type: "text", text: "好的,先停在这里等你指示。" }] },
+		],
+	}, ctx);
+
+	assert.equal(userMessages.length, 0, "取消信号被后续 toolResult 掩盖时仍须停下,不发 followUp");
+	assert.equal(entries.length, entriesBefore);
+	assert.match(notifications.at(-1)?.message ?? "", /取消/);
+});
+
+// ponytail: planning→reviewing 在同一 session 内切换时,messages 会混着 plan-ctx 和
+// review-ctx 两种起边界。filterTaskContextMessages 的"对方阶段起边界"分支(只滤起本身,
+// 不动内容)此前无测试触达。
+test("/task reviewing filters out planning start-boundaries but keeps reviewing cycle intact", async () => {
+	const { pi, handlers } = makePi();
+	const { ctx } = makeCtx();
+	registerTask(pi as any);
+
+	// 进入 reviewing 态。
+	ctx.sessionManager.getEntries = () => [{
+		customType: "task-state",
+		data: enterReviewing(startExecuting(markPlanQuestionnaireUsed(setTaskSpec(enterPlanning(createTaskState()), spec)), "run-dir"), "done"),
+	}];
+	await handlers.get("session_start")![0]({}, ctx);
+
+	// 混合:旧的 plan-ctx(planning 残留)+ 当前 review-ctx。
+	const planCtx = { role: "custom", customType: "task-plan-context", content: "stale from planning" };
+	const reviewCtx = { role: "custom", customType: "task-review-context", content: "current review" };
+	const qa = { role: "assistant", content: [{ type: "text", text: "review 内容" }] };
+	const filtered = await handlers.get("context")![0]({ messages: [planCtx, reviewCtx, qa] }, ctx);
+
+	// plan-ctx(对方阶段起边界)滤掉;review 当前周期(起 + 内容)保留。
+	assert.deepEqual(filtered.messages, [reviewCtx, qa]);
+});
 
 test("/task new after a previous exited task strips the previous task's Q&A but keeps post-exit chat", async () => {
 	const { pi, commands, handlers } = makePi();

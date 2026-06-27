@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { applyUgkRuntimePolicy } from "../bin/ugk-runtime-policy.js";
+import { Editor } from "@earendil-works/pi-tui";
+import { CustomEditor } from "@earendil-works/pi-coding-agent";
+import { applyUgkRuntimePolicy, installUgkEditorBorderGlyphPatch } from "../bin/ugk-runtime-policy.js";
 
 const PINNED_PI_VERSION = "0.79.4";
 const PI_DEPENDENCIES = [
@@ -54,4 +56,34 @@ test("applyUgkRuntimePolicy disables pi-owned update surfaces", () => {
 
 	assert.equal(env.PI_SKIP_VERSION_CHECK, "1");
 	assert.equal(env.PI_TELEMETRY, "0");
+});
+
+test("applyUgkRuntimePolicy softens editor border glyphs", () => {
+	const editor = new Editor(
+		{ terminal: { rows: 24 }, requestRender() {} } as any,
+		{ borderColor: (text: string) => text, selectList: {} as any },
+	);
+	editor.setText("keep ─ typed");
+
+	applyUgkRuntimePolicy({});
+
+	const lines = editor.render(12);
+
+	assert.equal(lines[0], "╌".repeat(12));
+	assert.equal(lines.at(-1), "╌".repeat(12));
+	assert.match(lines.join("\n"), /keep ─/);
+});
+
+test("applyUgkRuntimePolicy softens coding-agent custom editor border glyphs", () => {
+	installUgkEditorBorderGlyphPatch(CustomEditor);
+	const editor = new CustomEditor(
+		{ terminal: { rows: 24 }, requestRender() {} } as any,
+		{ borderColor: (text: string) => text, selectList: {} as any },
+		{ matches: () => false } as any,
+	);
+
+	const lines = editor.render(12);
+
+	assert.equal(lines[0], "╌".repeat(12));
+	assert.equal(lines.at(-1), "╌".repeat(12));
 });

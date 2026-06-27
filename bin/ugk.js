@@ -17,7 +17,7 @@ import { dirname, resolve } from "node:path";
 import { buildUgkCliArgs } from "./ugk-cli-args.js";
 import { installUgkExtensionOverlayPatch } from "./ugk-extension-overlay-patch.js";
 import { installUgkPackageUpdatePatch } from "./ugk-package-update-patch.js";
-import { applyUgkRuntimePolicy } from "./ugk-runtime-policy.js";
+import { applyUgkRuntimePolicy, installUgkEditorBorderGlyphPatch } from "./ugk-runtime-policy.js";
 import { installUgkSessionViewPatch } from "./ugk-session-view-patch.js";
 import { ensureUgkQuietStartupDefault } from "./ugk-startup-settings.js";
 import { runUgkUpdatePreflight } from "./update-preflight.js";
@@ -43,7 +43,8 @@ if (!trust.trusted) {
 	process.exit(1);
 }
 
-const { InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
+const { CustomEditor, InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
+installUgkEditorBorderGlyphPatch(CustomEditor);
 // Install pi patches; warn if either fails to apply (e.g. pi upgrade changed internals).
 if (!installUgkSessionViewPatch({ InteractiveMode })) {
 	console.warn("ugk: session-view patch did not apply (pi version drift?). Session switching may be limited.");

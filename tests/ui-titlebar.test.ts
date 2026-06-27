@@ -56,3 +56,46 @@ test("ugk title spinner stops itself if the captured extension context becomes s
 
 	assert.deepEqual(errors.map((error) => error.message), []);
 });
+
+test("ugk title spinner uses the active session cwd", async () => {
+	const handlers = new Map<string, Function>();
+	const titles: string[] = [];
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerFlag() {},
+		registerCommand() {},
+		getFlag() {
+			return false;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	const ctx = {
+		cwd: "/Users/demo/projects/fallback",
+		sessionManager: {
+			getCwd: () => "/Users/demo/projects/active-session",
+			getEntries: () => [],
+		},
+		ui: {
+			setTitle(title: string) {
+				titles.push(title);
+			},
+			notify() {},
+			setHeader() {},
+			setFooter() {},
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await handlers.get("session_start")!({}, ctx);
+	await handlers.get("agent_start")!({}, ctx);
+	await wait(100);
+	await handlers.get("agent_end")!({}, ctx);
+	await handlers.get("session_shutdown")?.({ reason: "test" }, ctx);
+
+	assert.match(titles.join("\n"), /⠋ ugk - demo - active-session/);
+	assert.equal(titles.at(-1), "ugk - demo - active-session");
+});

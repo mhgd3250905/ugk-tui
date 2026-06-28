@@ -358,3 +358,152 @@ test("buildTaskDispatcherPrompt instructs bare-value mapping and natural-languag
 	assert.match(prompt, /不要.*当字段值/);
 	assert.match(prompt, /不要编造/);
 });
+
+// === required 门禁升级:字段值有效性(x-search 试金石踩出的坑)===
+// 复现场景:dispatcher 输出的 JSON 合法,但某个 required 字段的值是无意义残片字符串
+// (如 timeWindow:"{mode:")。旧 coversRequired 只看 key 存在 → 放行 → worker 拿到残片现编默认。
+// 新 coversRequired 要求 required 字段"存在且值有效" → 残片视为解析失败 → headless 抛错。
+
+const timeWindowContract = {
+	runtimeInput: ["keyword", "startIso", "endIso"],
+	runtimeInputMeta: {
+		keyword: { description: "搜索关键词", required: true },
+		startIso: { description: "窗口起 ISO", required: true },
+		endIso: { description: "窗口止 ISO", required: true },
+	},
+};
+
+test("required gate: dispatcher returns valid values → passes through", async () => {
+	// 基线:三个 required 字段都有有效值,正常返回。
+	setTaskDispatcherForTests(async () => ({
+		keyword: "medtrum",
+		startIso: "2026-06-15T00:00:00.000Z",
+		endIso: "2026-06-22T00:00:00.000Z",
+	}));
+	try {
+		const value = await resolveRuntimeInputFromText({}, "# Skill", timeWindowContract, "medtrum 上周", undefined, true);
+		assert.deepEqual(value, {
+			keyword: "medtrum",
+			startIso: "2026-06-15T00:00:00.000Z",
+			endIso: "2026-06-22T00:00:00.000Z",
+		});
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("required gate: dispatcher returns a field with truncated-string value → throws (not passes through)", async () => {
+	// ponytail: 机制层能抓的是"空值/缺失"。纯字符串残片(如 "{mode:") 对机制层是合法非空字符串,
+	// 无法通用判别 —— 那是 verify 产物层的职责(校验 startIso 能否 parse 成日期)。
+	// 这里测机制层能抓的:空对象值(dispatcher 想输出嵌套对象但没填内容)。
+	const objectFieldContract = {
+		runtimeInput: ["config"],
+		runtimeInputMeta: { config: { description: "配置对象", required: true } },
+	};
+	setTaskDispatcherForTests(async () => ({ config: {} })); // 空对象 = 无效
+	try {
+		await assert.rejects(
+			() => resolveRuntimeInputFromText({}, "# Skill", objectFieldContract, "xxx", undefined, true),
+			/字段值无效.*config/,
+		);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("required gate: dispatcher returns empty-string value → throws", async () => {
+	// 空字符串/纯空白也算无效值(dispatcher 没真正算出东西)。
+	setTaskDispatcherForTests(async () => ({
+		keyword: "medtrum",
+		startIso: "   ", // 纯空白
+		endIso: "2026-06-22T00:00:00.000Z",
+	}));
+	try {
+		await assert.rejects(
+			() => resolveRuntimeInputFromText({}, "# Skill", timeWindowContract, "medtrum 上周", undefined, true),
+			/字段值无效.*startIso/,
+		);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("required gate: dispatcher returns empty object value → throws", async () => {
+	// 空对象 {} 也算无效(嵌套对象字段 dispatcher 没填内容)。
+	const objectFieldContract = {
+		runtimeInput: ["config"],
+		runtimeInputMeta: { config: { description: "配置对象", required: true } },
+	};
+	setTaskDispatcherForTests(async () => ({ config: {} }));
+	try {
+		await assert.rejects(
+			() => resolveRuntimeInputFromText({}, "# Skill", objectFieldContract, "xxx", undefined, true),
+			/字段值无效.*config/,
+		);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("required gate: error message distinguishes missing vs invalid fields", async () => {
+	// ponytail: 报错要精准 —— 缺字段说缺,值无效说无效,不混淆。
+	// keyword 缺失,startIso 是空白。报错应同时指出两者,且措辞区分。
+	setTaskDispatcherForTests(async () => ({
+		startIso: "   ", // 无效(空白)
+		endIso: "2026-06-22T00:00:00.000Z",
+		// keyword 缺失
+	}));
+	try {
+		await assert.rejects(
+			() => resolveRuntimeInputFromText({}, "# Skill", timeWindowContract, "xxx", undefined, true),
+			(err: Error) => {
+				assert.match(err.message, /缺失字段.*keyword/, "报错应指出缺失的 keyword");
+				assert.match(err.message, /字段值无效.*startIso/, "报错应指出无效的 startIso");
+				return true;
+			},
+		);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("required gate: valid non-required field with empty value does NOT trigger gate", async () => {
+	// ponytail: 门禁只管 required 字段。非 required 字段值无效(如空串)不该触发门禁,
+	// 它会走 default 补全或原样保留。这是"required 门禁"语义,不是"所有字段都校验"。
+	const mixedContract = {
+		runtimeInput: ["keyword", "note"],
+		runtimeInputMeta: {
+			keyword: { required: true },
+			note: { required: false, default: "" },
+		},
+	};
+	setTaskDispatcherForTests(async () => ({ keyword: "x", note: "" }));
+	try {
+		const value = await resolveRuntimeInputFromText({}, "# Skill", mixedContract, "x", undefined, true);
+		// note 是空串但非 required → 不门禁,正常返回
+		assert.deepEqual(value, { keyword: "x", note: "" });
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("buildTaskDispatcherPrompt emphasizes LLM compute capability and complete output", () => {
+	// ponytail: 验证强化后的 prompt 告诉 dispatcher 它能算 + 必须输出完整值。
+	// 这是配合机制层门禁的源头治理:让 dispatcher 少产出残片。
+	const prompt = buildTaskDispatcherPrompt("# Skill", { runtimeInput: ["startIso"] }, "上周");
+	assert.match(prompt, /推理与计算/, "prompt 应说明 dispatcher 能算日期/推理");
+	assert.match(prompt, /完整.*有效/, "prompt 应要求输出完整有效值");
+	assert.match(prompt, /截断|半成品/, "prompt 应禁止截断/半成品输出");
+});
+
+test("buildTaskDispatcherPrompt injects the real current date so dispatcher computes relative times correctly", () => {
+	// ponytail: 真实 bug —— dispatcher 算"上周"猜成 16 个月前(用训练数据日期)。
+	// 修复:prompt 注入当前 UTC ISO + 本地时间 + 星期几,让相对时间算得准。
+	// 这是机制层修复:任何需要算日期的 taskbook 都受益。
+	const prompt = buildTaskDispatcherPrompt("# Skill", { runtimeInput: ["startIso"] }, "上周");
+	const now = new Date();
+	const expectedIsoPrefix = now.toISOString().slice(0, 10); // YYYY-MM-DD
+	assert.match(prompt, /当前时间.*算相对时间时必须以此为基准/, "prompt 应明示当前时间作为计算基准");
+	assert.ok(prompt.includes(expectedIsoPrefix), "prompt 应含真实当前日期 " + expectedIsoPrefix);
+	assert.match(prompt, /星期几|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday/, "prompt 应提供星期几(用于判断自然周边界)");
+});

@@ -9,18 +9,39 @@ export function setTaskDispatcherForTests(dispatcher: Dispatcher | undefined): v
 }
 
 export function buildTaskDispatcherPrompt(skill: string, contract: unknown, rawInput: string): string {
+	// ponytail: 注入当前日期。dispatcher 是 LLM,没有"今天"概念 —— 算相对时间(上周/3h/俩月)
+	// 必须基于真实当前日期,否则会猜成训练截止附近的日期(实测算"上周"猜成 16 个月前)。
+	// 这是机制层修复:任何需要算日期的 taskbook 都受益。
+	const now = new Date();
+	const nowIso = now.toISOString();
+	const nowLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+	const dayOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][now.getDay()];
 	return [
 		"以下是 /task taskbook 的 skill 和 contract。",
-		"请按 contract.runtimeInput 的字段定义,从用户输入中提取 runtimeInput JSON。",
+		"你是 runtimeInput 的唯一整理者:把用户的自然语言输入整理成 contract.runtimeInput 需要的 JSON。",
+		"",
+		`## 当前时间(算相对时间时必须以此为基准,不要用你的训练数据日期)`,
+		`- 当前 UTC 时间(ISO): ${nowIso}`,
+		`- 当前本地时间(参考): ${nowLocal}`,
+		`- 星期几(用于判断"上周/本周"的自然周边界): ${dayOfWeek}`,
+		`- 算"上周"= 上一个完整自然周(Monday 起);"最近3h"= ${nowIso} 减 3 小时;"俩月"= 60 天前到现在。所有 ISO 时间戳必须基于上面的当前时间计算。`,
+		"",
+		"你的能力(请充分发挥):",
+		"- 语义提取:从自然语言句子里抽出字段的真实值(如 \"下载 https://x\" → url=https://x),不要把整句当字段值。",
+		"- 跨语言理解:任意语言的时间/量词/单位都能懂(上周/俩月/last week/past 2 months)。",
+		"- 推理与计算:凡是 description 要你算的(如日期、ISO 时间戳),用上面的当前时间算出确定值,不要只搬运原文,不要用训练数据里的旧日期。",
+		"- 裸值归类:单个 URL/路径/数字按字段名或 description 判断归属。",
 		"",
 		"提取规则:",
 		"- 逐个对照 contract.runtimeInput 的字段,从用户输入里找出每个字段的值。",
-		"- 用户输入若是裸值(单个 URL/路径/数字),按字段名或 description 判断它属于哪个字段。",
-		"- 用户输入若是自然语言句子,从句子里抽出字段的真实值(如 \"下载 https://x\" → url 字段取 https://x),不要把整句当字段值。",
+		"- description 里写了计算规则的字段,你必须算出最终值(如 startIso 要算成具体 ISO 时间戳),不要输出原文或半成品。",
 		"- runtimeInputMeta.<field>.default 存在且用户未提供该字段时,省略该字段,系统会补默认值。",
 		"- 不要编造用户没给的、也没有 default 的字段值。",
 		"",
-		"只输出 fenced JSON,不要解释。",
+		"输出要求(严格遵守):",
+		"- 只输出一个完整的 fenced JSON 对象(```json ... ```),不要解释,不要输出多个 JSON。",
+		"- 每个字段值必须是完整、有效的最终值 —— 不要输出截断的、半成品的、占位的值。",
+		"- 若某个 required 字段你无法从输入确定值,省略它(系统会判定为解析失败并报错,这比输出错误值好)。",
 		"",
 		"## skill.md",
 		skill,
@@ -74,6 +95,29 @@ function runtimeDefaults(contract: unknown): Record<string, unknown> {
 		}
 	}
 	return defaults;
+}
+
+/**
+ * 判定 runtimeInput 字段的值是否"有效"——即 dispatcher 真的算出了有意义的东西,
+ * 而不是吐了个残片/空壳。这是 dispatcher 作为"唯一参数入口"的质量底线:
+ * required 字段不仅要在,还得有有效值,否则视为 dispatcher 失败(headless 抛错)。
+ *
+ * ponytail: 不做格式语义校验(那该由 verify 在产物层做),只判"值非空且类型合理":
+ *   - string: 非空(空串/纯空白 = 无效)
+ *   - number: 有限数(NaN/Infinity = 无效)
+ *   - boolean: 恒有效
+ *   - object/array: 非空(空对象 {}/空数组 [] = 无效)
+ *   - null/undefined: 无效
+ * 这样能抓住 dispatcher 输出 timeWindow:"{mode:"(合法 JSON 但值是无意义残片字符串)这类情况。
+ */
+function isValidRuntimeValue(value: unknown): boolean {
+	if (value === null || value === undefined) return false;
+	if (typeof value === "string") return value.trim().length > 0;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (typeof value === "boolean") return true;
+	if (Array.isArray(value)) return value.length > 0;
+	if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+	return false;
 }
 
 /**
@@ -177,9 +221,16 @@ async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInp
 export async function resolveRuntimeInputFromText(ctx: any, skill: string, contract: unknown, rawInput: string, modelOverride?: string, headless = false): Promise<unknown> {
 	const fields = runtimeFields(contract);
 	const required = runtimeRequiredFields(contract);
+	// ponytail: required 门禁从"字段 key 存在"升级到"字段有有效值"。dispatcher 作为唯一参数入口,
+	// 它吐出 required 字段但值是残片(如 timeWindow:"{mode:" 这种合法 JSON 但无意义字符串残片)
+	// 视为解析失败,走"未能解析必填字段"分支(headless 抛错)。这把无效值的拦截点从 verify
+	// (产物层)前移到 dispatcher(输入层),worker 拿不到残片就没机会现编默认值。
 	const coversRequired = (input: unknown): boolean =>
 		!!input && typeof input === "object" && !Array.isArray(input) &&
-		required.every((field) => Object.prototype.hasOwnProperty.call(input, field));
+		required.every((field) =>
+			Object.prototype.hasOwnProperty.call(input, field) &&
+			isValidRuntimeValue((input as Record<string, unknown>)[field]),
+		);
 
 	if (rawInput.trim()) {
 		const local = localRuntimeInput(contract, rawInput);
@@ -197,14 +248,25 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 			const merged = local ? { ...dispatched, ...local } : dispatched;
 			return runtimeInputWithDefaults(contract, merged);
 		}
-		// dispatcher 也没抽全 required。partial 不覆盖 required 则不返回,
-		// 否则下游 worker 拿到不完整的 input 会 hardcode 或猜值,绕开 contract 约束。
-		// headless 时直接抛错让调用方补 input;交互式时落到后面的 UI prompt。
+		// dispatcher 也没抽全 required,或抽到的 required 字段值无效(残片/空值)。
+		// partial 不覆盖 required 则不返回,否则下游 worker 拿到不完整/无效的 input
+		// 会 hardcode 或猜值,绕开 contract 约束。headless 时直接抛错让调用方补 input;
+		// 交互式时落到后面的 UI prompt。
 		const partial = dispatched ?? local;
 		if (partial && coversRequired(partial)) return runtimeInputWithDefaults(contract, partial);
 		if (partial && headless) {
+			// ponytail: 区分"缺字段"和"字段值无效",给用户精准反馈。
+			// 无效值(如 dispatcher 输出残片)和缺失一样视为解析失败 —— dispatcher 是唯一入口。
 			const missing = required.filter((field) => !Object.prototype.hasOwnProperty.call(partial, field));
-			throw new Error(`dispatcher 未能从输入解析出必填字段: ${missing.join(", ")}。请用更明确、完整的 input 重试,或确认 taskbook 的 runtimeInput 定义。`);
+			const invalid = required.filter((field) =>
+				Object.prototype.hasOwnProperty.call(partial, field) &&
+				!isValidRuntimeValue((partial as Record<string, unknown>)[field]),
+			);
+			const detail = [
+				missing.length ? `缺失字段: ${missing.join(", ")}` : "",
+				invalid.length ? `字段值无效(空值/残片): ${invalid.join(", ")}` : "",
+			].filter(Boolean).join("; ");
+			throw new Error(`dispatcher 未能从输入解析出有效的必填字段 —— ${detail}。请用更明确、完整的 input 重试,或确认 taskbook 的 runtimeInput 定义。`);
 		}
 	}
 	if (fields.length === 0) return {};

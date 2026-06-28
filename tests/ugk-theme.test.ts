@@ -11,6 +11,7 @@ test("ugk geek theme is a complete pi theme with subdued neon green identity", (
 
 	assert.equal(theme.name, "ugk-geek");
 	assert.equal(theme.vars.green, "#9be564");
+	assert.equal(theme.vars.bgToolSuccess, "#2f5f2a");
 	assert.equal(theme.colors.accent, "green");
 	assert.notEqual(theme.colors.accent, "#6f5cff");
 	assert.notEqual(theme.colors.accent, "#7e57c2");

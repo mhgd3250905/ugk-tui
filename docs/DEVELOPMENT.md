@@ -80,6 +80,7 @@
 `extensions/ui-brand.ts` 的 header/footer/title 组件:
 - **不得在 render 阶段持有或读取 `ExtensionContext`**
 - 必须在 `session_start` 时抽取普通 session 数据,避免 session replacement/reload 后 stale ctx 崩溃
+- footer 的模型显示必须从当前 session 模型 getter 读取,不要在 `session_start` 缓存模型快照
 
 ---
 

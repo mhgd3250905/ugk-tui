@@ -51,7 +51,7 @@
 
 ### autopilot 自动放行
 
-- `/ugk-autopilot on|off|status` —— 所有"工具级确认"(CDP / MCP / 未来工具)的总开关
+- `/ugk-autopilot` —— 打开菜单(Status / Turn on / Turn off / Exit);也支持 `/ugk-autopilot on|off|status`,是所有"工具级确认"(CDP / MCP / 未来工具)的总开关
 - on 时:可逆的工具确认自动放行,不再弹确认打断用户;同时注入"范围类决策直接干、别发问卷"的指令
 - **不管危险动作**:删除级(rm -rf 等)、花钱、不可逆外部副作用永远走人确认
 - 状态只在会话内存,关掉 ugk 即忘(临时放飞用,不持久)
@@ -67,6 +67,7 @@
 
 - `/ugk-ui on|off|status` 可运行中切换
 - 默认低刺激荧光绿主题;另有 16 个社区主题(atom/catppuccin/dracula/gruvbox/nord/solarized)
+- footer 模型名随当前 session 模型动态刷新,并以绿色 chip 高亮
 
 ### slash 命令
 
@@ -79,8 +80,8 @@
 - `/task` — 固定任务委托
 - `/plan` — 只读计划模式
 - `/ugk-ui` — 开关品牌 UI
-- `/ugk-autopilot` — 工具确认总开关(自动放行可逆确认,危险动作仍归人)
-- `/language` — 设 agent 交流语言(跨会话持久,如 `/language English`)
+- `/ugk-autopilot` — 工具确认总开关菜单(自动放行可逆确认,危险动作仍归人)
+- `/language` — 语言偏好菜单(跨会话持久,也支持 `/language English`)
 - `/implement` `/scout-and-plan` `/implement-and-review` — subagent 流水线
 
 ### @mention 手动触发

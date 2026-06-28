@@ -166,7 +166,20 @@ function colorFooterUsageLine(line: string, theme: any): string {
 	if (index === -1) return theme.fg("dim", line);
 	const usage = line.slice(0, index);
 	const modelOrState = line.slice(index + separator.length);
-	return `${colorFooterUsageText(usage, theme)}${separator}${theme.fg(classifyUgkStatusTone(modelOrState), modelOrState)}`;
+	let tone = classifyUgkStatusTone(modelOrState);
+	if (modelOrState.startsWith("🤖 ") && tone === "dim" && !/\bno-model\b|model not selected/i.test(modelOrState)) {
+		tone = "success";
+	}
+	const coloredModelOrState = theme.fg(tone, modelOrState);
+	let modelChip = coloredModelOrState;
+	if (modelOrState.startsWith("🤖 ") && typeof theme.bg === "function") {
+		try {
+			modelChip = theme.bg("toolSuccessBg", coloredModelOrState);
+		} catch {
+			modelChip = coloredModelOrState;
+		}
+	}
+	return `${colorFooterUsageText(usage, theme)}${separator}${modelChip}`;
 }
 
 function colorFooterStatusLine(statuses: string[], fallback: string, theme: any): string {
@@ -176,9 +189,8 @@ function colorFooterStatusLine(statuses: string[], fallback: string, theme: any)
 
 interface BrandUiSessionSource {
 	cwd: string;
-	modelId?: string;
-	modelContextWindow?: number;
 	thinkingLevel?: string;
+	getModel?: () => { id?: string; contextWindow?: number } | undefined;
 	getContextUsage?: () => ContextUsage | undefined;
 	sessionManager?: {
 		getCwd?: () => string;
@@ -190,12 +202,19 @@ interface BrandUiSessionSource {
 function createBrandUiSessionSource(ctx: ExtensionContext): BrandUiSessionSource {
 	return {
 		cwd: ctx.cwd ?? process.cwd(),
-		modelId: ctx.model?.id,
-		modelContextWindow: ctx.model?.contextWindow,
 		thinkingLevel: (ctx as any).session?.state?.thinkingLevel,
+		getModel: () => ctx.model,
 		getContextUsage: ctx.getContextUsage?.bind(ctx),
 		sessionManager: ctx.sessionManager,
 	};
+}
+
+function getCurrentModel(source: BrandUiSessionSource): { id?: string; contextWindow?: number } | undefined {
+	try {
+		return source.getModel?.();
+	} catch {
+		return undefined;
+	}
 }
 
 class UgkHeader implements Component {
@@ -211,7 +230,7 @@ class UgkHeader implements Component {
 
 	render(width: number): string[] {
 		const cwd = this.source.sessionManager?.getCwd?.() ?? this.source.cwd;
-		const modelId = resolveUgkDisplayModelId(this.source.modelId, getDeepSeekStatus());
+		const modelId = resolveUgkDisplayModelId(getCurrentModel(this.source)?.id, getDeepSeekStatus());
 		const options = {
 			version: VERSION,
 			cwdName: path.basename(cwd),
@@ -258,7 +277,7 @@ function collectUsage(source: BrandUiSessionSource): UgkFooterUsage {
 		cacheWrite,
 		cost,
 		contextPercent: context?.percent ?? null,
-		contextWindow: context?.contextWindow ?? source.modelContextWindow ?? 0,
+		contextWindow: context?.contextWindow ?? getCurrentModel(source)?.contextWindow ?? 0,
 	};
 }
 
@@ -289,7 +308,7 @@ class UgkFooter implements Component {
 		const lines = buildUgkFooterLines({
 			cwd,
 			branch: this.footerData.getGitBranch?.() ?? null,
-			modelId: resolveUgkDisplayModelId(this.source.modelId, getDeepSeekStatus()) || "no-model",
+			modelId: resolveUgkDisplayModelId(getCurrentModel(this.source)?.id, getDeepSeekStatus()) || "no-model",
 			thinkingLevel: this.source.thinkingLevel,
 			statuses,
 			usage: collectUsage(this.source),

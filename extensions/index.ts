@@ -37,6 +37,9 @@ import { renderTerminalTable } from "./terminal-table.ts";
 import { AUTOPILOT_PROMPT_SNIPPET, isAutopilotOn, setAutopilot } from "./shared/autopilot.ts";
 import { buildLanguagePromptSnippet, clearLanguage, getLanguage, setLanguage } from "./shared/language.ts";
 
+const AUTOPILOT_MENU_OPTIONS = ["Status", "Turn on", "Turn off", "Exit"];
+const LANGUAGE_MENU_OPTIONS = ["Status", "Set language", "Clear", "Exit"];
+
 function isNaturalBareAtPrefix(lines: string[], cursorLine: number, cursorCol: number): boolean {
 	const currentLine = lines[cursorLine] || "";
 	const textBeforeCursor = currentLine.slice(0, cursorCol);
@@ -163,7 +166,14 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("ugk-autopilot", {
 		description: "Toggle autopilot: auto-approve reversible tool confirmations",
 		handler: async (args, ctx) => {
-			const arg = (args || "").trim().toLowerCase();
+			let arg = (args || "").trim().toLowerCase();
+			if (arg === "" && ctx.ui?.select) {
+				const selection = await ctx.ui.select("Autopilot", AUTOPILOT_MENU_OPTIONS);
+				if (!selection || selection === "Exit") return;
+				if (selection === "Status") arg = "status";
+				if (selection === "Turn on") arg = "on";
+				if (selection === "Turn off") arg = "off";
+			}
 			if (arg === "on" || arg === "off") {
 				setAutopilot(arg === "on");
 				ctx.ui.notify(
@@ -206,7 +216,27 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("language", {
 		description: "Set the language the agent speaks (persists across sessions)",
 		handler: async (args, ctx) => {
-			const raw = (args || "").trim();
+			let raw = (args || "").trim();
+			if (raw === "" && ctx.ui?.select) {
+				const selection = await ctx.ui.select("Language", LANGUAGE_MENU_OPTIONS);
+				if (!selection || selection === "Exit") return;
+				if (selection === "Status") raw = "status";
+				if (selection === "Clear") raw = "clear";
+				if (selection === "Set language") {
+					if (!ctx.ui?.input) {
+						ctx.ui.notify("Set language requires interactive input support. Use /language <语言>.", "warning");
+						return;
+					}
+					const input = await ctx.ui.input("用什么语言与 agent 交流?", "如:English / 中文 / 日本語");
+					if (!input?.trim()) {
+						ctx.ui.notify("未设置,保持当前语言偏好。", "info");
+						return;
+					}
+					const set = setLanguage(input);
+					ctx.ui.notify(`语言偏好已设为: ${set}\n下个回合起生效。`, "info");
+					return;
+				}
+			}
 			const arg = raw.toLowerCase();
 
 			if (arg === "status" || (arg === "" && !ctx.ui?.input)) {

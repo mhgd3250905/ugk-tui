@@ -164,7 +164,7 @@ Release notes: https://github.com/mhgd3250905/ugk-tui/commits/main
 ugk 默认通过 `extensions/ui-brand.ts` 加载一层独立的品牌 UI,只使用 pi 官方 extension API:
 
 - `ctx.ui.setHeader()` 替换启动顶部说明为 `ugk` 品牌区
-- `ctx.ui.setFooter()` 替换底部状态栏,保留 cwd/branch/token/model/轮次信息
+- `ctx.ui.setFooter()` 替换底部状态栏,保留 cwd/branch/token/model/轮次信息;模型名随当前 session 模型动态刷新,并以绿色 chip 高亮
 - `ctx.ui.setTitle()` 把终端标题改成 `ugk - <session> - <cwd>`
 - 新会话启动时清理当前终端视口和 scrollback,用字符特效启动页填满当前终端高度
 - 对话开始后自动回到紧凑 header,不长期占用消息区域
@@ -201,6 +201,8 @@ UGK_CLEAR_STARTUP=0 ugk
 | `/cdp` | 管理本地 Chrome CDP 访问模式、端口、启动和标签页 |
 | `/mcp` | 管理 MCP server 状态、权限模式、reload、enable/disable |
 | `/ugk-ui` | 开关 ugk 品牌 UI |
+| `/ugk-autopilot` | 工具确认总开关菜单,也支持 `on|off|status` |
+| `/language` | 语言偏好菜单,也支持 `<语言>|status|clear` |
 | `/plan` | 切换 plan-mode 只读探索模式(或 Ctrl+Alt+P) |
 | `/todos` | 查看 plan-mode 计划进度 |
 | `/task` | 固定任务委托(taskbook 创造/复用/编排) |
@@ -227,6 +229,29 @@ UGK_CLEAR_STARTUP=0 ugk
 ```
 
 默认模式是 `ask`。非 status 操作需要提供原因并说明普通访问是否已经尝试或不适用。详见 `skills/chrome-cdp-guide/SKILL.md` 和 `extensions/chrome-cdp/README.md`。
+
+### autopilot 与语言偏好
+
+`/ugk-autopilot` 无参会打开菜单,可选 `Status` / `Turn on` / `Turn off` / `Exit`。也可以直接用:
+
+```text
+/ugk-autopilot status
+/ugk-autopilot on
+/ugk-autopilot off
+```
+
+autopilot 只自动放行可逆的工具级确认(CDP/MCP/run_task 受保护工具等);危险命令、花钱、不可逆外部副作用仍然归用户确认。状态只在当前 ugk 会话内生效。
+
+`/language` 无参会打开菜单,可选 `Status` / `Set language` / `Clear` / `Exit`。也可以直接用:
+
+```text
+/language English
+/language 日本語
+/language status
+/language clear
+```
+
+语言偏好写入 `~/.pi/agent/settings.json`,跨会话保留;清除后回到 AGENTS.md 的默认中文优先。
 
 ### MCP tools 接入
 

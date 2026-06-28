@@ -101,12 +101,13 @@ Windows 上 PowerShell 的 `Set-Content` / `Out-File` 默认写 UTF-8 BOM,而 No
 - [ ] 加了 `try/catch`?核对降级方向是否安全
 - [ ] 改了 task 核心函数签名/状态机?同步 `docs/design/subtask-extension-spec.md`
 - [ ] 加了带确认的新工具?用 `suppressConfirmation()` 接入 autopilot(见 §7)
+- [ ] 改了用户可见 slash 命令或菜单?同步 `README.md` 和 `AGENTS.md`
 
 ---
 
 ## 7. autopilot 统一工具确认总开关
 
-`/ugk-autopilot on|off|status` 是所有"工具级确认"的总开关。内核在 `extensions/shared/autopilot.ts`,全局单例,状态只在会话内存(关 ugk 即忘)。
+`/ugk-autopilot` 无参打开菜单(Status / Turn on / Turn off / Exit),也支持 `/ugk-autopilot on|off|status`。它是所有"工具级确认"的总开关。内核在 `extensions/shared/autopilot.ts`,全局单例,状态只在会话内存(关 ugk 即忘)。
 
 **管什么**:普通工具确认(CDP / MCP / 未来加的有副作用的工具)。autopilot on 时,这些工具的 `requiresConfirmation` 被短路为"直接放行"。
 

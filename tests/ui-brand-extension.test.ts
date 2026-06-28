@@ -445,3 +445,152 @@ test("ugk brand footer refreshes context usage on each render", async () => {
 	percent = 42.5;
 	assert.match(footer.render(140).join("\n"), /42\.5%\/1\.0M/);
 });
+
+test("ugk brand footer refreshes model on each render", async () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand() {},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	let footerFactory: Function | undefined;
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "gpt-5.5", contextWindow: 1000000 },
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => [],
+			getBranch: () => [],
+		},
+		getContextUsage: () => ({ percent: 0, contextWindow: ctx.model.contextWindow }),
+		ui: {
+			setHeader: () => {},
+			setFooter: (factory: unknown) => {
+				footerFactory = factory as Function;
+			},
+			setTitle: () => {},
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await handlers.get("session_start")!({ reason: "startup" }, ctx);
+	const footer = footerFactory!({ requestRender() {} }, { fg: (_color: string, text: string) => text }, {
+		getGitBranch: () => null,
+		getExtensionStatuses: () => new Map(),
+		onBranchChange: () => () => {},
+	});
+
+	assert.match(footer.render(140).join("\n"), /gpt-5\.5/);
+	ctx.model = { id: "mimo-v2.5-pro", contextWindow: 1000000 };
+	const refreshed = footer.render(140).join("\n");
+	assert.match(refreshed, /mimo-v2\.5-pro/);
+	assert.doesNotMatch(refreshed, /gpt-5\.5/);
+});
+
+test("ugk brand footer renders model as a background chip", async () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand() {},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	let footerFactory: Function | undefined;
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "mimo-v2.5-pro", contextWindow: 1000000 },
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => [],
+			getBranch: () => [],
+		},
+		getContextUsage: () => ({ percent: 0, contextWindow: 1000000 }),
+		ui: {
+			setHeader: () => {},
+			setFooter: (factory: unknown) => {
+				footerFactory = factory as Function;
+			},
+			setTitle: () => {},
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await handlers.get("session_start")!({ reason: "startup" }, ctx);
+	const footer = footerFactory!({ requestRender() {} }, {
+		fg: (color: string, text: string) => `<fg:${color}>${text}</fg:${color}>`,
+		bg: (color: string, text: string) => `<bg:${color}>${text}</bg:${color}>`,
+	}, {
+		getGitBranch: () => null,
+		getExtensionStatuses: () => new Map(),
+		onBranchChange: () => () => {},
+	});
+
+	assert.match(footer.render(300).join("\n"), /<bg:toolSuccessBg><fg:success>🤖 mimo-v2\.5-pro<\/fg:success><\/bg:toolSuccessBg>/);
+});
+
+test("ugk brand footer falls back when model chip background is unavailable", async () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand() {},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	let footerFactory: Function | undefined;
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "mimo-v2.5-pro", contextWindow: 1000000 },
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => [],
+			getBranch: () => [],
+		},
+		getContextUsage: () => ({ percent: 0, contextWindow: 1000000 }),
+		ui: {
+			setHeader: () => {},
+			setFooter: (factory: unknown) => {
+				footerFactory = factory as Function;
+			},
+			setTitle: () => {},
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await handlers.get("session_start")!({ reason: "startup" }, ctx);
+	const footer = footerFactory!({ requestRender() {} }, {
+		fg: (color: string, text: string) => `<fg:${color}>${text}</fg:${color}>`,
+		bg: () => {
+			throw new Error("Unknown theme background color: toolSuccessBg");
+		},
+	}, {
+		getGitBranch: () => null,
+		getExtensionStatuses: () => new Map(),
+		onBranchChange: () => () => {},
+	});
+
+	const rendered = footer.render(300).join("\n");
+	assert.match(rendered, /<fg:success>🤖 mimo-v2\.5-pro<\/fg:success>/);
+	assert.doesNotMatch(rendered, /<bg:toolSuccessBg>/);
+});

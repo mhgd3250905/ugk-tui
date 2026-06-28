@@ -4,9 +4,31 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import registerUgkExtension, { suppressNaturalAtAutocomplete } from "../extensions/index.ts";
+import { createAutopilotState, installAutopilotState, isAutopilotOn } from "../extensions/shared/autopilot.ts";
 
 function tempAgentDir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "ugk-command-"));
+}
+
+function registerCommands() {
+	const commands = new Map<string, { handler: Function }>();
+	const pi = {
+		registerTool() {},
+		registerCommand(name: string, options: { handler: Function }) {
+			commands.set(name, options);
+		},
+		registerFlag() {},
+		registerShortcut() {},
+		on() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	registerUgkExtension(pi as any);
+	return commands;
 }
 
 test("/ugk renders a structured status panel", async () => {
@@ -57,6 +79,73 @@ test("/ugk renders a structured status panel", async () => {
 	} finally {
 		if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
 		else process.env.DEEPSEEK_API_KEY = previousApiKey;
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("/ugk-autopilot with no args opens an action menu", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = tempAgentDir();
+	installAutopilotState(createAutopilotState(false));
+	try {
+		const commands = registerCommands();
+		const selections: Array<{ title: string; options: string[] }> = [];
+		const notifications: string[] = [];
+
+		await commands.get("ugk-autopilot")!.handler("", {
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+				select(title: string, options: string[]) {
+					selections.push({ title, options });
+					return "Turn on";
+				},
+			},
+		});
+
+		assert.equal(selections[0].title, "Autopilot");
+		assert.deepEqual(selections[0].options, ["Status", "Turn on", "Turn off", "Exit"]);
+		assert.equal(isAutopilotOn(), true);
+		assert.match(notifications.join("\n"), /Autopilot: ON/);
+	} finally {
+		installAutopilotState(createAutopilotState(false));
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("/language with no args opens an action menu before input", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = tempAgentDir();
+	try {
+		const commands = registerCommands();
+		const selections: Array<{ title: string; options: string[] }> = [];
+		const inputs: string[] = [];
+		const notifications: string[] = [];
+
+		await commands.get("language")!.handler("", {
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+				select(title: string, options: string[]) {
+					selections.push({ title, options });
+					return "Set language";
+				},
+				input(prompt: string) {
+					inputs.push(prompt);
+					return "English";
+				},
+			},
+		});
+
+		assert.equal(selections[0].title, "Language");
+		assert.deepEqual(selections[0].options, ["Status", "Set language", "Clear", "Exit"]);
+		assert.equal(inputs[0], "用什么语言与 agent 交流?");
+		assert.match(notifications.join("\n"), /语言偏好已设为: English/);
+	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 	}

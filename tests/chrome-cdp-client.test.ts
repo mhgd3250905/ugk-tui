@@ -161,6 +161,26 @@ test("evaluateChromeExpression timeoutMs 透传且钳位到 1s~5min", async () =
 	assert.ok(elapsed >= 1000 && elapsed < 3000, `1100ms 应在 1~3s 超时,实际 ${elapsed}ms`);
 });
 
+// ponytail: ESC 中断验证。pi 的 agent.signal 通过 execute 第3参数传入。chrome_cdp 必须响应它,
+// 否则卡在长 evaluate 的 CDP 调用要等自己跑完/超时(ESC 体感"过一会儿才打断")。
+// abort 时立即 socket.close + reject AbortError,不等 timeout。
+test("evaluateChromeExpression signal abort 时立即 reject AbortError", async () => {
+	const client = createChromeCdpClient({
+		port: 9222,
+		fetch: makeFetch(sampleTabs),
+		WebSocket: SilentWebSocket as any, // 永不响应,模拟卡住的长 evaluate
+	});
+	const controller = new AbortController();
+
+	const start = Date.now();
+	const p = evaluateChromeExpression(client, "tab-1", "long loop", 100000, controller.signal);
+	// 立即 abort(模拟 ESC),应在远小于 100s timeout 时就 reject
+	controller.abort();
+	await assert.rejects(p, (err: Error) => err.name === "AbortError");
+	const elapsed = Date.now() - start;
+	assert.ok(elapsed < 500, `abort 应立即 reject(实际 ${elapsed}ms),而非等 timeout`);
+});
+
 test("captureChromeScreenshot writes screenshot bytes to disk", async () => {
 	FakeWebSocket.sent = [];
 	FakeWebSocket.response = { id: 1, result: { data: Buffer.from("png").toString("base64") } };

@@ -45,9 +45,9 @@ const CDP_MENU_OPTIONS = [
 export interface ChromeCdpDeps {
 	getStatus?: (port: number) => Promise<Awaited<ReturnType<typeof getChromeCdpStatus>>>;
 	listTabs?: (port: number) => Promise<ChromeTab[]>;
-	navigate?: (port: number, target: string | undefined, url: string) => Promise<unknown>;
-	evaluate?: (port: number, target: string | undefined, expression: string, timeoutMs?: number) => Promise<unknown>;
-	screenshot?: (port: number, target: string | undefined, path: string) => Promise<unknown>;
+	navigate?: (port: number, target: string | undefined, url: string, signal?: AbortSignal) => Promise<unknown>;
+	evaluate?: (port: number, target: string | undefined, expression: string, timeoutMs?: number, signal?: AbortSignal) => Promise<unknown>;
+	screenshot?: (port: number, target: string | undefined, path: string, signal?: AbortSignal) => Promise<unknown>;
 	launch?: (port: number) => Promise<string>;
 }
 function textResult(text: string, details: Record<string, unknown> = {}): ToolResult {
@@ -58,11 +58,11 @@ function defaultDeps(): Required<ChromeCdpDeps> {
 	return {
 		getStatus: async (port) => getChromeCdpStatus(createChromeCdpClient({ port })),
 		listTabs: async (port) => listChromeTabs(createChromeCdpClient({ port })),
-		navigate: async (port, target, url) => navigateChromeTab(createChromeCdpClient({ port }), target, url),
-		evaluate: async (port, target, expression, timeoutMs) =>
-			evaluateChromeExpression(createChromeCdpClient({ port }), target, expression, timeoutMs),
-		screenshot: async (port, target, filePath) =>
-			captureChromeScreenshot(createChromeCdpClient({ port }), target, filePath),
+		navigate: async (port, target, url, signal) => navigateChromeTab(createChromeCdpClient({ port }), target, url, signal),
+		evaluate: async (port, target, expression, timeoutMs, signal) =>
+			evaluateChromeExpression(createChromeCdpClient({ port }), target, expression, timeoutMs, signal),
+		screenshot: async (port, target, filePath, signal) =>
+			captureChromeScreenshot(createChromeCdpClient({ port }), target, filePath, signal),
 		launch: async (port) => launchChromeCdpAndWait(port),
 	};
 }
@@ -152,7 +152,7 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 				description: "Whether ordinary network/browser-free access was attempted or reasoned through first.",
 			}),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const action = params.action as ChromeCdpAction;
 			const policy = checkChromeCdpPolicy(state, {
 				action,
@@ -188,17 +188,17 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 			}
 			if (action === "navigate") {
 				if (!params.url) return textResult("navigate requires url.", { ok: false });
-				const result = await deps.navigate(port, target, params.url);
+				const result = await deps.navigate(port, target, params.url, signal);
 				return textResult(`Navigated Chrome tab to ${params.url}`, { ok: true, result });
 			}
 			if (action === "evaluate") {
 				if (!params.expression) return textResult("evaluate requires expression.", { ok: false });
-				const result = await deps.evaluate(port, target, params.expression, params.timeoutMs);
+				const result = await deps.evaluate(port, target, params.expression, params.timeoutMs, signal);
 				return textResult(JSON.stringify(result, null, 2), { ok: true, result });
 			}
 			if (action === "screenshot") {
 				if (!params.path) return textResult("screenshot requires path.", { ok: false });
-				const result = await deps.screenshot(port, target, params.path);
+				const result = await deps.screenshot(port, target, params.path, signal);
 				return textResult(`Saved Chrome screenshot to ${params.path}`, { ok: true, result });
 			}
 			return textResult(`Unknown chrome_cdp action: ${String(action)}`, { ok: false });

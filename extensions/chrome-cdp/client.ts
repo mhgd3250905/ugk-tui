@@ -76,31 +76,45 @@ function sendCdpCommand(
 	method: string,
 	params: Record<string, unknown>,
 	timeoutMs = 10000,
+	signal?: AbortSignal,
 ): Promise<any> {
 	// ponytail: 钳位 1s~5min。下限防 0/负数立即触发(等于没超时保护);上限防 LLM 乱传
 	// 天文数字让 evaluate 长时间挂起占用 CDP tab/worker 进程。5min 够任何滚动循环。
 	const clampedTimeoutMs = Math.min(Math.max(timeoutMs, 1000), 300000);
+	// 已 abort 直接拒,不建 WebSocket(避免无谓连接)。
+	if (signal?.aborted) return Promise.reject(abortError());
 	return new Promise((resolve, reject) => {
 		const socket = new WebSocketCtor(webSocketUrl);
 		const id = 1;
+		const cleanup = () => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+		};
 		const timer = setTimeout(() => {
-			try {
-				socket.close();
-			} catch {}
+			try { socket.close(); } catch {}
+			signal?.removeEventListener("abort", onAbort);
 			reject(new Error(`Timed out waiting for CDP response: ${method}`));
 		}, clampedTimeoutMs);
+		// ponytail: ESC 中断走 pi 的 agent.signal(execute 第3参数)。signal abort 时立即 close socket
+		// + reject AbortError,让卡在长 evaluate 的 CDP 调用瞬间返回,不再等它自己跑完/超时。
+		const onAbort = () => {
+			clearTimeout(timer);
+			try { socket.close(); } catch {}
+			reject(abortError());
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
 
 		socket.onopen = () => {
 			socket.send(JSON.stringify({ id, method, params }));
 		};
 		socket.onerror = (event) => {
-			clearTimeout(timer);
+			cleanup();
 			reject(new Error(`CDP WebSocket error: ${String(event)}`));
 		};
 		socket.onmessage = (event) => {
 			const message = JSON.parse(String(event.data));
 			if (message.id !== id) return;
-			clearTimeout(timer);
+			cleanup();
 			socket.close();
 			if (message.error) {
 				reject(new Error(message.error.message || `CDP command failed: ${method}`));
@@ -111,9 +125,15 @@ function sendCdpCommand(
 	});
 }
 
-export async function navigateChromeTab(client: ChromeCdpClient, target: string | undefined, url: string) {
+function abortError(): Error {
+	const err = new Error("chrome_cdp operation aborted");
+	err.name = "AbortError";
+	return err;
+}
+
+export async function navigateChromeTab(client: ChromeCdpClient, target: string | undefined, url: string, signal?: AbortSignal) {
 	const tab = await findTab(client, target);
-	return sendCdpCommand(client.WebSocket, tab.webSocketDebuggerUrl!, "Page.navigate", { url });
+	return sendCdpCommand(client.WebSocket, tab.webSocketDebuggerUrl!, "Page.navigate", { url }, 10000, signal);
 }
 
 export async function evaluateChromeExpression(
@@ -121,6 +141,7 @@ export async function evaluateChromeExpression(
 	target: string | undefined,
 	expression: string,
 	timeoutMs?: number,
+	signal?: AbortSignal,
 ) {
 	const tab = await findTab(client, target);
 	const result = await sendCdpCommand(
@@ -136,16 +157,17 @@ export async function evaluateChromeExpression(
 		// 默认 10s 对短操作够用;长循环(30 轮滚动抓取)显式传大值,让整个循环在一个 evaluate 内跑完。
 		// 不设上限——调用方负责合理值(CDP 本身有连接级超时兜底)。
 		timeoutMs,
+		signal,
 	);
 	return result.result;
 }
 
-export async function captureChromeScreenshot(client: ChromeCdpClient, target: string | undefined, filePath: string) {
+export async function captureChromeScreenshot(client: ChromeCdpClient, target: string | undefined, filePath: string, signal?: AbortSignal) {
 	const tab = await findTab(client, target);
 	const result = await sendCdpCommand(client.WebSocket, tab.webSocketDebuggerUrl!, "Page.captureScreenshot", {
 		format: "png",
 		fromSurface: true,
-	});
+	}, 10000, signal);
 	const data = Buffer.from(String(result.data || ""), "base64");
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
 	fs.writeFileSync(filePath, data);

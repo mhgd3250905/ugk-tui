@@ -20,6 +20,17 @@ import os from "node:os";
 import path from "node:path";
 import type { WorkerLifecycle } from "../shared/worker-lifecycle.ts";
 import { closeChromeTab, createChromeCdpClient, createChromeTab } from "./client.ts";
+import { launchChromeCdpAndWait } from "./launcher.ts";
+
+// ponytail: 连接类错误的特征串。命中即"Chrome 没起"(而非 tab 配额/协议错),
+// 才值得花一次 autolaunch 去救。
+const CDP_CONNECT_ERROR = /fetch failed|ECONNREFUSED|Failed to fetch|NetworkError/i;
+
+// ponytail: autolaunch 默认开 —— taskbook 声明了 chrome_cdp = 用户已知情同意,
+// 主进程代为起 CDP 不算越权。UGK_CDP_AUTOLAUNCH=0 关掉,回退到"没起就报错等用户"。
+function autolaunchEnabled(): boolean {
+	return process.env.UGK_CDP_AUTOLAUNCH !== "0";
+}
 
 // ponytail: 简单 appendFileSync + 时间戳前缀,够用。写到 agent 目录下,跨 run 保留,
 // worker 子进程也能写(同一文件系统)。要并发/轮转再升级。
@@ -46,30 +57,68 @@ export interface CdpTabLifecycleDeps {
 	fetch?: typeof fetch;
 	// ponytail: 可选日志注入(测试默认禁用,避免污染生产 cdp-tab.log)。
 	log?: (line: string) => void;
+	// ponytail: 可选 autolaunch 注入。生产不传 → launchChromeCdpAndWait(真起 Chrome)。
+	// 测试必须注入 fake,否则 beforeSpawn 重试会真 spawn Chrome。
+	launch?: (port: number) => Promise<string>;
 }
 
 export function makeCdpTabLifecycle(port: number, deps: CdpTabLifecycleDeps = {}): WorkerLifecycle {
 	const client = () => createChromeCdpClient({ port, fetch: deps.fetch });
 	// 测试传 deps.log=()=>{} 禁用日志;生产不传 → tabLog(写文件,默认开)。
 	const log = deps.log ?? tabLog;
+	// ponytail: launch DI。生产走 launchChromeCdpAndWait(真起 Chrome + 轮询就绪);
+	// 测试注入 fake 避免真 spawn。解析延迟到调用点,让测试能注入、生产能 tree-shake 不用就不加载。
+	const launch = deps.launch ?? ((p: number) => launchChromeCdpAndWait(p));
 	let tabId: string | undefined;
+	// ponytail: openTab = 在当前 client 上开一个 about:blank tab。抽出来让 beforeSpawn 的
+	// 初次/重试两条路共用同一段调用,避免 autolaunch 重试时复制粘贴 createChromeTab 调用。
+	const openTab = () => createChromeTab(client(), "about:blank");
 	return {
 		async beforeSpawn(env) {
 			// ponytail: about:blank 起 tab。worker 进程内 navigate 到真实目标页(B 站 BV 页等)。
+			// 首次失败若是连接类错误(Chrome 没起),autolaunch 一次再重试 —— 不让"CDP 没起"
+			// 直接整 task 崩;worker 根本没机会自救(它 spawn 之前就跑到这里了)。
 			try {
-				const tab = await createChromeTab(client(), "about:blank");
+				const tab = await openTab();
 				tabId = tab.id;
 				env.UGK_CDP_TAB_ID = tabId;
 				log(`OPEN  port=${port} tab=${tabId} url=about:blank`);
 			} catch (error) {
-				// ponytail: 把含糊的底层错(fetch failed / ECONNREFUSED)翻译成可操作的提示。
-				// Chrome 没起是最高频原因 —— 直接告诉用户 /cdp launch。
 				const msg = error instanceof Error ? error.message : String(error);
 				log(`ERROR port=${port} stage=open msg=${msg}`);
-				const hint = /fetch failed|ECONNREFUSED|Failed to fetch|NetworkError/i.test(msg)
-					? `Chrome CDP 未连接(port ${port})。请先运行 /cdp launch 启动带调试端口的 Chrome。`
-					: `CDP 开 tab 失败(port ${port}): ${msg}`;
-				throw new Error(hint);
+				if (!CDP_CONNECT_ERROR.test(msg) || !autolaunchEnabled()) {
+					// 非连接类错(tab 配额/协议错),或用户关了 autolaunch:翻译成可操作提示。
+					const hint = CDP_CONNECT_ERROR.test(msg)
+						? `Chrome CDP 未连接(port ${port})。请先运行 /cdp launch 启动带调试端口的 Chrome。`
+						: `CDP 开 tab 失败(port ${port}): ${msg}`;
+					throw new Error(hint);
+				}
+				// 连接类错 + autolaunch 开:起 Chrome 再开一次 tab。launchChromeCdpAndWait 内含
+				// waitForChromeCdpReady 轮询,解决 spawn→fetch 的启动竞态。
+				log(`AUTOLAUNCH port=${port} reason=connect-error launching managed Chrome`);
+				try {
+					await launch(port);
+				} catch (launchErr) {
+					const launchMsg = launchErr instanceof Error ? launchErr.message : String(launchErr);
+					log(`ERROR port=${port} stage=autolaunch msg=${launchMsg}`);
+					throw new Error(
+						`Chrome CDP 未连接(port ${port})且自动启动失败: ${launchMsg}。请手动运行 /cdp launch。`,
+					);
+				}
+				try {
+					const tab = await openTab();
+					tabId = tab.id;
+					env.UGK_CDP_TAB_ID = tabId;
+					log(`OPEN  port=${port} tab=${tabId} url=about:blank autolaunch=1`);
+				} catch (retryErr) {
+					// ponytail: launch 成功但仍开不了 tab —— 真有问题(端口被占/profile 损坏)。
+					// ceiling: 此时重试也没用,直接报清晰错让用户介入。
+					const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+					log(`ERROR port=${port} stage=open-retry msg=${retryMsg}`);
+					throw new Error(
+						`已自动启动 Chrome(port ${port})但仍无法开 tab: ${retryMsg}。请检查端口/profile,或手动 /cdp launch。`,
+					);
+				}
 			}
 		},
 		async afterClose() {

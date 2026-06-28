@@ -1,6 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import registerQuestionnaire from "../extensions/questionnaire.ts";
+
+async function withUiLanguage(language: string, fn: () => Promise<void> | void) {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-questionnaire-language-"));
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: language }));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		await fn();
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		fs.rmSync(agentDir, { recursive: true, force: true });
+	}
+}
 
 function makeQuestionnaireTool() {
 	let tool: any;
@@ -137,6 +154,41 @@ test("questionnaire allowOther selection uses editor and returns custom answer",
 	assert.deepEqual(editorCalls, [{ title: "Add detail", value: "" }]);
 });
 
+test("questionnaire UI strings follow UI language", async () => {
+	await withUiLanguage("en-US", async () => {
+		const tool = makeQuestionnaireTool();
+		const { ctx, selections } = makeCtx();
+
+		await tool.execute(
+			"call-1",
+			{
+				questions: [
+					{
+						id: "detail",
+						prompt: "Add detail",
+						options: [{ value: "preset", label: "Preset" }],
+						allowOther: true,
+					},
+				],
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+
+		assert.deepEqual(selections[0].options, ["1. Preset", "2. Type another answer."]);
+
+		const noUi = await tool.execute(
+			"call-2",
+			{ questions: [{ id: "x", prompt: "X", options: [{ value: "x", label: "X" }] }] },
+			undefined,
+			undefined,
+			makeCtx("print", false).ctx,
+		);
+		assert.match(noUi.content[0].text, /UI unavailable/);
+	});
+});
+
 test("questionnaire works in rpc mode when extension UI is available", async () => {
 	const tool = makeQuestionnaireTool();
 	const { ctx } = makeCtx("rpc");
@@ -172,7 +224,7 @@ test("questionnaire returns cancelled error when UI is unavailable", async () =>
 	);
 
 	assert.equal(result.details.cancelled, true);
-	assert.match(result.content[0].text, /UI not available/);
+	assert.match(result.content[0].text, /UI 不可用/);
 });
 
 // theme stub: passthrough, so assertions read the raw text the renderer built.
@@ -188,12 +240,26 @@ test("renderResult collapses to a one-line summary and expands on demand", () =>
 	const result = { content: [{ type: "text" as const, text: "..." }], details: { answers: sampleAnswers, cancelled: false } };
 
 	const collapsed = String(tool.renderResult(result, { expanded: false, isPartial: false }, stubTheme).text);
-	assert.match(collapsed, /answered 2 questions/);
+	assert.match(collapsed, /已回答 2 个问题/);
 	assert.doesNotMatch(collapsed, /scope/);
 
 	const expanded = String(tool.renderResult(result, { expanded: true, isPartial: false }, stubTheme).text);
-	assert.match(expanded, /scope: user selected: 1\. Single file/);
-	assert.match(expanded, /detail: user wrote: custom answer/);
+	assert.match(expanded, /scope: 用户选择: 1\. Single file/);
+	assert.match(expanded, /detail: 用户填写: custom answer/);
+});
+
+test("renderResult follows UI language", async () => {
+	await withUiLanguage("en-US", () => {
+		const tool = makeQuestionnaireTool();
+		const result = { content: [{ type: "text" as const, text: "..." }], details: { answers: sampleAnswers, cancelled: false } };
+
+		const collapsed = String(tool.renderResult(result, { expanded: false, isPartial: false }, stubTheme).text);
+		assert.match(collapsed, /answered 2 questions/);
+
+		const expanded = String(tool.renderResult(result, { expanded: true, isPartial: false }, stubTheme).text);
+		assert.match(expanded, /scope: user selected: 1\. Single file/);
+		assert.match(expanded, /detail: user typed: custom answer/);
+	});
 });
 
 test("renderResult reports cancelled state", () => {
@@ -204,7 +270,7 @@ test("renderResult reports cancelled state", () => {
 	};
 
 	const collapsed = String(tool.renderResult(result, { expanded: false, isPartial: false }, stubTheme).text);
-	assert.match(collapsed, /cancelled after 1 answer/);
+	assert.match(collapsed, /取消,已回答 1 个/);
 });
 
 test("renderCall shows question count and up to three labels", () => {
@@ -219,6 +285,6 @@ test("renderCall shows question count and up to three labels", () => {
 	};
 
 	const text = String(tool.renderCall(args, stubTheme).text);
-	assert.match(text, /4 questions/);
+	assert.match(text, /4 个问题/);
 	assert.match(text, /Alpha, Beta, c\.\.\./);
 });

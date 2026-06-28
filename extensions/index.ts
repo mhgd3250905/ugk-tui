@@ -36,9 +36,31 @@ import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { renderTerminalTable } from "./terminal-table.ts";
 import { AUTOPILOT_PROMPT_SNIPPET, isAutopilotOn, setAutopilot } from "./shared/autopilot.ts";
 import { buildLanguagePromptSnippet, clearLanguage, getLanguage, setLanguage } from "./shared/language.ts";
+import {
+	clearUiLanguage,
+	formatUiLanguage,
+	getUiLanguage,
+	setUiLanguage,
+	SUPPORTED_UI_LANGUAGES,
+	uiText,
+	type UiLanguage,
+} from "./shared/ui-language.ts";
 
-const AUTOPILOT_MENU_OPTIONS = ["Status", "Turn on", "Turn off", "Exit"];
-const LANGUAGE_MENU_OPTIONS = ["Status", "Set language", "Clear", "Exit"];
+function autopilotMenuOptions(): string[] {
+	return uiText(["查看状态", "开启", "关闭", "退出"], ["Status", "Turn on", "Turn off", "Exit"]);
+}
+
+function languageMenuOptions(): string[] {
+	return uiText(["查看状态", "设置回答语言", "清除", "退出"], ["Status", "Set reply language", "Clear", "Exit"]);
+}
+
+function uiLanguageMenuOptions(): string[] {
+	return uiText(["查看状态", "设置界面语言", "清除", "退出"], ["Status", "Set UI language", "Clear", "Exit"]);
+}
+
+function uiLanguageChoiceOptions(): string[] {
+	return [...SUPPORTED_UI_LANGUAGES.map((language) => language.label), uiText("返回", "Back")];
+}
 
 function isNaturalBareAtPrefix(lines: string[], cursorLine: number, cursorCol: number): boolean {
 	const currentLine = lines[cursorLine] || "";
@@ -62,21 +84,33 @@ export function suppressNaturalAtAutocomplete(current: AutocompleteProvider): Au
 	};
 }
 
+function formatDeepSeekSummary(deepseekStatus: string, language: UiLanguage): string {
+	if (/未配置|not configured/i.test(deepseekStatus)) {
+		return uiText("DeepSeek 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)", "DeepSeek not configured (set DEEPSEEK_API_KEY or run /login)", language);
+	}
+	if (/DEEPSEEK_API_KEY/.test(deepseekStatus)) {
+		return uiText("DeepSeek 已配置(DEEPSEEK_API_KEY, deepseek-chat/默认模型可用)", "DeepSeek configured (DEEPSEEK_API_KEY, deepseek-chat/default model available)", language);
+	}
+	return uiText("DeepSeek 已配置(pi login/auth.json, deepseek-chat/默认模型可用)", "DeepSeek configured (pi login/auth.json, deepseek-chat/default model available)", language);
+}
+
 function formatUgkStatusTable(deepseekStatus: string): string {
-	const apiIcon = /已配置/.test(deepseekStatus) ? "✅" : "❌";
-	const apiSummary = deepseekStatus.replace(/^deepseek:\s*/, "DeepSeek ");
+	const language = getUiLanguage();
+	const apiConfigured = /已配置|configured/i.test(deepseekStatus) && !/未配置|not configured/i.test(deepseekStatus);
+	const apiIcon = apiConfigured ? "✅" : "❌";
+	const apiSummary = formatDeepSeekSummary(deepseekStatus, language);
 	const rows = [
-		["🧰 Tools", "✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ mcp"],
-		["🤖 Agents", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries"],
-		["⌨️ Commands", "/ugk  /doctor  /check-env  /update  /plan  /cdp  /mcp  /ugk-ui  /ugk-autopilot  /language"],
+		[uiText("🧰 工具", "🧰 Tools", language), "✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ mcp"],
+		[uiText("🤖 代理", "🤖 Agents", language), uiText("✅ @agent 提及  ✅ /implement 流水线  ✅ 隔离摘要", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries", language)],
+		[uiText("⌨️ 命令", "⌨️ Commands", language), "/ugk  /doctor  /check-env  /update  /plan  /cdp  /mcp  /ugk-ui  /ui-language  /ugk-autopilot  /language"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
-		["🛡️ Guard", "dangerous bash gate enabled"],
+		[uiText("🛡️ 防护", "🛡️ Guardrails", language), uiText("危险 bash 门禁已启用", "Dangerous bash gate enabled", language)],
 	] as const;
 
 	return [
-		"🟢 UGK active",
+		uiText("🟢 UGK 已启用", "🟢 UGK enabled", language),
 		"",
-		renderTerminalTable(["模块", "状态"], rows),
+		renderTerminalTable(uiText(["模块", "状态"], ["Module", "Status"], language), rows),
 	].join("\n");
 }
 
@@ -168,28 +202,29 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			let arg = (args || "").trim().toLowerCase();
 			if (arg === "" && ctx.ui?.select) {
-				const selection = await ctx.ui.select("Autopilot", AUTOPILOT_MENU_OPTIONS);
-				if (!selection || selection === "Exit") return;
-				if (selection === "Status") arg = "status";
-				if (selection === "Turn on") arg = "on";
-				if (selection === "Turn off") arg = "off";
+				const options = autopilotMenuOptions();
+				const selection = await ctx.ui.select(uiText("自动放行", "Autopilot"), options);
+				if (!selection || selection === options[3]) return;
+				if (selection === options[0]) arg = "status";
+				if (selection === options[1]) arg = "on";
+				if (selection === options[2]) arg = "off";
 			}
 			if (arg === "on" || arg === "off") {
 				setAutopilot(arg === "on");
 				ctx.ui.notify(
-					`Autopilot: ${arg === "on" ? "ON" : "OFF"}\n` +
+					uiText(`自动放行: ${arg === "on" ? "开" : "关"}\n`, `Autopilot: ${arg === "on" ? "on" : "off"}\n`) +
 						(arg === "on"
-							? "可逆的工具确认(CDP/MCP 等)自动放行;危险命令(rm -rf 等)仍归人。"
-							: "工具确认回到各工具自己的模式。"),
+							? uiText("可逆的工具确认(CDP/MCP 等)自动放行;危险命令(rm -rf 等)仍归人。", "Reversible tool confirmations (CDP/MCP, etc.) are auto-approved; dangerous commands still require you.")
+							: uiText("工具确认回到各工具自己的模式。", "Tool confirmations return to each tool's own mode.")),
 					"info",
 				);
 				return;
 			}
 			if (arg === "status" || arg === "") {
-				ctx.ui.notify(`Autopilot: ${isAutopilotOn() ? "ON" : "OFF"}`, "info");
+				ctx.ui.notify(uiText(`自动放行: ${isAutopilotOn() ? "开" : "关"}`, `Autopilot: ${isAutopilotOn() ? "on" : "off"}`), "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /ugk-autopilot on|off|status", "warning");
+			ctx.ui.notify(uiText("用法: /ugk-autopilot on|off|status", "Usage: /ugk-autopilot on|off|status"), "warning");
 		},
 	});
 
@@ -218,22 +253,23 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			let raw = (args || "").trim();
 			if (raw === "" && ctx.ui?.select) {
-				const selection = await ctx.ui.select("Language", LANGUAGE_MENU_OPTIONS);
-				if (!selection || selection === "Exit") return;
-				if (selection === "Status") raw = "status";
-				if (selection === "Clear") raw = "clear";
-				if (selection === "Set language") {
+				const options = languageMenuOptions();
+				const selection = await ctx.ui.select(uiText("回答语言", "Reply Language"), options);
+				if (!selection || selection === options[3]) return;
+				if (selection === options[0]) raw = "status";
+				if (selection === options[2]) raw = "clear";
+				if (selection === options[1]) {
 					if (!ctx.ui?.input) {
-						ctx.ui.notify("Set language requires interactive input support. Use /language <语言>.", "warning");
+						ctx.ui.notify(uiText("设置回答语言需要交互输入支持。请使用 /language <语言>。", "Setting reply language needs interactive input. Use /language <language>."), "warning");
 						return;
 					}
-					const input = await ctx.ui.input("用什么语言与 agent 交流?", "如:English / 中文 / 日本語");
+					const input = await ctx.ui.input(uiText("AI 回答优先用什么语言?", "Which language should AI replies prefer?"), "English / 中文 / 日本語");
 					if (!input?.trim()) {
-						ctx.ui.notify("未设置,保持当前语言偏好。", "info");
+						ctx.ui.notify(uiText("未设置,保持当前语言偏好。", "Not set; keeping current reply language preference."), "info");
 						return;
 					}
 					const set = setLanguage(input);
-					ctx.ui.notify(`语言偏好已设为: ${set}\n下个回合起生效。`, "info");
+					ctx.ui.notify(uiText(`语言偏好已设为: ${set}\n下个回合起生效。`, `Reply language set to: ${set}\nTakes effect next turn.`), "info");
 					return;
 				}
 			}
@@ -243,30 +279,71 @@ export default function (pi: ExtensionAPI) {
 				const current = getLanguage();
 				ctx.ui.notify(
 					current
-						? `当前语言偏好: ${current}\n(/language <语言> 修改,/language clear 清除回默认)`
-						: `当前语言偏好: 默认(优先中文)\n(/language <语言> 设置)`,
+						? uiText(`当前语言偏好: ${current}\n(/language <语言> 修改,/language clear 清除回默认)`, `Current reply language: ${current}\n(/language <language> to change, /language clear to reset)`)
+						: uiText(`当前语言偏好: 默认(优先中文)\n(/language <语言> 设置)`, `Current reply language: default (Chinese preferred)\n(/language <language> to set)`),
 					"info",
 				);
 				return;
 			}
 			if (arg === "clear") {
 				clearLanguage();
-				ctx.ui.notify("语言偏好已清除,回到默认(优先中文)。", "info");
+				ctx.ui.notify(uiText("语言偏好已清除,回到默认(优先中文)。", "Reply language cleared; back to default (Chinese preferred)."), "info");
 				return;
 			}
 			if (arg === "") {
 				// ponytail: 无参且有 input 能力时,交互问一句。避免命令解析对 input 能力的耦合。
-				const input = await ctx.ui.input("用什么语言与 agent 交流?", "如:English / 中文 / 日本語");
+				const input = await ctx.ui.input(uiText("AI 回答优先用什么语言?", "Which language should AI replies prefer?"), "English / 中文 / 日本語");
 				if (!input?.trim()) {
-					ctx.ui.notify("未设置,保持当前语言偏好。", "info");
+					ctx.ui.notify(uiText("未设置,保持当前语言偏好。", "Not set; keeping current reply language preference."), "info");
 					return;
 				}
 				const set = setLanguage(input);
-				ctx.ui.notify(`语言偏好已设为: ${set}\n下个回合起生效。`, "info");
+				ctx.ui.notify(uiText(`语言偏好已设为: ${set}\n下个回合起生效。`, `Reply language set to: ${set}\nTakes effect next turn.`), "info");
 				return;
 			}
 			const set = setLanguage(raw);
-			ctx.ui.notify(`语言偏好已设为: ${set}\n下个回合起生效。`, "info");
+			ctx.ui.notify(uiText(`语言偏好已设为: ${set}\n下个回合起生效。`, `Reply language set to: ${set}\nTakes effect next turn.`), "info");
+		},
+	});
+
+	pi.registerCommand("ui-language", {
+		description: "Set UGK menu/UI language (separate from /language)",
+		handler: async (args, ctx) => {
+			let raw = (args || "").trim();
+			if (raw === "" && ctx.ui?.select) {
+				const options = uiLanguageMenuOptions();
+				const selection = await ctx.ui.select(uiText("界面语言", "UI Language"), options);
+				if (!selection || selection === options[3]) return;
+				if (selection === options[0]) raw = "status";
+				if (selection === options[2]) raw = "clear";
+				if (selection === options[1]) {
+					const choices = uiLanguageChoiceOptions();
+					const choice = await ctx.ui.select(uiText("选择界面语言", "Select UI Language"), choices);
+					if (!choice || choice === choices.at(-1)) return;
+					const selected = SUPPORTED_UI_LANGUAGES[choices.indexOf(choice)];
+					if (!selected) return;
+					raw = selected.code;
+				}
+			}
+
+			const arg = raw.toLowerCase();
+			if (arg === "status" || arg === "") {
+				const current = getUiLanguage();
+				ctx.ui.notify(uiText(`当前界面语言: ${formatUiLanguage(current)}`, `Current UI language: ${formatUiLanguage(current)}`), "info");
+				return;
+			}
+			if (arg === "clear") {
+				const language = getUiLanguage();
+				clearUiLanguage();
+				ctx.ui.notify(uiText("界面语言已清除,回到默认: 简体中文", "UI language cleared; back to default: Simplified Chinese", language), "info");
+				return;
+			}
+			const set = setUiLanguage(raw);
+			if (!set) {
+				ctx.ui.notify(uiText("用法: /ui-language zh-CN|English|status|clear", "Usage: /ui-language zh-CN|English|status|clear"), "warning");
+				return;
+			}
+			ctx.ui.notify(`${uiText("界面语言已设为", "UI language set to", set)}: ${formatUiLanguage(set)}`, "info");
 		},
 	});
 
@@ -297,8 +374,12 @@ export default function (pi: ExtensionAPI) {
 			return { block: true, reason: "Dangerous command blocked (no UI for confirmation)" };
 		}
 
-		const choice = await ctx.ui.select(`⚠️ Dangerous command:\n\n  ${command}\n\nAllow?`, ["Yes", "No"]);
-		if (choice !== "Yes") {
+		const options = uiText(["允许", "拒绝"], ["Yes", "No"]);
+		const choice = await ctx.ui.select(
+			uiText(`⚠️ 危险命令:\n\n  ${command}\n\n是否允许?`, `⚠️ Dangerous command:\n\n  ${command}\n\nAllow?`),
+			options,
+		);
+		if (choice !== options[0]) {
 			return { block: true, reason: "Blocked by user" };
 		}
 

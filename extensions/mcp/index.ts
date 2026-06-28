@@ -16,6 +16,7 @@ import {
 	type McpToolRegistrationResult,
 } from "./tools.ts";
 import type { DoctorCheck } from "../doctor/types.ts";
+import { uiText } from "../shared/ui-language.ts";
 
 type McpRuntimeContext = {
 	cwd?: string;
@@ -41,9 +42,6 @@ type McpStartupResult = {
 	warnings: string[];
 };
 
-const MCP_ALLOW_ONCE = "Allow once";
-const MCP_ALLOW_SESSION = "Allow for this session";
-const MCP_DENY = "Deny";
 const CLEANUP_REASONS = new Set(["quit", "reload", "new", "resume", "fork"]);
 // ponytail: 全部 pi session_start reason 都触发 MCP 连接。原白名单只含 startup/reload,
 // 导致 resume(恢复会话,最常见的"重启 ugk")/new/fork 时 MCP 不自动加载,必须手动 /mcp reload。
@@ -301,19 +299,14 @@ async function confirmSpawn(ctx: McpRuntimeContext, entry: McpConfigEntry): Prom
 	if (!hasInteractiveUi(ctx)) {
 		return false;
 	}
+	const title = uiText("允许 MCP server?", "Allow MCP server?");
+	const body = `${uiText("来自", "From")} ${entry.scope} ${uiText("配置的 server 想启动", "configured server wants to start")} "${entry.name}":\n${entry.config.command}`;
 	if (ctx.ui?.select && !ctx.ui?.confirm) {
-		const choice = await ctx.ui.select(
-			`Allow MCP server?\n\nServer "${entry.name}" from ${entry.scope} config wants to spawn:\n${entry.config.command}`,
-			["Allow", "Deny"],
-		);
-		return choice === "Allow";
+		const options = uiText(["允许", "拒绝"], ["Allow", "Deny"]);
+		const choice = await ctx.ui.select(`${title}\n\n${body}`, options);
+		return choice === options[0];
 	}
-	return Boolean(
-		await ctx.ui?.confirm?.(
-			"Allow MCP server?",
-			`Server "${entry.name}" from ${entry.scope} config wants to spawn:\n${entry.config.command}`,
-		),
-	);
+	return Boolean(await ctx.ui?.confirm?.(title, body));
 }
 
 async function confirmTool(ctx: McpRuntimeContext | undefined, context: McpToolPolicyContext) {
@@ -321,19 +314,21 @@ async function confirmTool(ctx: McpRuntimeContext | undefined, context: McpToolP
 		return "deny" as const;
 	}
 
-	const prompt = `Allow MCP tool?\n\n${context.registeredName}\nReason: ${context.reason}`;
+	const title = uiText("允许 MCP tool?", "Allow MCP tool?");
+	const prompt = `${title}\n\n${context.registeredName}\n${uiText("原因", "Reason")}: ${context.reason}`;
 	if (ctx?.ui?.select) {
-		const choice = await ctx.ui.select(prompt, [MCP_ALLOW_ONCE, MCP_ALLOW_SESSION, MCP_DENY]);
-		if (choice === MCP_ALLOW_SESSION) {
+		const options = uiText(["允许一次", "本会话允许", "拒绝"], ["Allow once", "Allow for session", "Deny"]);
+		const choice = await ctx.ui.select(prompt, options);
+		if (choice === options[1]) {
 			return "allow-session" as const;
 		}
-		if (choice === MCP_ALLOW_ONCE) {
+		if (choice === options[0]) {
 			return "allow-once" as const;
 		}
 		return "deny" as const;
 	}
 
-	return (await ctx?.ui?.confirm?.("Allow MCP tool?", prompt)) ? ("allow-once" as const) : ("deny" as const);
+	return (await ctx?.ui?.confirm?.(title, prompt)) ? ("allow-once" as const) : ("deny" as const);
 }
 
 function resolveCwd(ctx: McpRuntimeContext): string {

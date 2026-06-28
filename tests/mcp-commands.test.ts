@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { registerMcpCommand, type McpCommandState } from "../extensions/mcp/commands.ts";
 import { formatMcpStatus } from "../extensions/mcp/formatter.ts";
 import { createMcpPermissionState } from "../extensions/mcp/permissions.ts";
@@ -82,19 +85,19 @@ test("/mcp status renders connected servers, tool count, mode, and failed server
 	registerMcpCommand(pi as any, state);
 
 	const directText = formatMcpStatus(state);
-	assert.match(directText, /connected/i);
-	assert.match(directText, /tool/i);
-	assert.match(directText, /mode/i);
-	assert.match(directText, /failed/i);
+	assert.match(directText, /已连接 server/);
+	assert.match(directText, /工具/);
+	assert.match(directText, /权限模式/);
+	assert.match(directText, /失败 server/);
 	assert.match(directText, /alpha/);
 	assert.match(directText, /beta/);
 
 	const { notifications } = await runMcp(pi, "status");
 	assert.equal(notifications.length, 1);
-	assert.match(notifications[0], /connected/i);
-	assert.match(notifications[0], /tool/i);
-	assert.match(notifications[0], /mode/i);
-	assert.match(notifications[0], /failed/i);
+	assert.match(notifications[0], /已连接 server/);
+	assert.match(notifications[0], /工具/);
+	assert.match(notifications[0], /权限模式/);
+	assert.match(notifications[0], /失败 server/);
 });
 
 test("/mcp on off ask switches permission mode", async () => {
@@ -136,7 +139,7 @@ test("/mcp with no args opens the main menu and reuses existing dispatch", async
 		},
 	});
 
-	assert.equal(selectCalls[0].title, "MCP(2 servers connected, mode: ask)");
+	assert.equal(selectCalls[0].title, "MCP(已连接 2 个 server,模式: ask)");
 	assert.deepEqual(selectCalls[0].options, [
 		"📊 查看状态",
 		"🔄 重载所有 server",
@@ -147,6 +150,51 @@ test("/mcp with no args opens the main menu and reuses existing dispatch", async
 	]);
 	assert.equal(selectCalls[1].title, "切换 MCP 权限模式");
 	assert.equal(state.permissionState.mode, "on");
+});
+
+test("/mcp menu and status follow UI language", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-language-"));
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: "en-US" }));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const state = makeState({
+			registry: {
+				connections: new Map([
+					["alpha", { name: "alpha", status: "connected", tools: [] }],
+				]) as any,
+				async disconnectAll() {},
+			},
+		});
+		const pi = makePi();
+		registerMcpCommand(pi as any, state);
+		const selectCalls: Array<{ title: string; options: string[] }> = [];
+
+		await runMcp(pi, "", {
+			ui: {
+				async select(title: string, options: string[]) {
+					selectCalls.push({ title, options });
+					return "Status";
+				},
+			},
+		});
+
+		assert.equal(selectCalls[0].title, "MCP(connected servers: 1, mode: ask)");
+		assert.deepEqual(selectCalls[0].options, [
+			"📊 Status",
+			"🔄 Reload all servers",
+			"⚙️ Switch permission mode",
+			"✅ Enable server",
+			"⛔ Disable server",
+			"Exit",
+		]);
+		assert.match(formatMcpStatus(state), /MCP Status/);
+		assert.match(formatMcpStatus(state), /Connected servers/);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		fs.rmSync(agentDir, { recursive: true, force: true });
+	}
 });
 
 test("/mcp with no args falls back to status when select UI is unavailable", async () => {
@@ -190,7 +238,7 @@ test("/mcp enable menu lists inactive and stale servers", async () => {
 	});
 
 	assert.deepEqual(selectCalls[1].options, ["beta", "gone (stale)", "返回"]);
-	assert.match(notifications.join("\n"), /stale/i);
+	assert.match(notifications.join("\n"), /过期/);
 });
 
 test("/mcp disable menu lists active MCP servers only", async () => {
@@ -282,9 +330,9 @@ test("/mcp enable reports stale servers separately from missing servers", async 
 	const stale = await runMcp(pi, "enable beta");
 	const missing = await runMcp(pi, "enable missing");
 
-	assert.match(stale.notifications.join("\n"), /stale/i);
+	assert.match(stale.notifications.join("\n"), /过期/);
 	assert.doesNotMatch(stale.notifications.join("\n"), /not found/i);
-	assert.match(missing.notifications.join("\n"), /not found/i);
+	assert.match(missing.notifications.join("\n"), /未找到/);
 });
 
 test("/mcp reload disconnects, invokes reload, registers new tools, and updates state", async () => {
@@ -408,7 +456,7 @@ test("/mcp reload clears stale marker when a vanished server returns", async () 
 	await runMcp(pi, "reload");
 
 	assert.equal(state.staleServerTools.has("beta"), false);
-	assert.doesNotMatch(formatMcpStatus(state), /stale servers:.*beta/i);
+	assert.doesNotMatch(formatMcpStatus(state), /过期 server:.*beta/i);
 });
 
 test("stale tool execution returns disconnected without reconnecting", async () => {

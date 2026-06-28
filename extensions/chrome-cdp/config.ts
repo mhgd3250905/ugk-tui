@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { readSettingsJson, updateSettingsJson } from "../shared/settings-io.ts";
 import { suppressConfirmation } from "../shared/autopilot.ts";
+import { uiText } from "../shared/ui-language.ts";
 
 export type ChromeCdpMode = "off" | "ask" | "on";
 export type ChromeCdpAction = "status" | "tabs" | "launch" | "navigate" | "evaluate" | "screenshot";
@@ -124,7 +125,7 @@ export function checkChromeCdpPolicy(
 		return {
 			allowed: false,
 			requiresConfirmation: false,
-			reason: "Chrome CDP is off. Ask the user to run /cdp ask or /cdp on.",
+			reason: uiText("Chrome CDP 已关闭。请让用户运行 /cdp ask 或 /cdp on。", "Chrome CDP is off. Ask the user to run /cdp ask or /cdp on."),
 		};
 	}
 
@@ -136,7 +137,7 @@ export function checkChromeCdpPolicy(
 		return {
 			allowed: false,
 			requiresConfirmation: false,
-			reason: "Chrome CDP is reserved for logged-in local Chrome access after ordinary access is insufficient.",
+			reason: uiText("Chrome CDP 仅用于普通访问不足时的本机已登录 Chrome 访问。", "Chrome CDP is only for local logged-in Chrome access when ordinary access is insufficient."),
 		};
 	}
 

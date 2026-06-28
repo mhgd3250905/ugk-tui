@@ -8,6 +8,7 @@ import { createChromeCdpState, resolveChromeCdpPort } from "../chrome-cdp/config
 import { resolveChromeBinary, type ChromeBinaryResolution } from "../chrome-cdp/launcher.ts";
 import { getDeepSeekStatus, type DeepSeekStatusDeps } from "../deepseek-status.ts";
 import { readSettingsJson, updateSettingsJson } from "../shared/settings-io.ts";
+import { uiText } from "../shared/ui-language.ts";
 import type { DoctorCheck, DoctorResult } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
@@ -131,32 +132,32 @@ export async function checkBash(deps: BashCheckDeps = {}): Promise<DoctorResult>
 			} catch {
 				// Keep /doctor truthful: bash works even if settings cannot be updated.
 			}
-			return { status: "pass", summary: `bash available (${bash.source}: ${bash.command})` };
+			return { status: "pass", summary: uiText(`bash 可用(${bash.source}: ${bash.command})`, `bash available (${bash.source}: ${bash.command})`) };
 		}
 		return {
 			status: "fail",
-			summary: "bash unavailable: unexpected output",
-			nextSteps: ["Check PATH or install a bash-compatible shell."],
+			summary: uiText("bash 不可用: 输出异常", "bash unavailable: unexpected output"),
+			nextSteps: [uiText("检查 PATH 或安装 bash 兼容 shell。", "Check PATH or install a bash-compatible shell.")],
 		};
 	} catch (error) {
 		return {
 			status: "fail",
-			summary: `bash unavailable: ${errorMessage(error)}`,
-			nextSteps: ["Check PATH or install a bash-compatible shell."],
+			summary: uiText(`bash 不可用: ${errorMessage(error)}`, `bash unavailable: ${errorMessage(error)}`),
+			nextSteps: [uiText("检查 PATH 或安装 bash 兼容 shell。", "Check PATH or install a bash-compatible shell.")],
 		};
 	}
 }
 
 export async function checkDeepSeekApi(deps: DeepSeekStatusDeps = {}): Promise<DoctorResult> {
 	const status = getDeepSeekStatus(deps);
-	if (/已配置/.test(status)) {
+	if ((/已配置|configured/i.test(status)) && !/未配置|not configured/i.test(status)) {
 		return { status: "pass", summary: status.replace(/^deepseek:\s*/, "DeepSeek ") };
 	}
 	return {
 		status: "fail",
 		summary: status.replace(/^deepseek:\s*/, "DeepSeek "),
-		details: ["底栏模型名只表示当前选择的模型,不代表 DeepSeek API 已配置。"],
-		nextSteps: ["Set DEEPSEEK_API_KEY or run /login."],
+		details: [uiText("底栏模型名只表示当前选择的模型,不代表 DeepSeek API 已配置。", "The footer model name only shows the selected model; it does not mean the DeepSeek API is configured.")],
+		nextSteps: [uiText("设置 DEEPSEEK_API_KEY 或运行 /login。", "Set DEEPSEEK_API_KEY or run /login.")],
 	};
 }
 
@@ -165,13 +166,13 @@ export async function checkChromeBinary(deps: ChromeBinaryCheckDeps = {}): Promi
 	if (resolution.found) {
 		return {
 			status: "pass",
-			summary: `Chrome found: ${resolution.command}`,
+			summary: uiText(`已找到 Chrome: ${resolution.command}`, `Chrome found: ${resolution.command}`),
 		};
 	}
 	return {
 		status: "fail",
-		summary: `Chrome not found: ${resolution.command}`,
-		nextSteps: ["Install Chrome or check PATH."],
+		summary: uiText(`未找到 Chrome: ${resolution.command}`, `Chrome not found: ${resolution.command}`),
+		nextSteps: [uiText("安装 Chrome 或检查 PATH。", "Install Chrome or check PATH.")],
 	};
 }
 
@@ -184,14 +185,14 @@ export async function checkChromeCdp(deps: ChromeCdpCheckDeps = {}): Promise<Doc
 	if (status.online) {
 		return {
 			status: "pass",
-			summary: `Chrome CDP reachable on 127.0.0.1:${status.port}`,
-			details: [`Tabs: ${status.tabs?.length ?? 0}`],
+			summary: uiText(`Chrome CDP 可连接: 127.0.0.1:${status.port}`, `Chrome CDP reachable: 127.0.0.1:${status.port}`),
+			details: [uiText(`标签页: ${status.tabs?.length ?? 0}`, `Tabs: ${status.tabs?.length ?? 0}`)],
 		};
 	}
 
 	return {
 		status: "warn",
-		summary: `Chrome CDP not reachable on 127.0.0.1:${status.port}`,
+		summary: uiText(`Chrome CDP 无法连接: 127.0.0.1:${status.port}`, `Chrome CDP not reachable: 127.0.0.1:${status.port}`),
 		details: status.error ? [status.error] : undefined,
 		nextSteps: ["/cdp launch", "/cdp status"],
 	};

@@ -1,4 +1,5 @@
 import { renderTerminalTable } from "../terminal-table.ts";
+import { uiText } from "../shared/ui-language.ts";
 import type { DoctorCheckRun } from "./types.ts";
 
 function unique(values: string[]): string[] {
@@ -19,13 +20,13 @@ export function formatDoctorReport(runs: DoctorCheckRun[]): string {
 		...(result.details ?? []).map((detail) => ["↳", check.title, detail]),
 	]);
 
-	lines.push(renderTerminalTable(["状态", "检查", "结果"], rows));
+	lines.push(renderTerminalTable(uiText(["状态", "检查", "结果"], ["Status", "Check", "Result"]), rows));
 
 	const nextSteps = unique(runs.flatMap((run) => run.result.nextSteps ?? []));
 	if (nextSteps.length) {
-		lines.push("", "👉 Next steps:", ...nextSteps.map((step) => `  ${step}`));
+		lines.push("", uiText("👉 下一步:", "👉 Next steps:"), ...nextSteps.map((step) => `  ${step}`));
 	} else {
-		lines.push("", "✨ All core checks passed.");
+		lines.push("", uiText("✨ 核心检查全部通过。", "✨ Core checks all passed."));
 	}
 
 	return lines.join("\n");

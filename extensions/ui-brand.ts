@@ -15,6 +15,7 @@ import {
 } from "./ui-brand-utils.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { readSettingsJson } from "./shared/settings-io.ts";
+import { getUiLanguage, uiText } from "./shared/ui-language.ts";
 
 function readUgkVersion(): string {
 	try {
@@ -28,7 +29,9 @@ function readUgkVersion(): string {
 const VERSION = readUgkVersion();
 const ENABLED_ENV_VALUES = new Set(["1", "true", "yes", "on"]);
 const DISABLED_ENV_VALUES = new Set(["0", "false", "no", "off"]);
-const UGK_UI_MENU_OPTIONS = ["Show status", "Turn off", "Turn on", "Exit"];
+function ugkUiMenuOptions(): string[] {
+	return uiText(["查看状态", "关闭", "开启", "退出"], ["Status", "Turn off", "Turn on", "Exit"]);
+}
 
 function envDisablesBrandUi(): boolean {
 	const raw = process.env.UGK_UI;
@@ -111,14 +114,18 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 	if (/^[┌├└]/.test(trimmed)) {
 		return logoColoredLine
 			.replace("ugk", theme.bold(theme.fg("success", "ugk")))
-			.replace("quick actions", theme.fg("success", "quick actions"))
-			.replace("model", theme.fg("success", "model"));
+			.replace("快捷操作", theme.fg("success", "快捷操作"))
+			.replace("Quick Actions", theme.fg("success", "Quick Actions"))
+			.replace("模型", theme.fg("success", "模型"))
+			.replace("Model", theme.fg("success", "Model"));
 	}
 	if (trimmed.startsWith("│")) {
 		const colored = logoColoredLine
-			.replace(/(workspace|agent|stack|model)/, theme.fg("dim", "$1"))
-			.replace("◆ Tips for getting started", theme.bold(theme.fg("success", "◆ Tips for getting started")))
-			.replace("◆ What's new", theme.bold(theme.fg("success", "◆ What's new")))
+			.replace(/(工作区|代理|能力|模型|Workspace|Agent|Capabilities|Model)/, theme.fg("dim", "$1"))
+			.replace("◆ 入门提示", theme.bold(theme.fg("success", "◆ 入门提示")))
+			.replace("◆ 最近更新", theme.bold(theme.fg("success", "◆ 最近更新")))
+			.replace("◆ Getting Started", theme.bold(theme.fg("success", "◆ Getting Started")))
+			.replace("◆ Recent Updates", theme.bold(theme.fg("success", "◆ Recent Updates")))
 			.replace("/plan", theme.fg("success", "/plan"))
 			.replace("/implement", theme.fg("success", "/implement"))
 			.replace("/check-env", theme.fg("success", "/check-env"))
@@ -128,7 +135,8 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 	if (line.startsWith("  ")) return theme.fg("success", line);
 	if (index === 0) return theme.fg("muted", line);
 	return line
-		.replace("model", theme.fg("dim", "model"))
+		.replace("模型", theme.fg("dim", "模型"))
+		.replace("Model", theme.fg("dim", "Model"))
 		.replace("/plan", theme.fg("success", "/plan"))
 		.replace("/implement", theme.fg("success", "/implement"))
 		.replace("/check-env", theme.fg("success", "/check-env"))
@@ -136,7 +144,17 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 }
 
 function colorStatefulText(text: string, theme: any): string {
-	const statefulValues = ["❌ API not configured", "api not configured", "model not selected", "bash unavailable", "subagent not loaded"];
+	const statefulValues = [
+		"❌ API 未配置",
+		"❌ API not configured",
+		"api not configured",
+		"未选择模型",
+		"model not selected",
+		"bash 不可用",
+		"bash unavailable",
+		"subagent 未加载",
+		"subagent not loaded",
+	];
 	return statefulValues.reduce((current, value) => {
 		if (!current.includes(value)) return current;
 		return current.replace(value, theme.fg(classifyUgkStatusTone(value), value));
@@ -167,7 +185,7 @@ function colorFooterUsageLine(line: string, theme: any): string {
 	const usage = line.slice(0, index);
 	const modelOrState = line.slice(index + separator.length);
 	let tone = classifyUgkStatusTone(modelOrState);
-	if (modelOrState.startsWith("🤖 ") && tone === "dim" && !/\bno-model\b|model not selected/i.test(modelOrState)) {
+	if (modelOrState.startsWith("🤖 ") && tone === "dim" && !/\bno-model\b|model not selected|未选择模型/i.test(modelOrState)) {
 		tone = "success";
 	}
 	const coloredModelOrState = theme.fg(tone, modelOrState);
@@ -230,12 +248,14 @@ class UgkHeader implements Component {
 
 	render(width: number): string[] {
 		const cwd = this.source.sessionManager?.getCwd?.() ?? this.source.cwd;
-		const modelId = resolveUgkDisplayModelId(getCurrentModel(this.source)?.id, getDeepSeekStatus());
+		const language = getUiLanguage();
+		const modelId = resolveUgkDisplayModelId(getCurrentModel(this.source)?.id, getDeepSeekStatus(), language);
 		const options = {
 			version: VERSION,
 			cwdName: path.basename(cwd),
 			modelId,
 			width,
+			uiLanguage: language,
 		};
 		const lines = hasSessionMessages(this.source)
 			? buildUgkHeaderLines(options)
@@ -305,14 +325,16 @@ class UgkFooter implements Component {
 	render(width: number): string[] {
 		const statuses = Array.from(this.footerData.getExtensionStatuses?.().values?.() ?? []) as string[];
 		const cwd = this.source.sessionManager?.getCwd?.() ?? this.source.cwd;
+		const language = getUiLanguage();
 		const lines = buildUgkFooterLines({
 			cwd,
 			branch: this.footerData.getGitBranch?.() ?? null,
-			modelId: resolveUgkDisplayModelId(getCurrentModel(this.source)?.id, getDeepSeekStatus()) || "no-model",
+			modelId: resolveUgkDisplayModelId(getCurrentModel(this.source)?.id, getDeepSeekStatus(), language) || uiText("未选择模型", "model not selected", language),
 			thinkingLevel: this.source.thinkingLevel,
 			statuses,
 			usage: collectUsage(this.source),
 			width,
+			uiLanguage: language,
 		});
 
 		const [pwd, usage, status] = lines;
@@ -386,27 +408,28 @@ export default function registerUgkBrandUi(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			let action = args.trim().toLowerCase();
 			if (!action && ctx.ui?.select) {
-				const selection = await ctx.ui.select("UGK UI", UGK_UI_MENU_OPTIONS);
-				if (!selection || selection === "Exit") return;
-				if (selection === "Show status") action = "status";
-				if (selection === "Turn off") action = "off";
-				if (selection === "Turn on") action = "on";
+				const options = ugkUiMenuOptions();
+				const selection = await ctx.ui.select("UGK UI", options);
+				if (!selection || selection === options[3]) return;
+				if (selection === options[0]) action = "status";
+				if (selection === options[1]) action = "off";
+				if (selection === options[2]) action = "on";
 			}
 			if (!action) action = "status";
 			if (action === "on" || action === "enable") {
 				enabled = true;
 				applyBrandUi(pi, ctx);
-				ctx.ui.notify("ugk UI enabled", "info");
+				ctx.ui.notify(uiText("UGK UI 已开启", "UGK UI enabled"), "info");
 				return;
 			}
 			if (action === "off" || action === "disable") {
 				enabled = false;
 				stopSpinnerTitle(ctx);
 				clearBrandUi(ctx);
-				ctx.ui.notify("ugk UI disabled", "info");
+				ctx.ui.notify(uiText("UGK UI 已关闭", "UGK UI disabled"), "info");
 				return;
 			}
-			ctx.ui.notify(`ugk UI is ${enabled ? "enabled" : "disabled"}. Use /ugk-ui on or /ugk-ui off.`, "info");
+			ctx.ui.notify(uiText(`UGK UI 当前已${enabled ? "开启" : "关闭"}。使用 /ugk-ui on 或 /ugk-ui off。`, `UGK UI is ${enabled ? "enabled" : "disabled"}. Use /ugk-ui on or /ugk-ui off.`), "info");
 		},
 	});
 

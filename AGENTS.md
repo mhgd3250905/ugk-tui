@@ -6,7 +6,7 @@
 
 ## 语言
 
-**默认优先用中文与用户交流。** 用户可用 `/language <语言>` 覆盖(如 `/language English`、`/language 日本語`),覆盖后以新语言为准。代码、命令、标识符不随语言切换。
+**默认优先用中文与用户交流。** 用户可用 `/language <语言>` 覆盖(如 `/language English`、`/language 日本語`),覆盖后以新语言为准。代码、命令、标识符不随语言切换。`/language` 只控制 AI 回复语言偏好,不控制 UGK 菜单/UI 语言;UGK 菜单/UI 语言用 `/ui-language` 单独切换。
 
 ## 工作风格
 
@@ -51,7 +51,7 @@
 
 ### autopilot 自动放行
 
-- `/ugk-autopilot` —— 打开菜单(Status / Turn on / Turn off / Exit);也支持 `/ugk-autopilot on|off|status`,是所有"工具级确认"(CDP / MCP / 未来工具)的总开关
+- `/ugk-autopilot` —— 打开中文菜单(查看状态 / 开启 / 关闭 / 退出);也支持 `/ugk-autopilot on|off|status`,是所有"工具级确认"(CDP / MCP / 未来工具)的总开关
 - on 时:可逆的工具确认自动放行,不再弹确认打断用户;同时注入"范围类决策直接干、别发问卷"的指令
 - **不管危险动作**:删除级(rm -rf 等)、花钱、不可逆外部副作用永远走人确认
 - 状态只在会话内存,关掉 ugk 即忘(临时放飞用,不持久)
@@ -66,6 +66,7 @@
 ### ugk 品牌 UI
 
 - `/ugk-ui on|off|status` 可运行中切换
+- `/ui-language` 打开菜单切换 UGK 菜单/UI 语言(查看状态 / 设置界面语言 / 清除 / 退出),与 `/language` 分离;当前支持简体中文/English/日本語/한국어/Français/Deutsch/Español/Português/Русский,也保留 `zh-CN|English|status|clear` 直输参数
 - 默认低刺激荧光绿主题;另有 16 个社区主题(atom/catppuccin/dracula/gruvbox/nord/solarized)
 - footer 模型名随当前 session 模型动态刷新,并以绿色 chip 高亮
 
@@ -80,6 +81,7 @@
 - `/task` — 固定任务委托
 - `/plan` — 只读计划模式
 - `/ugk-ui` — 开关品牌 UI
+- `/ui-language` — UGK 菜单/UI 语言(跨会话持久,支持常见语言)
 - `/ugk-autopilot` — 工具确认总开关菜单(自动放行可逆确认,危险动作仍归人)
 - `/language` — 语言偏好菜单(跨会话持久,也支持 `/language English`)
 - `/implement` `/scout-and-plan` `/implement-and-review` — subagent 流水线

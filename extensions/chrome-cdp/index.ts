@@ -24,23 +24,21 @@ import { formatChromeCdpStatus, formatChromeTabs } from "./formatter.ts";
 import { launchChromeCdpAndWait } from "./launcher.ts";
 import { makeCdpTabLifecycle } from "./tab-session.ts";
 import { setWorkerLifecycleFactory } from "../shared/worker-lifecycle.ts";
+import { uiText } from "../shared/ui-language.ts";
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
 type ChromeCdpConfirmation = "allow-once" | "allow-session" | "deny";
 
-const CHROME_CDP_ALLOW_ONCE = "Allow once";
-const CHROME_CDP_ALLOW_SESSION = "Allow for this session";
-const CHROME_CDP_DENY = "Deny";
-const CDP_MENU_OPTIONS = [
-	"Status",
-	"Tabs",
-	"Launch Chrome",
-	"Mode: ask",
-	"Mode: on",
-	"Mode: off",
-	"Set port",
-	"Exit",
-];
+function chromeCdpConfirmOptions(): string[] {
+	return uiText(["允许一次", "本会话允许", "拒绝"], ["Allow once", "Allow for session", "Deny"]);
+}
+
+function cdpMenuOptions(): string[] {
+	return uiText(
+		["查看状态", "查看标签页", "启动 Chrome", "Mode: ask", "Mode: on", "Mode: off", "设置端口", "退出"],
+		["Status", "View tabs", "Launch Chrome", "Mode: ask", "Mode: on", "Mode: off", "Set port", "Exit"],
+	);
+}
 
 export interface ChromeCdpDeps {
 	getStatus?: (port: number) => Promise<Awaited<ReturnType<typeof getChromeCdpStatus>>>;
@@ -70,13 +68,13 @@ function defaultDeps(): Required<ChromeCdpDeps> {
 async function confirmChromeCdpUse(ctx: any, params: any): Promise<ChromeCdpConfirmation> {
 	if (!ctx.hasUI) return "deny";
 	const prompt = [
-		"Allow Chrome CDP?",
+		uiText("允许 Chrome CDP?", "Allow Chrome CDP?"),
 		"",
 		[
-			"An agent wants to control your local logged-in Chrome session.",
+			uiText("agent 想控制你本机已登录的 Chrome 会话。", "The agent wants to control your local logged-in Chrome session."),
 			params.url ? `URL: ${params.url}` : params.target ? `Target: ${params.target}` : "",
-			`Reason: ${params.reason}`,
-			"Allow this browser operation?",
+			uiText(`原因: ${params.reason}`, `Reason: ${params.reason}`),
+			uiText("是否允许这次浏览器操作?", "Allow this browser operation?"),
 		]
 			.filter(Boolean)
 			.join("\n"),
@@ -85,24 +83,21 @@ async function confirmChromeCdpUse(ctx: any, params: any): Promise<ChromeCdpConf
 		.join("\n");
 
 	if (ctx.ui?.select) {
-		const choice = await ctx.ui.select(prompt, [
-			CHROME_CDP_ALLOW_ONCE,
-			CHROME_CDP_ALLOW_SESSION,
-			CHROME_CDP_DENY,
-		]);
-		if (choice === CHROME_CDP_ALLOW_SESSION) return "allow-session";
-		if (choice === CHROME_CDP_ALLOW_ONCE) return "allow-once";
+		const options = chromeCdpConfirmOptions();
+		const choice = await ctx.ui.select(prompt, options);
+		if (choice === options[1]) return "allow-session";
+		if (choice === options[0]) return "allow-once";
 		return "deny";
 	}
 
 	if (!ctx.ui?.confirm) return "deny";
 	return (await ctx.ui.confirm(
-		"Allow Chrome CDP?",
+		uiText("允许 Chrome CDP?", "Allow Chrome CDP?"),
 		[
-			"An agent wants to control your local logged-in Chrome session.",
+			uiText("agent 想控制你本机已登录的 Chrome 会话。", "The agent wants to control your local logged-in Chrome session."),
 			params.url ? `URL: ${params.url}` : params.target ? `Target: ${params.target}` : "",
-			`Reason: ${params.reason}`,
-			"Allow this browser operation?",
+			uiText(`原因: ${params.reason}`, `Reason: ${params.reason}`),
+			uiText("是否允许这次浏览器操作?", "Allow this browser operation?"),
 		]
 			.filter(Boolean)
 			.join("\n"),
@@ -164,7 +159,7 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 			if (policy.requiresConfirmation) {
 				const confirmation = await confirmChromeCdpUse(ctx, params);
 				if (confirmation === "deny") {
-					return textResult("Chrome CDP request denied by user.", { blocked: true });
+					return textResult(uiText("用户已拒绝 Chrome CDP 请求。", "User denied the Chrome CDP request."), { blocked: true });
 				}
 				if (confirmation === "allow-session") {
 					grantChromeCdpSessionAllow(state);
@@ -187,21 +182,21 @@ function createChromeCdpTool(state: ChromeCdpState, deps: Required<ChromeCdpDeps
 				return textResult(formatChromeTabs(tabs), { tabs });
 			}
 			if (action === "navigate") {
-				if (!params.url) return textResult("navigate requires url.", { ok: false });
+				if (!params.url) return textResult(uiText("navigate 需要 url。", "navigate requires url."), { ok: false });
 				const result = await deps.navigate(port, target, params.url, signal);
-				return textResult(`Navigated Chrome tab to ${params.url}`, { ok: true, result });
+				return textResult(uiText(`已导航 Chrome 标签页到 ${params.url}`, `Navigated Chrome tab to ${params.url}`), { ok: true, result });
 			}
 			if (action === "evaluate") {
-				if (!params.expression) return textResult("evaluate requires expression.", { ok: false });
+				if (!params.expression) return textResult(uiText("evaluate 需要 expression。", "evaluate requires expression."), { ok: false });
 				const result = await deps.evaluate(port, target, params.expression, params.timeoutMs, signal);
 				return textResult(JSON.stringify(result, null, 2), { ok: true, result });
 			}
 			if (action === "screenshot") {
-				if (!params.path) return textResult("screenshot requires path.", { ok: false });
+				if (!params.path) return textResult(uiText("screenshot 需要 path。", "screenshot requires path."), { ok: false });
 				const result = await deps.screenshot(port, target, params.path, signal);
-				return textResult(`Saved Chrome screenshot to ${params.path}`, { ok: true, result });
+				return textResult(uiText(`已保存 Chrome 截图到 ${params.path}`, `Saved Chrome screenshot to ${params.path}`), { ok: true, result });
 			}
-			return textResult(`Unknown chrome_cdp action: ${String(action)}`, { ok: false });
+			return textResult(`未知 chrome_cdp action: ${String(action)}`, { ok: false });
 		},
 	});
 }
@@ -217,17 +212,18 @@ export function registerChromeCdp(pi: ExtensionAPI, overrides: ChromeCdpDeps = {
 		if (args.trim()) return args;
 		if (!ctx.ui?.select) return "status";
 
-		const selection = await ctx.ui.select("Chrome CDP", CDP_MENU_OPTIONS);
-		if (!selection || selection === "Exit") return undefined;
-		if (selection === "Status") return "status";
-		if (selection === "Tabs") return "tabs";
-		if (selection === "Launch Chrome") return "launch";
-		if (selection === "Mode: ask") return "ask";
-		if (selection === "Mode: on") return "on";
-		if (selection === "Mode: off") return "off";
-		if (selection === "Set port") {
+		const options = cdpMenuOptions();
+		const selection = await ctx.ui.select("Chrome CDP", options);
+		if (!selection || selection === options[7]) return undefined;
+		if (selection === options[0]) return "status";
+		if (selection === options[1]) return "tabs";
+		if (selection === options[2]) return "launch";
+		if (selection === options[3]) return "ask";
+		if (selection === options[4]) return "on";
+		if (selection === options[5]) return "off";
+		if (selection === options[6]) {
 			if (!ctx.ui?.input) {
-				ctx.ui.notify("Set port requires interactive input support. Use /cdp port <1-65535>.", "warning");
+				ctx.ui.notify(uiText("设置端口需要交互输入支持。请使用 /cdp port <1-65535>。", "Setting port needs interactive input. Use /cdp port <1-65535>."), "warning");
 				return undefined;
 			}
 			const port = await ctx.ui.input("Chrome CDP port", "1-65535");
@@ -246,12 +242,12 @@ export function registerChromeCdp(pi: ExtensionAPI, overrides: ChromeCdpDeps = {
 			if (!action || action === "status") {
 				const port = resolveChromeCdpPort(state, {});
 				const status = await deps.getStatus(port);
-				ctx.ui.notify(`CDP mode: ${state.mode}\n${formatChromeCdpStatus(status)}`, "info");
+				ctx.ui.notify(uiText(`CDP 模式: ${state.mode}\n`, `CDP mode: ${state.mode}\n`) + formatChromeCdpStatus(status), "info");
 				return;
 			}
 			if (action === "ask" || action === "on" || action === "off") {
 				setChromeCdpMode(state, action);
-				ctx.ui.notify(`Chrome CDP mode: ${action}`, "info");
+				ctx.ui.notify(uiText(`Chrome CDP 模式: ${action}`, `Chrome CDP mode: ${action}`), "info");
 				return;
 			}
 			if (action === "port") {
@@ -259,10 +255,10 @@ export function registerChromeCdp(pi: ExtensionAPI, overrides: ChromeCdpDeps = {
 				try {
 					setChromeCdpPort(state, port);
 				} catch {
-					ctx.ui.notify(`Invalid CDP port: ${value || "(missing)"}. Use /cdp port <1-65535>.`, "warning");
+					ctx.ui.notify(uiText(`CDP 端口无效: ${value || "(缺失)"}。请使用 /cdp port <1-65535>。`, `Invalid CDP port: ${value || "(missing)"}. Use /cdp port <1-65535>.`), "warning");
 					return;
 				}
-				ctx.ui.notify(`Chrome CDP port: ${port}`, "info");
+				ctx.ui.notify(uiText(`Chrome CDP 端口: ${port}`, `Chrome CDP port: ${port}`), "info");
 				return;
 			}
 			if (action === "tabs") {
@@ -274,7 +270,7 @@ export function registerChromeCdp(pi: ExtensionAPI, overrides: ChromeCdpDeps = {
 				ctx.ui.notify(await deps.launch(resolveChromeCdpPort(state, {})), "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /cdp status|ask|on|off|port <number>|launch|tabs", "warning");
+			ctx.ui.notify(uiText("用法: /cdp status|ask|on|off|port <number>|launch|tabs", "Usage: /cdp status|ask|on|off|port <number>|launch|tabs"), "warning");
 		},
 	});
 }

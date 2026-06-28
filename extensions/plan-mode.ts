@@ -24,6 +24,7 @@ import {
 	togglePlanMode as togglePlanModeState,
 } from "./plan-mode-state.ts";
 import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./plan-mode-utils.ts";
+import { uiText } from "./shared/ui-language.ts";
 
 // Tools
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
@@ -108,13 +109,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			// Capture current active tools so we can restore them (incl. MCP/dynamic) on exit.
 			state.savedTools = getActiveToolsSafely(pi);
 			pi.setActiveTools(PLAN_MODE_TOOLS);
-			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
+			ctx.ui.notify(uiText(`Plan mode 已开启。可用工具: ${PLAN_MODE_TOOLS.join(", ")}`, `Plan mode enabled. Available tools: ${PLAN_MODE_TOOLS.join(", ")}`));
 		} else {
 			// Only restore if we were previously enabled (avoid clobbering on double-toggle edge cases).
 			if (wasEnabled) {
 				restoreActiveTools(pi, state);
 			}
-			ctx.ui.notify("Plan mode disabled. Full access restored.");
+			ctx.ui.notify(uiText("Plan mode 已关闭。完整工具访问已恢复。", "Plan mode disabled. Full tool access restored."));
 		}
 		updateStatus(ctx);
 	}
@@ -136,11 +137,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		description: "Show current plan todo list",
 		handler: async (_args, ctx) => {
 			if (state.todoItems.length === 0) {
-				ctx.ui.notify("No todos. Create a plan first with /plan", "info");
+				ctx.ui.notify(uiText("暂无 todo。请先用 /plan 创建计划。", "No todos yet. Use /plan to create a plan first."), "info");
 				return;
 			}
 			const list = state.todoItems.map((item, i) => `${i + 1}. ${item.completed ? "✓" : "○"} ${item.text}`).join("\n");
-			ctx.ui.notify(`Plan Progress:\n${list}`, "info");
+			ctx.ui.notify(uiText(`计划进度:\n${list}`, `Plan progress:\n${list}`), "info");
 		},
 	});
 
@@ -157,7 +158,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		if (!isSafeCommand(command)) {
 			return {
 				block: true,
-				reason: `Plan mode: command blocked (not allowlisted). Use /plan to disable plan mode first.\nCommand: ${command}`,
+				reason: uiText(
+					`Plan mode:命令已拦截(不在只读白名单内)。请先用 /plan 关闭 plan mode。\n命令: ${command}`,
+					`Plan mode: command blocked (not in the read-only allowlist). Run /plan first to leave plan mode.\nCommand: ${command}`,
+				),
 			};
 		}
 	});
@@ -254,7 +258,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			if (state.todoItems.every((t) => t.completed)) {
 				const completedList = state.todoItems.map((t) => `~~${t.text}~~`).join("\n");
 				pi.sendMessage(
-					{ customType: "plan-complete", content: `**Plan Complete!** ✓\n\n${completedList}`, display: true },
+					{ customType: "plan-complete", content: uiText(`**计划已完成!** ✓\n\n${completedList}`, `**Plan complete!** ✓\n\n${completedList}`), display: true },
 					{ triggerTurn: false },
 				);
 				state = completeExecution(state);
@@ -282,20 +286,20 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			pi.sendMessage(
 				{
 					customType: "plan-todo-list",
-					content: `**Plan Steps (${state.todoItems.length}):**\n\n${todoListText}`,
+					content: uiText(`**计划步骤(${state.todoItems.length}):**\n\n${todoListText}`, `**Plan steps (${state.todoItems.length}):**\n\n${todoListText}`),
 					display: true,
 				},
 				{ triggerTurn: false },
 			);
 		}
 
-		const choice = await ctx.ui.select("Plan mode - what next?", [
-			state.todoItems.length > 0 ? "Execute the plan (track progress)" : "Execute the plan",
-			"Stay in plan mode",
-			"Refine the plan",
-		]);
+		const options = uiText(
+			[state.todoItems.length > 0 ? "执行计划(跟踪进度)" : "执行计划", "留在 plan mode", "细化计划"],
+			[state.todoItems.length > 0 ? "Execute plan (track progress)" : "Execute plan", "Stay in plan mode", "Refine plan"],
+		);
+		const choice = await ctx.ui.select(uiText("Plan mode - 下一步?", "Plan mode - next step?"), options);
 
-		if (choice?.startsWith("Execute")) {
+		if (choice === options[0] || choice?.startsWith("执行计划")) {
 			state = startExecution(state);
 			// Restore tools for execution but keep the snapshot so completeExecution can restore again.
 			restoreActiveTools(pi, state, false);
@@ -303,14 +307,14 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 			const execMessage =
 				state.todoItems.length > 0
-					? `Execute the plan. Start with: ${state.todoItems[0].text}`
-					: "Execute the plan you just created.";
+					? uiText(`执行计划。先做: ${state.todoItems[0].text}`, `Execute the plan. Start with: ${state.todoItems[0].text}`)
+					: uiText("执行刚才创建的计划。", "Execute the plan just created.");
 			pi.sendMessage(
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
 				{ triggerTurn: true },
 			);
-		} else if (choice === "Refine the plan") {
-			const refinement = await ctx.ui.editor("Refine the plan:", "");
+		} else if (choice === options[2] || choice === "细化计划") {
+			const refinement = await ctx.ui.editor(uiText("细化计划:", "Refine plan:"), "");
 			if (refinement?.trim()) {
 				pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
 			}

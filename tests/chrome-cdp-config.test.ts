@@ -82,7 +82,7 @@ test("checkChromeCdpPolicy blocks execution when mode is off", () => {
 
 	assert.equal(result.allowed, false);
 	assert.equal(result.requiresConfirmation, false);
-	assert.match(result.reason, /off/);
+	assert.match(result.reason, /已关闭/);
 });
 
 test("checkChromeCdpPolicy allows status without confirmation", () => {
@@ -122,7 +122,7 @@ test("checkChromeCdpPolicy blocks non-status actions when normal access was not 
 	});
 
 	assert.equal(result.allowed, false);
-	assert.match(result.reason, /ordinary access/i);
+	assert.match(result.reason, /普通访问/);
 });
 
 test("checkChromeCdpPolicy requires confirmation in ask mode and allows in on mode", () => {

@@ -8,7 +8,7 @@ export { defaultAgentDir } from "./paths.js";
 
 const TRUST_STATE_FILE = "trusted-workspaces.json";
 const PROJECT_MARKERS = [".git", "AGENTS.md", "CLAUDE.md", "package.json"];
-const TRUST_OPTIONS = ["Yes, I trust this folder", "No, exit"];
+const TRUST_OPTIONS = ["信任此文件夹", "退出"];
 
 function trustStatePath(agentDir = defaultAgentDir()) {
 	return path.join(agentDir, TRUST_STATE_FILE);
@@ -87,11 +87,11 @@ export function advanceTrustPromptSelection(state, key) {
 function workspaceTrustHeader(workspaceRoot) {
 	return [
 		"",
-		"Quick safety check: Is this a project you created or one you trust?",
+		"快速安全确认:这是你创建或信任的项目吗?",
 		"",
-		"UGK will be able to read, edit, and execute files in this folder.",
+		"UGK 将能够读取、编辑并执行此文件夹中的文件。",
 		"",
-		`Folder: ${workspaceRoot}`,
+		`文件夹: ${workspaceRoot}`,
 		"",
 	].join("\n");
 }
@@ -101,7 +101,7 @@ function renderTrustPrompt(workspaceRoot, selected) {
 		workspaceTrustHeader(workspaceRoot),
 		...TRUST_OPTIONS.map((option, index) => `${index === selected ? "> " : "  "}${option}`),
 		"",
-		"Use Up/Down to choose, Enter to confirm, Esc to cancel.",
+		"使用 ↑/↓ 选择,Enter 确认,Esc 取消。",
 	].join("\n");
 }
 
@@ -115,7 +115,7 @@ async function promptWorkspaceTrustLine(workspaceRoot, input, output) {
 	output.write(`${workspaceTrustHeader(workspaceRoot)}  1. ${TRUST_OPTIONS[0]}\n  2. ${TRUST_OPTIONS[1]}\n\n`);
 	const rl = readline.createInterface({ input, output });
 	try {
-		const answer = (await rl.question("Select 1 or 2 [1]: ")).trim().toLowerCase();
+		const answer = (await rl.question("选择 1 或 2 [1]: ")).trim().toLowerCase();
 		return answer === "" || answer === "1" || answer === "y" || answer === "yes";
 	} finally {
 		rl.close();
@@ -180,7 +180,7 @@ export async function ensureWorkspaceTrusted(options = {}) {
 		return {
 			trusted: false,
 			workspaceRoot,
-			reason: `Workspace requires trust before UGK can run: ${workspaceRoot}`,
+			reason: `需要先信任工作目录,UGK 才能运行: ${workspaceRoot}`,
 		};
 	}
 
@@ -190,7 +190,7 @@ export async function ensureWorkspaceTrusted(options = {}) {
 		return {
 			trusted: false,
 			workspaceRoot,
-			reason: "Workspace trust declined.",
+			reason: "已拒绝信任工作目录。",
 		};
 	}
 

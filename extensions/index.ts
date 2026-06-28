@@ -41,6 +41,7 @@ import {
 	formatUiLanguage,
 	getUiLanguage,
 	setUiLanguage,
+	SUPPORTED_UI_LANGUAGES,
 	uiText,
 	type UiLanguage,
 } from "./shared/ui-language.ts";
@@ -58,7 +59,7 @@ function uiLanguageMenuOptions(): string[] {
 }
 
 function uiLanguageChoiceOptions(): string[] {
-	return uiText(["简体中文", "English", "返回"], ["Simplified Chinese", "English", "Back"]);
+	return [...SUPPORTED_UI_LANGUAGES.map((language) => language.label), uiText("返回", "Back")];
 }
 
 function isNaturalBareAtPrefix(lines: string[], cursorLine: number, cursorCol: number): boolean {
@@ -318,9 +319,10 @@ export default function (pi: ExtensionAPI) {
 				if (selection === options[1]) {
 					const choices = uiLanguageChoiceOptions();
 					const choice = await ctx.ui.select(uiText("选择界面语言", "Select UI Language"), choices);
-					if (!choice || choice === choices[2]) return;
-					if (choice === choices[0]) raw = "zh-CN";
-					if (choice === choices[1]) raw = "English";
+					if (!choice || choice === choices.at(-1)) return;
+					const selected = SUPPORTED_UI_LANGUAGES[choices.indexOf(choice)];
+					if (!selected) return;
+					raw = selected.code;
 				}
 			}
 
@@ -340,7 +342,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(uiText("用法: /ui-language zh-CN|English|status|clear", "Usage: /ui-language zh-CN|English|status|clear"), "warning");
 				return;
 			}
-			ctx.ui.notify(uiText(`界面语言已设为: ${formatUiLanguage(set)}`, `UI language set to: ${formatUiLanguage(set)}`, set), "info");
+			ctx.ui.notify(`${uiText("界面语言已设为", "UI language set to", set)}: ${formatUiLanguage(set)}`, "info");
 		},
 	});
 

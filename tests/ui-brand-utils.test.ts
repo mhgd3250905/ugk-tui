@@ -62,6 +62,22 @@ test("buildUgkHeaderLines can render English UI copy", () => {
 	assert.doesNotMatch(text, /欢迎回来|入门提示|最近更新/);
 });
 
+test("buildUgkHeaderLines can render Japanese UI copy", () => {
+	const text = buildUgkHeaderLines({
+		version: "1.0.0",
+		cwdName: "ugk-tui",
+		modelId: "deepseek-v4-pro",
+		width: 96,
+		uiLanguage: "ja-JP",
+	}).join("\n");
+
+	assert.match(text, /おかえりなさい/);
+	assert.match(text, /◆ はじめに/);
+	assert.match(text, /ワークスペース\s+ugk-tui/);
+	assert.match(text, /モデル\s+deepseek-v4-pro/);
+	assert.doesNotMatch(text, /Welcome back|欢迎回来/);
+});
+
 test("buildUgkHeaderLines keeps panel borders aligned for wide workspace names", () => {
 	const lines = buildUgkHeaderLines({
 		version: "1.0.0",

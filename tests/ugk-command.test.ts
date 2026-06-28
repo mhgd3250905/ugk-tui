@@ -206,7 +206,7 @@ test("/ui-language with no args uses nested selectable menus", async () => {
 				},
 				select(title: string, options: string[]) {
 					selections.push({ title, options });
-					return selections.length === 1 ? "设置界面语言" : "English";
+					return selections.length === 1 ? "设置界面语言" : "日本語";
 				},
 			},
 		});
@@ -218,10 +218,10 @@ test("/ui-language with no args uses nested selectable menus", async () => {
 			},
 			{
 				title: "选择界面语言",
-				options: ["简体中文", "English", "返回"],
+				options: ["简体中文", "English", "日本語", "한국어", "Français", "Deutsch", "Español", "Português", "Русский", "返回"],
 			},
 		]);
-		assert.match(notifications.join("\n"), /UI language set to: English/);
+		assert.match(notifications.join("\n"), /UI 言語を設定しました: 日本語/);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

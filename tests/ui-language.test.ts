@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
 	clearUiLanguage,
 	getUiLanguage,
+	SUPPORTED_UI_LANGUAGES,
 	setUiLanguage,
 	uiText,
 } from "../extensions/shared/ui-language.ts";
@@ -35,6 +36,27 @@ test("setUiLanguage persists supported aliases without touching agent language",
 	assert.equal(deps.readBack().shellPath, "bash");
 });
 
+test("supports common UI languages", () => {
+	assert.deepEqual(SUPPORTED_UI_LANGUAGES.map((item) => item.code), [
+		"zh-CN",
+		"en-US",
+		"ja-JP",
+		"ko-KR",
+		"fr-FR",
+		"de-DE",
+		"es-ES",
+		"pt-BR",
+		"ru-RU",
+	]);
+	assert.equal(setUiLanguage("日本語", memDeps()), "ja-JP");
+	assert.equal(setUiLanguage("한국어", memDeps()), "ko-KR");
+	assert.equal(setUiLanguage("Français", memDeps()), "fr-FR");
+	assert.equal(setUiLanguage("Deutsch", memDeps()), "de-DE");
+	assert.equal(setUiLanguage("Español", memDeps()), "es-ES");
+	assert.equal(setUiLanguage("Português", memDeps()), "pt-BR");
+	assert.equal(setUiLanguage("Русский", memDeps()), "ru-RU");
+});
+
 test("clearUiLanguage removes only the UI language key", () => {
 	const deps = memDeps({ uiLanguage: "en-US", language: "日本語" });
 
@@ -48,4 +70,8 @@ test("clearUiLanguage removes only the UI language key", () => {
 test("uiText selects text by UI language", () => {
 	assert.equal(uiText("中文", "English", "zh-CN"), "中文");
 	assert.equal(uiText("中文", "English", "en-US"), "English");
+	assert.equal(uiText("查看状态", "Status", "ja-JP"), "状態を表示");
+	assert.equal(uiText("查看状态", "Status", "ko-KR"), "상태 보기");
+	assert.equal(uiText("查看状态", "Status", "fr-FR"), "Voir l'état");
+	assert.equal(uiText(["查看状态", "退出"], ["Status", "Exit"], "de-DE").join(","), "Status anzeigen,Beenden");
 });

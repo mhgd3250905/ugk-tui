@@ -30,7 +30,7 @@ test("bash renderer summarizes success and failure output", () => {
 		theme,
 		{},
 	);
-	assert.equal(renderText(success), "done (2 lines)");
+	assert.equal(renderText(success), "完成 (2 行)");
 
 	const failure = bash.renderResult(
 		{ content: [{ type: "text", text: "bad\n\nCommand exited with code 2" }], details: {}, isError: true },
@@ -38,7 +38,7 @@ test("bash renderer summarizes success and failure output", () => {
 		theme,
 		{},
 	);
-	assert.equal(renderText(failure), "exit 2 (2 lines)");
+	assert.equal(renderText(failure), "exit 2 (2 行)");
 });
 
 test("bash renderer falls back to red exit when error output has no code", () => {
@@ -53,7 +53,7 @@ test("bash renderer falls back to red exit when error output has no code", () =>
 		{},
 	);
 
-	assert.equal(renderText(failure), "exit 1 (1 lines)");
+	assert.equal(renderText(failure), "exit 1 (1 行)");
 });
 
 test("edit renderer summarizes diff stats", () => {

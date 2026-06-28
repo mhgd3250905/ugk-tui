@@ -64,7 +64,7 @@ export default function registerBuiltinToolRenderers(pi: ExtensionAPI): void {
 		},
 
 		renderResult(result, { expanded, isPartial }, theme) {
-			if (isPartial) return new Text(theme.fg("warning", "Running..."), 0, 0);
+			if (isPartial) return new Text(theme.fg("warning", "运行中..."), 0, 0);
 
 			const details = result.details as BashToolDetails | undefined;
 			const content = result.content[0];
@@ -75,14 +75,14 @@ export default function registerBuiltinToolRenderers(pi: ExtensionAPI): void {
 			const lineCount = outputLines.filter((line) => line.trim()).length;
 
 			let text = exitCode === null
-				? theme.fg("success", "done")
+				? theme.fg("success", "完成")
 				: theme.fg("error", `exit ${exitCode}`);
-			text += theme.fg("dim", ` (${lineCount} lines)`);
-			if (details?.truncation?.truncated) text += theme.fg("warning", " [truncated]");
+			text += theme.fg("dim", ` (${lineCount} 行)`);
+			if (details?.truncation?.truncated) text += theme.fg("warning", " [已截断]");
 
 			if (expanded) {
 				for (const line of outputLines.slice(0, 20)) text += `\n${theme.fg("dim", line)}`;
-				if (outputLines.length > 20) text += `\n${theme.fg("muted", "... more output")}`;
+				if (outputLines.length > 20) text += `\n${theme.fg("muted", "... 更多输出")}`;
 			}
 
 			return new Text(text, 0, 0);
@@ -108,14 +108,14 @@ export default function registerBuiltinToolRenderers(pi: ExtensionAPI): void {
 		},
 
 		renderResult(result, { expanded, isPartial }, theme) {
-			if (isPartial) return new Text(theme.fg("warning", "Editing..."), 0, 0);
+			if (isPartial) return new Text(theme.fg("warning", "编辑中..."), 0, 0);
 
 			const details = result.details as EditToolDetails | undefined;
 			const content = result.content[0];
 			if (content?.type === "text" && content.text.startsWith("Error")) {
 				return new Text(theme.fg("error", content.text.split("\n")[0]), 0, 0);
 			}
-			if (!details?.diff) return new Text(theme.fg("success", "Applied"), 0, 0);
+			if (!details?.diff) return new Text(theme.fg("success", "已应用"), 0, 0);
 
 			const diffLines = details.diff.split("\n");
 			let additions = 0;
@@ -136,7 +136,7 @@ export default function registerBuiltinToolRenderers(pi: ExtensionAPI): void {
 					else text += `\n${theme.fg("dim", line)}`;
 				}
 				if (diffLines.length > 30) {
-					text += `\n${theme.fg("muted", `... ${diffLines.length - 30} more diff lines`)}`;
+					text += `\n${theme.fg("muted", `... 还有 ${diffLines.length - 30} 行 diff`)}`;
 				}
 			}
 

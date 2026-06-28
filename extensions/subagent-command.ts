@@ -43,11 +43,11 @@ export default function registerSubagentCommand(pi: ExtensionAPI) {
 
 			const agentLabels = new Map(
 				agents.map((agent) => [
-					`${agent.name} · ${agent.model ?? "inherit"} · ${agent.source}`,
+					`${agent.name} · ${agent.model ?? "继承"} · ${agent.source}`,
 					agent,
 				]),
 			);
-			const agentChoice = await ctx.ui.select("Subagents", Array.from(agentLabels.keys()));
+			const agentChoice = await ctx.ui.select("子代理", Array.from(agentLabels.keys()));
 			if (!agentChoice) return;
 			const agent = agentLabels.get(agentChoice);
 			if (!agent) return;
@@ -59,7 +59,7 @@ export default function registerSubagentCommand(pi: ExtensionAPI) {
 			}
 
 			const modelLabels = new Map(models.map((model) => [`${modelValue(model)} · ${model.name}`, model]));
-			const modelChoice = await ctx.ui.select(`${agent.name} model`, [INHERIT_MODEL, ...modelLabels.keys()]);
+			const modelChoice = await ctx.ui.select(`${agent.name} 模型`, [INHERIT_MODEL, ...modelLabels.keys()]);
 			if (!modelChoice) return;
 
 			const selected = modelChoice === INHERIT_MODEL ? undefined : modelValue(modelLabels.get(modelChoice)!);

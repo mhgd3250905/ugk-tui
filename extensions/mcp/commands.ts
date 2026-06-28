@@ -11,17 +11,18 @@ import {
 	type McpToolRegistrationResult,
 } from "./tools.ts";
 import { formatMcpStatus } from "./formatter.ts";
+import { uiText } from "../shared/ui-language.ts";
 
-const MCP_MENU_OPTIONS = [
-	"📊 查看状态",
-	"🔄 重载所有 server",
-	"⚙️ 切换权限模式",
-	"✅ 启用 server",
-	"⛔ 禁用 server",
-	"退出",
-];
+function mcpMenuOptions(): string[] {
+	return uiText(
+		["📊 查看状态", "🔄 重载所有 server", "⚙️ 切换权限模式", "✅ 启用 server", "⛔ 禁用 server", "退出"],
+		["📊 Status", "🔄 Reload all servers", "⚙️ Switch permission mode", "✅ Enable server", "⛔ Disable server", "Exit"],
+	);
+}
 
-const MCP_MODE_OPTIONS = ["ask", "on", "off", "返回"];
+function mcpModeOptions(): string[] {
+	return uiText(["ask", "on", "off", "返回"], ["ask", "on", "off", "Back"]);
+}
 
 export type McpCommandState = {
 	registry: Pick<McpRegistry, "connections" | "disconnectAll">;
@@ -77,7 +78,7 @@ export function registerMcpCommand(pi: ExtensionAPI, state: McpCommandState, dep
 
 			if (isPermissionMode(action)) {
 				setMcpPermissionMode(state.permissionState, action);
-				notify(context, `MCP mode: ${state.permissionState.mode}`);
+				notify(context, uiText(`MCP 模式: ${state.permissionState.mode}`, `MCP mode: ${state.permissionState.mode}`));
 				return;
 			}
 
@@ -96,7 +97,7 @@ export function registerMcpCommand(pi: ExtensionAPI, state: McpCommandState, dep
 				return;
 			}
 
-			notify(context, `Unknown /mcp command "${command}". Usage: /mcp status|on|off|ask|reload|enable <server>|disable <server>`);
+			notify(context, uiText(`未知 /mcp 命令 "${command}"。用法: /mcp status|on|off|ask|reload|enable <server>|disable <server>`, `Unknown /mcp command "${command}". Usage: /mcp status|on|off|ask|reload|enable <server>|disable <server>`));
 		},
 	});
 }
@@ -114,31 +115,33 @@ async function resolveMcpArgs(
 		return "status";
 	}
 
-	const selection = await ctx.ui.select(formatMcpMenuTitle(state), MCP_MENU_OPTIONS);
-	if (!selection || selection === "退出") {
+	const options = mcpMenuOptions();
+	const selection = await ctx.ui.select(formatMcpMenuTitle(state), options);
+	if (!selection || selection === options[5]) {
 		return undefined;
 	}
-	if (selection === "📊 查看状态") {
+	if (selection === options[0]) {
 		return "status";
 	}
-	if (selection === "🔄 重载所有 server") {
+	if (selection === options[1]) {
 		return "reload";
 	}
-	if (selection === "⚙️ 切换权限模式") {
+	if (selection === options[2]) {
 		return selectMcpMode(ctx);
 	}
-	if (selection === "✅ 启用 server") {
+	if (selection === options[3]) {
 		return selectMcpServerToEnable(ctx, state, activeTools);
 	}
-	if (selection === "⛔ 禁用 server") {
+	if (selection === options[4]) {
 		return selectMcpServerToDisable(ctx, state, activeTools);
 	}
 	return undefined;
 }
 
 async function selectMcpMode(ctx: CommandContext): Promise<string | undefined> {
-	const selection = await ctx.ui!.select!("切换 MCP 权限模式", MCP_MODE_OPTIONS);
-	return selection && selection !== "返回" ? selection : undefined;
+	const options = mcpModeOptions();
+	const selection = await ctx.ui!.select!(uiText("切换 MCP 权限模式", "Switch MCP Permission Mode"), options);
+	return selection && selection !== options[3] ? selection : undefined;
 }
 
 async function selectMcpServerToEnable(
@@ -158,12 +161,13 @@ async function selectMcpServerToEnable(
 	}
 
 	if (options.length === 0) {
-		notify(ctx, "没有可启用的 server");
+		notify(ctx, uiText("没有可启用的 server", "No servers available to enable"));
 		return undefined;
 	}
 
-	const selection = await ctx.ui!.select!("启用 MCP server", [...options, "返回"]);
-	if (!selection || selection === "返回") {
+	const back = uiText("返回", "Back");
+	const selection = await ctx.ui!.select!(uiText("启用 MCP server", "Enable MCP Server"), [...options, back]);
+	if (!selection || selection === back) {
 		return undefined;
 	}
 	return `enable ${selection.replace(/ \(stale\)$/, "")}`;
@@ -180,44 +184,48 @@ async function selectMcpServerToDisable(
 		.map(([serverName]) => serverName);
 
 	if (options.length === 0) {
-		notify(ctx, "没有可禁用的 server");
+		notify(ctx, uiText("没有可禁用的 server", "No servers available to disable"));
 		return undefined;
 	}
 
-	const selection = await ctx.ui!.select!("禁用 MCP server", [...options, "返回"]);
-	return selection && selection !== "返回" ? `disable ${selection}` : undefined;
+	const back = uiText("返回", "Back");
+	const selection = await ctx.ui!.select!(uiText("禁用 MCP server", "Disable MCP Server"), [...options, back]);
+	return selection && selection !== back ? `disable ${selection}` : undefined;
 }
 
 function formatMcpMenuTitle(state: McpCommandState): string {
-	return `MCP(${countConnectedServers(state)} servers connected, mode: ${state.permissionState.mode})`;
+	return uiText(
+		`MCP(已连接 ${countConnectedServers(state)} 个 server,模式: ${state.permissionState.mode})`,
+		`MCP(connected servers: ${countConnectedServers(state)}, mode: ${state.permissionState.mode})`,
+	);
 }
 
 function disableServer(pi: ExtensionAPI, state: McpCommandState, serverName?: string): string {
 	if (!serverName) {
-		return "Missing server. Usage: /mcp disable <server>";
+		return uiText("缺少 server。用法: /mcp disable <server>", "Missing server. Usage: /mcp disable <server>");
 	}
 
 	const tools = state.serverTools.get(serverName);
 	if (!tools) {
-		return `MCP server "${serverName}" not found.`;
+		return uiText(`MCP server "${serverName}" 未找到。`, `MCP server "${serverName}" not found.`);
 	}
 
 	removeActiveTools(pi, tools);
-	return `MCP server "${serverName}" disabled (${tools.length} tools removed from active tools).`;
+	return uiText(`MCP server "${serverName}" 已禁用(已从 active tools 移除 ${tools.length} 个工具)。`, `MCP server "${serverName}" disabled (${tools.length} tools removed from active tools).`);
 }
 
 function enableServer(pi: ExtensionAPI, state: McpCommandState, serverName?: string): string {
 	if (!serverName) {
-		return "Missing server. Usage: /mcp enable <server>";
+		return uiText("缺少 server。用法: /mcp enable <server>", "Missing server. Usage: /mcp enable <server>");
 	}
 
 	if (state.staleServerTools?.has(serverName)) {
-		return `MCP server "${serverName}" is stale (disconnected during reload). Run /mcp reload to reconnect, or fix its config first.`;
+		return uiText(`MCP server "${serverName}" 已过期(重载时断开)。请运行 /mcp reload 重新连接,或先修复配置。`, `MCP server "${serverName}" is stale (disconnected during reload). Run /mcp reload to reconnect, or fix the config first.`);
 	}
 
 	const tools = state.serverTools.get(serverName);
 	if (!tools) {
-		return `MCP server "${serverName}" not found.`;
+		return uiText(`MCP server "${serverName}" 未找到。`, `MCP server "${serverName}" not found.`);
 	}
 
 	const active = new Set(getActiveTools(pi));
@@ -225,7 +233,7 @@ function enableServer(pi: ExtensionAPI, state: McpCommandState, serverName?: str
 		active.add(tool);
 	}
 	pi.setActiveTools(Array.from(active));
-	return `MCP server "${serverName}" enabled (${tools.length} tools active).`;
+	return uiText(`MCP server "${serverName}" 已启用(${tools.length} 个工具已激活)。`, `MCP server "${serverName}" enabled (${tools.length} tools activated).`);
 }
 
 async function reloadMcp(
@@ -276,7 +284,10 @@ async function reloadMcp(
 	}
 
 	removeActiveTools(pi, staleTools);
-	return `MCP reload complete. connected: ${connections.length}, tools: ${countTools(nextServerTools)}, failed: ${countFailed(state.failedServers)}, stale: ${state.staleServerTools.size}`;
+	return uiText(
+		`MCP 重载完成。已连接: ${connections.length},工具: ${countTools(nextServerTools)},失败: ${countFailed(state.failedServers)},过期: ${state.staleServerTools.size}`,
+		`MCP reload complete. Connected: ${connections.length}, tools: ${countTools(nextServerTools)}, failed: ${countFailed(state.failedServers)}, stale: ${state.staleServerTools.size}`,
+	);
 }
 
 function serverToolsFromConnections(connections: McpConnection[]): Map<string, string[]> {

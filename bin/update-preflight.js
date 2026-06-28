@@ -51,15 +51,15 @@ export function buildCliUpdatePromptRerenderSequence(linesRendered) {
 
 export function formatCliUpdatePrompt(info, commandLabel, selected = 0) {
 	return [
-		`✨ Update available! ${info.currentVersion} (${shortRef(info.currentRef)}) -> ${shortRef(info.latestRef)}`,
+		`✨ 发现可用更新! ${info.currentVersion} (${shortRef(info.currentRef)}) -> ${shortRef(info.latestRef)}`,
 		"",
-		`Release notes: https://github.com/${GITHUB_REPO_SLUG}/commits/main`,
+		`发布记录: https://github.com/${GITHUB_REPO_SLUG}/commits/main`,
 		"",
-		`${selected === 0 ? "›" : " "} 1. Update now (runs \`${commandLabel}\`)`,
-		`${selected === 1 ? "›" : " "} 2. Skip`,
-		`${selected === 2 ? "›" : " "} 3. Skip until next version`,
+		`${selected === 0 ? "›" : " "} 1. 立即更新(运行 \`${commandLabel}\`)`,
+		`${selected === 1 ? "›" : " "} 2. 跳过本次`,
+		`${selected === 2 ? "›" : " "} 3. 跳过直到下个版本`,
 		"",
-		"  Use Up/Down to choose, Enter to confirm, Esc to cancel.",
+		"  使用 ↑/↓ 选择,Enter 确认,Esc 取消。",
 	].join("\n");
 }
 
@@ -144,7 +144,7 @@ export async function runUgkUpdatePreflight(options = {}) {
 		choice = await promptCliUpdateChoice(stdin, stdout, info, commandLabel);
 	}
 	if (choice === "skip") {
-		stdout.write("\nSkipping this UGK update for now.\n");
+		stdout.write("\n已跳过本次 UGK 更新。\n");
 		return { action: "continue" };
 	}
 	if (choice === "skip-until-next") {
@@ -153,19 +153,19 @@ export async function runUgkUpdatePreflight(options = {}) {
 			skippedRef: info.latestRef,
 			skippedAt: now.toISOString(),
 		});
-		stdout.write("\nSkipping this UGK update until the next version.\n");
+		stdout.write("\n已跳过此版本更新,下个版本再提示。\n");
 		return { action: "continue" };
 	}
 
 	try {
-		stdout.write(`\nUpdating UGK via \`${commandLabel}\`...\n`);
+		stdout.write(`\n正在通过 \`${commandLabel}\` 更新 UGK...\n`);
 		const applyUpdate = options.applyUpdate || (() => applyUgkUpdate(options.packageRoot, { stdio: "inherit" }));
 		await applyUpdate();
-		stdout.write("\n🎉 Update ran successfully! Please restart UGK.\n");
+		stdout.write("\n🎉 更新命令已成功运行,请重启 UGK。\n");
 		return { action: "exit", exitCode: 0 };
 	} catch (error) {
-		const message = error instanceof Error ? error.message : "UGK update failed.";
-		stderr.write(`\nUGK update failed: ${message}\nContinuing with the current version.\n`);
+		const message = error instanceof Error ? error.message : "UGK 更新失败。";
+		stderr.write(`\nUGK 更新失败: ${message}\n继续使用当前版本。\n`);
 		return { action: "continue" };
 	}
 }

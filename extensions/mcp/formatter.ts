@@ -1,5 +1,6 @@
 import type { McpConnection } from "./registry.ts";
 import type { McpPermissionState } from "./permissions.ts";
+import { uiText } from "../shared/ui-language.ts";
 
 // ponytail: formatter 自描述所需 state 形状(structural typing 鸭子兼容 McpCommandState),
 // 不再 import commands.ts —— 斩断 commands→formatter→commands 的 import cycle。
@@ -22,24 +23,27 @@ export function formatMcpStatus(state: McpStatusStateShape): string {
 	const warnings = state.warnings ?? [];
 
 	const lines = [
-		"MCP status",
-		`connected servers: ${connected.length}${connected.length ? ` (${connected.map((c) => c.name).join(", ")})` : ""}`,
-		`tools: ${toolCount}`,
-		`mode: ${state.permissionState.mode}`,
+		uiText("MCP 状态", "MCP Status"),
+		uiText(
+			`已连接 server: ${connected.length}${connected.length ? ` (${connected.map((c) => c.name).join(", ")})` : ""}`,
+			`Connected servers: ${connected.length}${connected.length ? ` (${connected.map((c) => c.name).join(", ")})` : ""}`,
+		),
+		uiText(`工具: ${toolCount}`, `Tools: ${toolCount}`),
+		uiText(`权限模式: ${state.permissionState.mode}`, `Permission mode: ${state.permissionState.mode}`),
 	];
 
 	if (failed.length > 0) {
-		lines.push(`failed servers: ${failed.map(([name, message]) => `${name} (${message})`).join(", ")}`);
+		lines.push(uiText(`失败 server: ${failed.map(([name, message]) => `${name} (${message})`).join(", ")}`, `Failed servers: ${failed.map(([name, message]) => `${name} (${message})`).join(", ")}`));
 	} else {
-		lines.push("failed servers: none");
+		lines.push(uiText("失败 server: 无", "Failed servers: none"));
 	}
 
 	if (stale.length > 0) {
-		lines.push(`stale servers: ${stale.map(([name, tools]) => `${name} (${tools.length} tools)`).join(", ")}`);
+		lines.push(uiText(`过期 server: ${stale.map(([name, tools]) => `${name} (${tools.length} 个工具)`).join(", ")}`, `Stale servers: ${stale.map(([name, tools]) => `${name} (${tools.length} tools)`).join(", ")}`));
 	}
 
 	if (warnings.length > 0) {
-		lines.push(`warnings: ${warnings.join("; ")}`);
+		lines.push(uiText(`警告: ${warnings.join("; ")}`, `Warnings: ${warnings.join("; ")}`));
 	}
 
 	return lines.join("\n");

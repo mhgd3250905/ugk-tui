@@ -1,4 +1,5 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { getUiLanguage, uiText, type UiLanguage } from "./shared/ui-language.ts";
 
 export const UGK_BRAND_COLORS = {
 	accent: "#9be564",
@@ -17,6 +18,7 @@ export interface UgkHeaderOptions {
 	cwdName: string;
 	modelId?: string;
 	width: number;
+	uiLanguage?: UiLanguage;
 }
 
 export interface UgkStartupScreenOptions extends UgkHeaderOptions {
@@ -41,24 +43,25 @@ export interface UgkFooterOptions {
 	statuses: string[];
 	usage: UgkFooterUsage;
 	width: number;
+	uiLanguage?: UiLanguage;
 }
 
 export type UgkStatusTone = "error" | "warning" | "success" | "dim";
 
-export function resolveUgkDisplayModelId(modelId: string | undefined, deepSeekStatus: string): string | undefined {
+export function resolveUgkDisplayModelId(modelId: string | undefined, deepSeekStatus: string, language: UiLanguage = getUiLanguage()): string | undefined {
 	if (!modelId) return undefined;
 	const isDeepSeekModel = modelId.toLowerCase().startsWith("deepseek");
-	if (isDeepSeekModel && /未配置/.test(deepSeekStatus)) return "❌ API not configured";
+	if (isDeepSeekModel && /未配置|not configured/i.test(deepSeekStatus)) return uiText("❌ API 未配置", "❌ API not configured", language);
 	return modelId;
 }
 
 export function classifyUgkStatusTone(text: string): UgkStatusTone {
 	const normalized = text.toLowerCase();
-	if (/\[fail\]|✗|未配置|api not configured|unavailable|not loaded|missing|failed|error/.test(normalized)) {
+	if (/\[fail\]|✗|未配置|不可用|未加载|缺失|未找到|失败|错误|api not configured|unavailable|not loaded|missing|failed|error/.test(normalized)) {
 		return "error";
 	}
-	if (/\[warn\]|⚠|warn|not reachable|not ready|timeout|skipped/.test(normalized)) return "warning";
-	if (/\[pass\]|✓|已配置|configured|available|loaded|reachable|online|success/.test(normalized)) return "success";
+	if (/\[warn\]|⚠|警告|无法连接|未就绪|超时|已跳过|warn|not reachable|not ready|timeout|skipped/.test(normalized)) return "warning";
+	if (/\[pass\]|✓|已配置|可用|已加载|可连接|在线|成功|configured|available|loaded|reachable|online|success/.test(normalized)) return "success";
 	return "dim";
 }
 
@@ -183,20 +186,22 @@ export function buildUgkLogoLines(width: number): string[] {
 }
 
 function buildUgkInfoPanelLines(options: UgkHeaderOptions): string[] {
-	const model = options.modelId || "model not selected";
+	const language = options.uiLanguage ?? getUiLanguage();
+	const model = options.modelId || uiText("未选择模型", "model not selected", language);
 	return [
 		panelRule("┌", `ugk v${options.version}`, "┐", options.width),
-		panelRow("workspace", options.cwdName, options.width),
-		panelRow("agent", "terminal coding agent", options.width),
-		panelRow("stack", "plan · subagents · cron · adb", options.width),
-		panelRule("├", "quick actions", "┤", options.width),
+		panelRow(uiText("工作区", "Workspace", language), options.cwdName, options.width),
+		panelRow(uiText("代理", "Agent", language), uiText("终端编码代理", "Terminal coding agent", language), options.width),
+		panelRow(uiText("能力", "Capabilities", language), "plan · subagents · cron · adb", options.width),
+		panelRule("├", uiText("快捷操作", "Quick Actions", language), "┤", options.width),
 		panelRow("", "/plan  /implement  /check-env  @agent", options.width),
-		panelRow("model", model, options.width),
+		panelRow(uiText("模型", "Model", language), model, options.width),
 		panelEdge("└", "┘", options.width),
 	];
 }
 
 function buildUgkWelcomePanelLines(options: UgkHeaderOptions): string[] {
+	const language = options.uiLanguage ?? getUiLanguage();
 	const rowWidth = welcomePanelWidth(options.width);
 	if (rowWidth < 72) {
 		return [
@@ -206,27 +211,27 @@ function buildUgkWelcomePanelLines(options: UgkHeaderOptions): string[] {
 		];
 	}
 
-	const model = options.modelId || "model not selected";
+	const model = options.modelId || uiText("未选择模型", "model not selected", language);
 	const leftWidth = Math.max(28, Math.floor((rowWidth - 7) * 0.45));
 	const logoWidth = Math.max(...UGK_BLOCK_LOGO.map((line) => visibleWidth(line)));
 	const leftRows = [
-		"Welcome back.",
+		uiText("欢迎回来。", "Welcome back.", language),
 		"",
 		...UGK_BLOCK_LOGO.map((line) => fitVisible(padEndVisible(line, logoWidth), leftWidth, "center")),
 		"",
-		`workspace  ${options.cwdName}`,
-		`model      ${model}`,
+		`${uiText("工作区", "Workspace", language)}  ${options.cwdName}`,
+		`${uiText("模型", "Model", language)}    ${model}`,
 	];
 	const rightRows = [
-		"◆ Tips for getting started",
-		"› /plan      draft before changing files",
-		"› /implement run the guided pipeline",
-		"› /check-env verify local tools",
+		uiText("◆ 入门提示", "◆ Getting Started", language),
+		uiText("› /plan      修改前先拟计划", "› /plan      Plan before editing", language),
+		uiText("› /implement 运行引导流程", "› /implement Run guided flow", language),
+		uiText("› /check-env 检查本地工具", "› /check-env Check local tools", language),
 		"",
-		"◆ What's new",
-		"› task runs show worker progress",
-		"› footer shows usage and ready state",
-		"› @agent delegates focused work",
+		uiText("◆ 最近更新", "◆ Recent Updates", language),
+		uiText("› task 显示 worker 进度", "› task shows worker progress", language),
+		uiText("› footer 显示用量和就绪状态", "› footer shows usage and readiness", language),
+		uiText("› @agent 委派专注任务", "› @agent delegates focused work", language),
 	];
 
 	const rowCount = Math.max(leftRows.length, rightRows.length);

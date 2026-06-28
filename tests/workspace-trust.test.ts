@@ -94,7 +94,7 @@ test("ensureWorkspaceTrusted rejects untrusted non-interactive workspaces", asyn
 	});
 
 	assert.equal(result.trusted, false);
-	assert.match(result.reason ?? "", /requires trust/);
+	assert.match(result.reason ?? "", /需要先信任工作目录/);
 });
 
 test("isWorkspaceTrusted supports legacy array-shaped state", () => {

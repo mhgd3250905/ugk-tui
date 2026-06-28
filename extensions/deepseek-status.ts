@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { stripBom } from "./shared/settings-io.ts";
+import { uiText } from "./shared/ui-language.ts";
 
 export interface DeepSeekStatusDeps {
 	env?: Record<string, string | undefined>;
@@ -29,17 +30,17 @@ function hasDeepSeekAuth(rawAuth: string): boolean {
 export function getDeepSeekStatus(deps: DeepSeekStatusDeps = {}): string {
 	const env = deps.env ?? process.env;
 	if (env.DEEPSEEK_API_KEY) {
-		return "deepseek: 已配置(DEEPSEEK_API_KEY, deepseek-chat/默认模型可用)";
+		return uiText("deepseek: 已配置(DEEPSEEK_API_KEY, deepseek-chat/默认模型可用)", "deepseek: configured(DEEPSEEK_API_KEY, deepseek-chat/default model available)");
 	}
 
 	const readFile = deps.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
 	try {
 		if (hasDeepSeekAuth(readFile(getAuthPath(env, deps.authPath)))) {
-			return "deepseek: 已配置(pi login/auth.json, deepseek-chat/默认模型可用)";
+			return uiText("deepseek: 已配置(pi login/auth.json, deepseek-chat/默认模型可用)", "deepseek: configured(pi login/auth.json, deepseek-chat/default model available)");
 		}
 	} catch {
 		// Missing or unreadable auth.json means DeepSeek is not configured through pi login.
 	}
 
-	return "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)";
+	return uiText("deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)", "deepseek: not configured(set DEEPSEEK_API_KEY or run /login)");
 }

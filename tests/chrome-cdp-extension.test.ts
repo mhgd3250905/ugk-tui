@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { registerChromeCdp } from "../extensions/chrome-cdp/index.ts";
@@ -96,7 +96,7 @@ test("/cdp command manages ask on off modes and port", async () => {
 
 test("/cdp with no args opens an action menu", async () => {
 	const { pi, commands } = makePi();
-	const { ctx, notifications, selections } = makeCtx("Tabs");
+	const { ctx, notifications, selections } = makeCtx("查看标签页");
 	registerChromeCdp(pi as any, {
 		getStatus: async () => ({ online: false, port: 9222, error: "offline" }),
 		listTabs: async () => [{ id: "tab-1", type: "page", title: "Private", url: "https://private.example.com" }],
@@ -107,8 +107,32 @@ test("/cdp with no args opens an action menu", async () => {
 	assert.equal(selections.length, 1);
 	assert.equal(selections[0].title, "Chrome CDP");
 	assert.deepEqual(selections[0].options, [
+		"查看状态",
+		"查看标签页",
+		"启动 Chrome",
+		"Mode: ask",
+		"Mode: on",
+		"Mode: off",
+		"设置端口",
+		"退出",
+	]);
+	assert.match(notifications.join("\n"), /tab-1/);
+});
+
+test("/cdp menu follows UI language", async () => {
+	const { pi, commands } = makePi();
+	writeFileSync(path.join(testAgentDir, "settings.json"), JSON.stringify({ uiLanguage: "en-US" }));
+	const { ctx, notifications, selections } = makeCtx("View tabs");
+	registerChromeCdp(pi as any, {
+		getStatus: async () => ({ online: false, port: 9222, error: "offline" }),
+		listTabs: async () => [{ id: "tab-1", type: "page", title: "Private", url: "https://private.example.com" }],
+	});
+
+	await commands.get("cdp").handler("", ctx);
+
+	assert.deepEqual(selections[0].options, [
 		"Status",
-		"Tabs",
+		"View tabs",
 		"Launch Chrome",
 		"Mode: ask",
 		"Mode: on",
@@ -135,7 +159,7 @@ test("/cdp port reports invalid values without throwing", async () => {
 	await assert.doesNotReject(() => command.handler("port nope", ctx));
 	await command.handler("status", ctx);
 
-	assert.match(notifications.join("\n"), /Invalid CDP port/);
+	assert.match(notifications.join("\n"), /CDP 端口无效/);
 	assert.deepEqual(statusPorts, [9222]);
 });
 
@@ -153,7 +177,7 @@ test("chrome_cdp tool blocks browser operations when mode is off", async () => {
 		ctx,
 	);
 
-	assert.match(result.content[0].text, /CDP is off/);
+	assert.match(result.content[0].text, /Chrome CDP 已关闭/);
 });
 
 test("chrome_cdp tool asks for confirmation in ask mode before browser operations", async () => {
@@ -223,11 +247,11 @@ test("chrome_cdp tool refuses non-status actions when normal access was not atte
 	);
 
 	assert.equal(tabsCalled, false);
-	assert.match(result.content[0].text, /ordinary access/i);
+	assert.match(result.content[0].text, /普通访问/);
 });
 
 test("chrome_cdp can be allowed for the current session without prompting again", async () => {
-	const allowForSession = "Allow for this session";
+	const allowForSession = "本会话允许";
 	const { pi, tools } = makePi();
 	const { ctx, selections } = makeCtx(allowForSession);
 	let tabsCalled = 0;
@@ -255,7 +279,7 @@ test("chrome_cdp can be allowed for the current session without prompting again"
 
 	assert.equal(tabsCalled, 2);
 	assert.equal(selections.length, 1);
-	assert.deepEqual(selections[0].options, ["Allow once", "Allow for this session", "Deny"]);
+	assert.deepEqual(selections[0].options, ["允许一次", "本会话允许", "拒绝"]);
 });
 
 // ponytail: per-worker 会话 tab 隔离。sessionTabId 来自 UGK_CDP_TAB_ID env(worker 进程注入)。

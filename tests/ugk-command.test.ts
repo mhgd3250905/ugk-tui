@@ -65,17 +65,17 @@ test("/ugk renders a structured status panel", async () => {
 		});
 
 		const text = notifications.join("\n");
-		assert.match(text, /^🟢 UGK active/);
+		assert.match(text, /^🟢 UGK 已启用/);
 		assert.match(text, /┌─+┬─+┐/);
-		assert.doesNotMatch(text, /│\s*🧰 Tools\s*│.*✅ greet/);
-		assert.match(text, /│\s*🧰 Tools\s*│.*✅ mcp/);
-		assert.match(text, /│\s*🤖 Agents\s*│\s*✅ @agent mention/);
-		assert.match(text, /│\s*⌨️ Commands\s*│\s*\/ugk/);
-		assert.match(text, /│\s*⌨️ Commands\s*│.*\/mcp/);
-		assert.doesNotMatch(text, /│\s*⌨️ Commands\s*│.*\/flow/);
+		assert.doesNotMatch(text, /│\s*🧰 工具\s*│.*✅ greet/);
+		assert.match(text, /│\s*🧰 工具\s*│.*✅ mcp/);
+		assert.match(text, /│\s*🤖 代理\s*│\s*✅ @agent 提及/);
+		assert.match(text, /│\s*⌨️ 命令\s*│\s*\/ugk/);
+		assert.match(text, /│\s*⌨️ 命令\s*│.*\/mcp/);
+		assert.doesNotMatch(text, /│\s*⌨️ 命令\s*│.*\/flow/);
 		assert.match(text, /│\s*📡 API\s*│\s*❌ DeepSeek 未配置/);
-		assert.match(text, /│\s*🛡️ Guard\s*│\s*dangerous bash gate enabled/);
-		assert.doesNotMatch(text, /🧰 Tools:/);
+		assert.match(text, /│\s*🛡️ 防护\s*│\s*危险 bash 门禁已启用/);
+		assert.doesNotMatch(text, /🧰 工具:/);
 	} finally {
 		if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
 		else process.env.DEEPSEEK_API_KEY = previousApiKey;
@@ -100,15 +100,15 @@ test("/ugk-autopilot with no args opens an action menu", async () => {
 				},
 				select(title: string, options: string[]) {
 					selections.push({ title, options });
-					return "Turn on";
+					return "开启";
 				},
 			},
 		});
 
-		assert.equal(selections[0].title, "Autopilot");
-		assert.deepEqual(selections[0].options, ["Status", "Turn on", "Turn off", "Exit"]);
+		assert.equal(selections[0].title, "自动放行");
+		assert.deepEqual(selections[0].options, ["查看状态", "开启", "关闭", "退出"]);
 		assert.equal(isAutopilotOn(), true);
-		assert.match(notifications.join("\n"), /Autopilot: ON/);
+		assert.match(notifications.join("\n"), /自动放行: 开/);
 	} finally {
 		installAutopilotState(createAutopilotState(false));
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -132,7 +132,7 @@ test("/language with no args opens an action menu before input", async () => {
 				},
 				select(title: string, options: string[]) {
 					selections.push({ title, options });
-					return "Set language";
+					return "设置回答语言";
 				},
 				input(prompt: string) {
 					inputs.push(prompt);
@@ -141,10 +141,87 @@ test("/language with no args opens an action menu before input", async () => {
 			},
 		});
 
-		assert.equal(selections[0].title, "Language");
-		assert.deepEqual(selections[0].options, ["Status", "Set language", "Clear", "Exit"]);
-		assert.equal(inputs[0], "用什么语言与 agent 交流?");
+		assert.equal(selections[0].title, "回答语言");
+		assert.deepEqual(selections[0].options, ["查看状态", "设置回答语言", "清除", "退出"]);
+		assert.equal(inputs[0], "AI 回答优先用什么语言?");
 		assert.match(notifications.join("\n"), /语言偏好已设为: English/);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("/ui-language switches UGK UI copy without changing agent reply language", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = tempAgentDir();
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const commands = registerCommands();
+		const notifications: string[] = [];
+
+		await commands.get("ui-language")!.handler("English", {
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+			},
+		});
+
+		await commands.get("ugk")!.handler("", {
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+			},
+		});
+
+		const text = notifications.join("\n");
+		assert.match(text, /UI language set to: English/);
+		assert.match(text, /^UI language set to: English[\s\S]*🟢 UGK enabled/);
+		assert.match(text, /Tools/);
+		assert.doesNotMatch(text, /UGK 已启用/);
+
+		const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+		assert.equal(settings.uiLanguage, "en-US");
+		assert.equal("language" in settings, false);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("/ui-language with no args uses nested selectable menus", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = tempAgentDir();
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const commands = registerCommands();
+		const selections: Array<{ title: string; options: string[] }> = [];
+		const notifications: string[] = [];
+
+		await commands.get("ui-language")!.handler("", {
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+				select(title: string, options: string[]) {
+					selections.push({ title, options });
+					return selections.length === 1 ? "设置界面语言" : "English";
+				},
+			},
+		});
+
+		assert.deepEqual(selections, [
+			{
+				title: "界面语言",
+				options: ["查看状态", "设置界面语言", "清除", "退出"],
+			},
+			{
+				title: "选择界面语言",
+				options: ["简体中文", "English", "返回"],
+			},
+		]);
+		assert.match(notifications.join("\n"), /UI language set to: English/);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

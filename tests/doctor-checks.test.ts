@@ -12,7 +12,7 @@ import {
 test("checkBash passes when bash returns ok", async () => {
 	const result = await checkBash({ resolveBash: () => ({ command: "bash", source: "PATH" }), exec: async () => ({ stdout: "ok\n" }) });
 	assert.equal(result.status, "pass");
-	assert.match(result.summary, /bash available/);
+	assert.match(result.summary, /bash 可用/);
 });
 
 test("checkBash persists resolved Windows Git Bash path for child agent sessions", async () => {
@@ -50,8 +50,8 @@ test("checkBash fails when bash cannot execute", async () => {
 		},
 	});
 	assert.equal(result.status, "fail");
-	assert.match(result.summary, /bash unavailable/);
-	assert.deepEqual(result.nextSteps, ["Check PATH or install a bash-compatible shell."]);
+	assert.match(result.summary, /bash 不可用/);
+	assert.deepEqual(result.nextSteps, ["检查 PATH 或安装 bash 兼容 shell。"]);
 });
 
 test("resolveBashCommand prefers Windows shellPath from settings", () => {
@@ -111,7 +111,7 @@ test("checkBash passes when persisting the resolved bash path fails", async () =
 	});
 
 	assert.equal(result.status, "pass");
-	assert.match(result.summary, /bash available/);
+	assert.match(result.summary, /bash 可用/);
 });
 
 test("checkDeepSeekApi passes and fails using existing status text", async () => {
@@ -122,7 +122,7 @@ test("checkDeepSeekApi passes and fails using existing status text", async () =>
 	const fail = await checkDeepSeekApi({ env: {}, authPath: "auth.json", readFile: () => "{}" });
 	assert.equal(fail.status, "fail");
 	assert.deepEqual(fail.details, ["底栏模型名只表示当前选择的模型,不代表 DeepSeek API 已配置。"]);
-	assert.deepEqual(fail.nextSteps, ["Set DEEPSEEK_API_KEY or run /login."]);
+	assert.deepEqual(fail.nextSteps, ["设置 DEEPSEEK_API_KEY 或运行 /login。"]);
 });
 
 test("checkChromeBinary reports found and missing binaries", async () => {
@@ -133,12 +133,12 @@ test("checkChromeBinary reports found and missing binaries", async () => {
 		}),
 	});
 	assert.equal(found.status, "pass");
-	assert.match(found.summary, /Chrome found/);
+	assert.match(found.summary, /已找到 Chrome/);
 
 	const missing = await checkChromeBinary({ resolveChromeBinary: () => ({ found: false, command: "google-chrome" }) });
 	assert.equal(missing.status, "fail");
-	assert.match(missing.summary, /Chrome not found/);
-	assert.deepEqual(missing.nextSteps, ["Install Chrome or check PATH."]);
+	assert.match(missing.summary, /未找到 Chrome/);
+	assert.deepEqual(missing.nextSteps, ["安装 Chrome 或检查 PATH。"]);
 });
 
 test("checkChromeCdp reports reachable and unreachable status", async () => {
@@ -147,14 +147,14 @@ test("checkChromeCdp reports reachable and unreachable status", async () => {
 		getStatus: async () => ({ online: true, port: 9222, tabs: [] }),
 	});
 	assert.equal(online.status, "pass");
-	assert.match(online.summary, /Chrome CDP reachable/);
+	assert.match(online.summary, /Chrome CDP 可连接/);
 
 	const offline = await checkChromeCdp({
 		resolvePort: () => 9333,
 		getStatus: async () => ({ online: false, port: 9333, error: "fetch failed" }),
 	});
 	assert.equal(offline.status, "warn");
-	assert.match(offline.summary, /not reachable on 127\.0\.0\.1:9333/);
+	assert.match(offline.summary, /无法连接: 127\.0\.0\.1:9333/);
 	assert.deepEqual(offline.nextSteps, ["/cdp launch", "/cdp status"]);
 });
 

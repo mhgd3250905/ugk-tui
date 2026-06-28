@@ -39,7 +39,7 @@
 
 ## 3. 更新机制实现
 
-启动入口在进入 TUI 前检查 GitHub `main` 最新 commit,显示 Codex CLI 风格的 `Update now / Skip / Skip until next version` 菜单。
+启动入口在进入 TUI 前检查 GitHub `main` 最新 commit,显示 Codex CLI 风格的中文更新菜单:`立即更新` / `跳过本次` / `跳过直到下个版本`。
 - 开发仓库内更新走 `git pull --rebase origin main && npm install`
 - 正式 npm 安装场景走 `npm install -g ugk-agent`
 - 成功后提示重启并退出,不继续加载旧 TUI

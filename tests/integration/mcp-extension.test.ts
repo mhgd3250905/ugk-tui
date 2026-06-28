@@ -518,7 +518,7 @@ test("/mcp reload treats command contexts with confirm UI as interactive even wi
 
 	assert.equal(confirmations, 1);
 	assert.equal(pi.registeredTools.has("alpha__echo"), true);
-	assert.match(notifications.join("\n"), /connected: 1/);
+	assert.match(notifications.join("\n"), /已连接: 1/);
 
 	await emit(pi, "session_shutdown", { reason: "quit" }, { cwd });
 	await waitForNoProcess(/mcp-stub-server\.mjs/);
@@ -544,6 +544,6 @@ test("/mcp reload without confirm or select still fail-closes project scope serv
 
 	assert.equal(pi.registeredTools.has("alpha__echo"), false);
 	assert.match(state.failedServers?.get("alpha") ?? "", /blocked by spawn policy/i);
-	assert.match(notifications.join("\n"), /failed: 1/);
+	assert.match(notifications.join("\n"), /失败: 1/);
 	await waitForNoProcess(/mcp-stub-server\.mjs/);
 });

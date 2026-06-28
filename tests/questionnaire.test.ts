@@ -172,7 +172,7 @@ test("questionnaire returns cancelled error when UI is unavailable", async () =>
 	);
 
 	assert.equal(result.details.cancelled, true);
-	assert.match(result.content[0].text, /UI not available/);
+	assert.match(result.content[0].text, /UI 不可用/);
 });
 
 // theme stub: passthrough, so assertions read the raw text the renderer built.
@@ -188,12 +188,12 @@ test("renderResult collapses to a one-line summary and expands on demand", () =>
 	const result = { content: [{ type: "text" as const, text: "..." }], details: { answers: sampleAnswers, cancelled: false } };
 
 	const collapsed = String(tool.renderResult(result, { expanded: false, isPartial: false }, stubTheme).text);
-	assert.match(collapsed, /answered 2 questions/);
+	assert.match(collapsed, /已回答 2 个问题/);
 	assert.doesNotMatch(collapsed, /scope/);
 
 	const expanded = String(tool.renderResult(result, { expanded: true, isPartial: false }, stubTheme).text);
-	assert.match(expanded, /scope: user selected: 1\. Single file/);
-	assert.match(expanded, /detail: user wrote: custom answer/);
+	assert.match(expanded, /scope: 用户选择: 1\. Single file/);
+	assert.match(expanded, /detail: 用户填写: custom answer/);
 });
 
 test("renderResult reports cancelled state", () => {
@@ -204,7 +204,7 @@ test("renderResult reports cancelled state", () => {
 	};
 
 	const collapsed = String(tool.renderResult(result, { expanded: false, isPartial: false }, stubTheme).text);
-	assert.match(collapsed, /cancelled after 1 answer/);
+	assert.match(collapsed, /取消,已回答 1 个/);
 });
 
 test("renderCall shows question count and up to three labels", () => {
@@ -219,6 +219,6 @@ test("renderCall shows question count and up to three labels", () => {
 	};
 
 	const text = String(tool.renderCall(args, stubTheme).text);
-	assert.match(text, /4 questions/);
+	assert.match(text, /4 个问题/);
 	assert.match(text, /Alpha, Beta, c\.\.\./);
 });

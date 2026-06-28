@@ -5,6 +5,9 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import planModeExtension from "../extensions/plan-mode.ts";
 
@@ -79,6 +82,38 @@ test("plan mode toggle preserves MCP/dynamic tools on exit", async () => {
 	);
 });
 
+test("plan mode toggle notification follows UI language", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-plan-language-"));
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: "en-US" }));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const pi = createMockPi(["read", "bash", "edit", "write"]);
+		planModeExtension(pi);
+		const notifications: string[] = [];
+		const ctx: any = {
+			hasUI: true,
+			cwd: process.cwd(),
+			ui: {
+				notify: (message: string) => notifications.push(message),
+				setStatus: () => {},
+				setWidget: () => {},
+				theme: { fg: (_color: string, text: string) => text, strikethrough: (s: string) => s },
+			},
+			sessionManager: { getEntries: () => [] },
+		};
+
+		await (pi as any).commands.get("plan").handler("", ctx);
+
+		assert.match(notifications.join("\n"), /Plan mode enabled/);
+		assert.doesNotMatch(notifications.join("\n"), /已开启/);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		fs.rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
 test("plan mode toggle without getActiveTools falls back to normal tools", async () => {
 	// Edge case: if getActiveTools is unavailable, exit should use NORMAL_MODE_TOOLS fallback.
 	const pi = createMockPi(["read", "bash"]);
@@ -126,7 +161,7 @@ test("plan execute -> complete restores MCP tools (S1 completeExecution path)", 
 			notify: noop,
 			setStatus: noop,
 			setWidget: noop,
-			select: async () => "Execute the plan",
+			select: async () => "执行计划",
 			theme: { fg: (s: string) => s, strikethrough: (s: string) => s },
 		},
 		sessionManager: { getEntries: () => [] },
@@ -139,7 +174,7 @@ test("plan execute -> complete restores MCP tools (S1 completeExecution path)", 
 	assert.deepEqual(pi.getActiveTools().sort(), ["read", "bash", "grep", "find", "ls", "questionnaire"].sort());
 
 	// 2. Trigger agent_end with a plan-shaped assistant message so todos get extracted,
-	//    then the handler offers "Execute the plan" (ctx.ui.select returns Execute) -> startExecution.
+	//    then the handler offers "执行计划" (ctx.ui.select returns Execute) -> startExecution.
 	const agentEndHandler = (pi as any)._agentEndHandler;
 	assert.ok(agentEndHandler, "agent_end handler should be registered");
 	const planMessage = { role: "assistant", content: [{ type: "text", text: "Plan:\n1. Do thing one\n2. Do thing two" }] };

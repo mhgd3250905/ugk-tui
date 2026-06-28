@@ -32,9 +32,9 @@ test("formatMcpStatus 用窄 state shape 渲染连接/工具/模式", () => {
 		warnings: ["low mem"],
 	});
 
-	assert.match(status, /connected servers: 1 \(alpha\)/);
-	assert.match(status, /tools: 1/);
-	assert.match(status, /mode: ask/);
-	assert.match(status, /failed servers: beta \(boom\)/);
-	assert.match(status, /warnings: low mem/);
+	assert.match(status, /已连接 server: 1 \(alpha\)/);
+	assert.match(status, /工具: 1/);
+	assert.match(status, /权限模式: ask/);
+	assert.match(status, /失败 server: beta \(boom\)/);
+	assert.match(status, /警告: low mem/);
 });

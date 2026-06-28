@@ -41,9 +41,9 @@ type McpStartupResult = {
 	warnings: string[];
 };
 
-const MCP_ALLOW_ONCE = "Allow once";
-const MCP_ALLOW_SESSION = "Allow for this session";
-const MCP_DENY = "Deny";
+const MCP_ALLOW_ONCE = "允许一次";
+const MCP_ALLOW_SESSION = "本会话允许";
+const MCP_DENY = "拒绝";
 const CLEANUP_REASONS = new Set(["quit", "reload", "new", "resume", "fork"]);
 // ponytail: 全部 pi session_start reason 都触发 MCP 连接。原白名单只含 startup/reload,
 // 导致 resume(恢复会话,最常见的"重启 ugk")/new/fork 时 MCP 不自动加载,必须手动 /mcp reload。
@@ -302,16 +302,16 @@ async function confirmSpawn(ctx: McpRuntimeContext, entry: McpConfigEntry): Prom
 		return false;
 	}
 	if (ctx.ui?.select && !ctx.ui?.confirm) {
-		const choice = await ctx.ui.select(
-			`Allow MCP server?\n\nServer "${entry.name}" from ${entry.scope} config wants to spawn:\n${entry.config.command}`,
-			["Allow", "Deny"],
+			const choice = await ctx.ui.select(
+			`允许 MCP server?\n\n来自 ${entry.scope} 配置的 server "${entry.name}" 想启动:\n${entry.config.command}`,
+			["允许", "拒绝"],
 		);
-		return choice === "Allow";
+		return choice === "允许";
 	}
 	return Boolean(
 		await ctx.ui?.confirm?.(
-			"Allow MCP server?",
-			`Server "${entry.name}" from ${entry.scope} config wants to spawn:\n${entry.config.command}`,
+			"允许 MCP server?",
+			`来自 ${entry.scope} 配置的 server "${entry.name}" 想启动:\n${entry.config.command}`,
 		),
 	);
 }
@@ -321,7 +321,7 @@ async function confirmTool(ctx: McpRuntimeContext | undefined, context: McpToolP
 		return "deny" as const;
 	}
 
-	const prompt = `Allow MCP tool?\n\n${context.registeredName}\nReason: ${context.reason}`;
+	const prompt = `允许 MCP tool?\n\n${context.registeredName}\n原因: ${context.reason}`;
 	if (ctx?.ui?.select) {
 		const choice = await ctx.ui.select(prompt, [MCP_ALLOW_ONCE, MCP_ALLOW_SESSION, MCP_DENY]);
 		if (choice === MCP_ALLOW_SESSION) {
@@ -333,7 +333,7 @@ async function confirmTool(ctx: McpRuntimeContext | undefined, context: McpToolP
 		return "deny" as const;
 	}
 
-	return (await ctx?.ui?.confirm?.("Allow MCP tool?", prompt)) ? ("allow-once" as const) : ("deny" as const);
+	return (await ctx?.ui?.confirm?.("允许 MCP tool?", prompt)) ? ("allow-once" as const) : ("deny" as const);
 }
 
 function resolveCwd(ctx: McpRuntimeContext): string {

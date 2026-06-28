@@ -102,9 +102,9 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	assert.match(coloredHeader, /<b><error>██╗<\/error><\/b>/);
 	assert.match(coloredHeader, /<b><accent>██║<\/accent><\/b>/);
 	assert.match(coloredHeader, /<b><accent>╚═════╝<\/accent><\/b>/);
-	assert.match(coloredHeader, /<b><success>◆ What's new<\/success><\/b>/);
+	assert.match(coloredHeader, /<b><success>◆ 最近更新<\/success><\/b>/);
 	assert.match(coloredHeader, /› <success>\/plan<\/success>/);
-	assert.doesNotMatch(coloredHeader, /^<b><success>│.*What's new/m);
+	assert.doesNotMatch(coloredHeader, /^<b><success>│.*最近更新/m);
 	header.dispose?.();
 });
 
@@ -196,7 +196,7 @@ test("/ugk-ui with no args opens an action menu", async () => {
 			setTitle: () => {},
 			select: async (title: string, options: string[]) => {
 				selections.push({ title, options });
-				return "Turn off";
+				return "关闭";
 			},
 			notify: (message: string) => calls.push(`notify:${message}`),
 		},
@@ -208,12 +208,71 @@ test("/ugk-ui with no args opens an action menu", async () => {
 	assert.deepEqual(selections, [
 		{
 			title: "UGK UI",
-			options: ["Show status", "Turn off", "Turn on", "Exit"],
+			options: ["查看状态", "关闭", "开启", "退出"],
 		},
 	]);
 	assert.ok(calls.includes("header"));
 	assert.ok(calls.includes("footer"));
-	assert.match(calls.join("\n"), /ugk UI disabled/);
+	assert.match(calls.join("\n"), /UGK UI 已关闭/);
+});
+
+test("/ugk-ui menu follows UI language", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = tempAgentDir();
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: "en-US" }));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const handlers = new Map<string, Function>();
+		const commands = new Map<string, { handler: Function }>();
+		const pi = {
+			on(event: string, handler: Function) {
+				handlers.set(event, handler);
+			},
+			registerCommand(name: string, options: { handler: Function }) {
+				commands.set(name, options);
+			},
+			registerFlag() {},
+			getFlag() {
+				return undefined;
+			},
+			getSessionName() {
+				return "demo";
+			},
+		};
+		const selections: Array<{ title: string; options: string[] }> = [];
+		const calls: string[] = [];
+		const ctx = {
+			cwd: "/Users/shengkai/projects/ugk-tui",
+			sessionManager: {
+				getCwd: () => "/Users/shengkai/projects/ugk-tui",
+				getEntries: () => [],
+			},
+			ui: {
+				setHeader: () => calls.push("header"),
+				setFooter: () => calls.push("footer"),
+				setTitle: () => {},
+				select: async (title: string, options: string[]) => {
+					selections.push({ title, options });
+					return "Turn off";
+				},
+				notify: (message: string) => calls.push(`notify:${message}`),
+			},
+		};
+
+		registerUgkBrandUi(pi as any);
+		await commands.get("ugk-ui")!.handler("", ctx);
+
+		assert.deepEqual(selections, [
+			{
+				title: "UGK UI",
+				options: ["Status", "Turn off", "Turn on", "Exit"],
+			},
+		]);
+		assert.match(calls.join("\n"), /UGK UI disabled/);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
 });
 
 test("ugk brand footer hides DeepSeek model when API credentials are missing", async () => {
@@ -265,7 +324,7 @@ test("ugk brand footer hides DeepSeek model when API credentials are missing", a
 		const text = footer.render(100).join("\n");
 
 		assert.doesNotMatch(text, /deepseek-v4-pro/);
-		assert.match(text, /❌ API not configured/);
+		assert.match(text, /❌ API 未配置/);
 	} finally {
 		if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
 		else process.env.DEEPSEEK_API_KEY = previousApiKey;
@@ -323,18 +382,18 @@ test("ugk brand footer colors stateful fields by severity", async () => {
 			getGitBranch: () => null,
 			getExtensionStatuses: () =>
 				new Map([
-					["bash", "bash unavailable"],
-					["subagent", "subagent not loaded"],
+					["bash", "bash 不可用"],
+					["subagent", "subagent 未加载"],
 					["turn-progress", "✓ 第 1 轮完成"],
 				]),
 			onBranchChange: () => () => {},
 		});
 		const text = footer.render(140).join("\n");
 
-		assert.match(text, /<error>🤖 ❌ API not configured<\/error>/);
+		assert.match(text, /<error>🤖 ❌ API 未配置<\/error>/);
 		assert.doesNotMatch(text, /<success>configured<\/success>/);
-		assert.match(text, /<error>bash unavailable<\/error>/);
-		assert.match(text, /<error>subagent not loaded<\/error>/);
+		assert.match(text, /<error>bash 不可用<\/error>/);
+		assert.match(text, /<error>subagent 未加载<\/error>/);
 		assert.match(text, /<success>✓ 第 1 轮完成<\/success>/);
 	} finally {
 		if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;

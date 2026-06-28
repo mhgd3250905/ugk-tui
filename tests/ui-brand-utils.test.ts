@@ -22,13 +22,13 @@ test("buildUgkHeaderLines brands startup without pi copy", () => {
 	const text = lines.join("\n");
 	assert.match(text, /█/);
 	assert.match(text, /┌─ ugk v1\.0\.0/);
-	assert.match(text, /Welcome back/);
-	assert.match(text, /◆ Tips for getting started/);
-	assert.match(text, /◆ What's new/);
-	assert.match(text, /workspace\s+ugk-tui/);
-	assert.match(text, /model\s+deepseek-v4-pro/);
-	assert.match(text, /› \/plan\s+draft before changing files/);
-	assert.doesNotMatch(text, /├─ quick actions/);
+	assert.match(text, /欢迎回来/);
+	assert.match(text, /◆ 入门提示/);
+	assert.match(text, /◆ 最近更新/);
+	assert.match(text, /工作区\s+ugk-tui/);
+	assert.match(text, /模型\s+deepseek-v4-pro/);
+	assert.match(text, /› \/plan\s+修改前先拟计划/);
+	assert.doesNotMatch(text, /├─ 快捷操作/);
 	assert.doesNotMatch(text, /\n  deepseek-v4-pro/);
 	assert.match(text, /ugk v1\.0\.0/);
 	assert.match(text, /deepseek-v4-pro/);
@@ -43,6 +43,25 @@ test("buildUgkHeaderLines brands startup without pi copy", () => {
 	assert.deepEqual([...panelWidths], [96]);
 });
 
+test("buildUgkHeaderLines can render English UI copy", () => {
+	const lines = buildUgkHeaderLines({
+		version: "1.0.0",
+		cwdName: "ugk-tui",
+		modelId: "deepseek-v4-pro",
+		width: 96,
+		uiLanguage: "en-US",
+	});
+
+	const text = lines.join("\n");
+	assert.match(text, /Welcome back/);
+	assert.match(text, /◆ Getting Started/);
+	assert.match(text, /◆ Recent Updates/);
+	assert.match(text, /Workspace\s+ugk-tui/);
+	assert.match(text, /Model\s+deepseek-v4-pro/);
+	assert.match(text, /› \/plan\s+Plan before editing/);
+	assert.doesNotMatch(text, /欢迎回来|入门提示|最近更新/);
+});
+
 test("buildUgkHeaderLines keeps panel borders aligned for wide workspace names", () => {
 	const lines = buildUgkHeaderLines({
 		version: "1.0.0",
@@ -55,7 +74,7 @@ test("buildUgkHeaderLines keeps panel borders aligned for wide workspace names",
 	for (const line of panelLines) {
 		assert.equal(visibleWidth(line), 96, line);
 	}
-	assert.match(panelLines.join("\n"), /workspace\s+TUI专区/);
+	assert.match(panelLines.join("\n"), /工作区\s+TUI专区/);
 });
 
 test("buildUgkHeaderLines does not leak ANSI resets when truncating cells", () => {
@@ -97,9 +116,9 @@ test("buildUgkStartupScreenLines fills the terminal viewport with character effe
 	});
 
 	assert.equal(lines.length, 19);
-	assert.match(lines.join("\n"), /Welcome back/);
-	assert.match(lines.join("\n"), /◆ Tips for getting started/);
-	assert.match(lines.join("\n"), /◆ What's new/);
+	assert.match(lines.join("\n"), /欢迎回来/);
+	assert.match(lines.join("\n"), /◆ 入门提示/);
+	assert.match(lines.join("\n"), /◆ 最近更新/);
 	assert.match(lines.join("\n"), /█/);
 	assert.match(lines.join("\n"), /\/plan/);
 	for (const line of lines) {
@@ -184,7 +203,7 @@ test("buildUgkFooterLines renders an empty context progress bar", () => {
 });
 
 test("resolveUgkDisplayModelId hides DeepSeek model when API credentials are missing", () => {
-	assert.equal(resolveUgkDisplayModelId("deepseek-v4-pro", "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)"), "❌ API not configured");
+	assert.equal(resolveUgkDisplayModelId("deepseek-v4-pro", "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)"), "❌ API 未配置");
 	assert.equal(resolveUgkDisplayModelId("deepseek-v4-pro", "deepseek: 已配置(DEEPSEEK_API_KEY, deepseek-chat/默认模型可用)"), "deepseek-v4-pro");
 	assert.equal(resolveUgkDisplayModelId("gpt-4o", "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)"), "gpt-4o");
 	assert.equal(resolveUgkDisplayModelId(undefined, "deepseek: 未配置(设 DEEPSEEK_API_KEY 或运行 /login 启用)"), undefined);
@@ -192,11 +211,11 @@ test("resolveUgkDisplayModelId hides DeepSeek model when API credentials are mis
 
 test("classifyUgkStatusTone maps stateful text to semantic color tones", () => {
 	assert.equal(classifyUgkStatusTone("api not configured"), "error");
-	assert.equal(classifyUgkStatusTone("❌ API not configured"), "error");
-	assert.equal(classifyUgkStatusTone("bash unavailable"), "error");
-	assert.equal(classifyUgkStatusTone("subagent not loaded"), "error");
-	assert.equal(classifyUgkStatusTone("Chrome CDP not reachable"), "warning");
-	assert.equal(classifyUgkStatusTone("DeepSeek configured"), "success");
+	assert.equal(classifyUgkStatusTone("❌ API 未配置"), "error");
+	assert.equal(classifyUgkStatusTone("bash 不可用"), "error");
+	assert.equal(classifyUgkStatusTone("subagent 未加载"), "error");
+	assert.equal(classifyUgkStatusTone("Chrome CDP 无法连接"), "warning");
+	assert.equal(classifyUgkStatusTone("DeepSeek 已配置"), "success");
 	assert.equal(classifyUgkStatusTone("✓ 第 1 轮完成"), "success");
 	assert.equal(classifyUgkStatusTone("plan 2/5"), "dim");
 });

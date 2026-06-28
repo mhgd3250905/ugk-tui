@@ -52,12 +52,12 @@ test("formatCliUpdatePrompt mirrors codex-style numbered update choices", () => 
 		"npm install -g ugk-agent",
 	);
 
-	assert.match(prompt, /✨ Update available!/);
+	assert.match(prompt, /✨ 发现可用更新!/);
 	assert.match(prompt, /1\.0\.0 \(aaaaaaa\) -> bbbbbbb/);
-	assert.match(prompt, /1\. Update now \(runs `npm install -g ugk-agent`\)/);
-	assert.match(prompt, /2\. Skip/);
-	assert.match(prompt, /3\. Skip until next version/);
-	assert.match(prompt, /Use Up\/Down to choose, Enter to confirm, Esc to cancel/);
+	assert.match(prompt, /1\. 立即更新\(运行 `npm install -g ugk-agent`\)/);
+	assert.match(prompt, /2\. 跳过本次/);
+	assert.match(prompt, /3\. 跳过直到下个版本/);
+	assert.match(prompt, /使用 ↑\/↓ 选择,Enter 确认,Esc 取消/);
 });
 
 test("advanceCliUpdatePromptSelection supports arrow navigation and enter selection", () => {
@@ -126,7 +126,7 @@ test("promptCliUpdateChoice uses raw TTY arrow navigation", async () => {
 	assert.equal(await choice, "skip");
 	assert.equal(resumed, true);
 	assert.deepEqual(rawModes, [true, false]);
-	assert.match(output.text(), /› 2\. Skip/);
+	assert.match(output.text(), /› 2\. 跳过本次/);
 });
 
 test("runUgkUpdatePreflight continues when no update is available", async () => {
@@ -170,7 +170,7 @@ test("runUgkUpdatePreflight skip only affects the current run", async () => {
 	assert.deepEqual(result, { action: "continue" });
 	assert.equal(state.skippedRef, undefined);
 	assert.equal(state.skippedAt, undefined);
-	assert.match(output.text(), /Skipping this UGK update for now/);
+	assert.match(output.text(), /已跳过本次 UGK 更新/);
 });
 
 test("runUgkUpdatePreflight skip until next version records the latest ref", async () => {
@@ -214,6 +214,6 @@ test("runUgkUpdatePreflight updates and asks caller to exit before pi starts", a
 
 	assert.deepEqual(result, { action: "exit", exitCode: 0 });
 	assert.equal(applied, true);
-	assert.match(output.text(), /Updating UGK via `npm install -g ugk-agent`/);
-	assert.match(output.text(), /🎉 Update ran successfully! Please restart UGK\./);
+	assert.match(output.text(), /正在通过 `npm install -g ugk-agent` 更新 UGK/);
+	assert.match(output.text(), /🎉 更新命令已成功运行,请重启 UGK/);
 });

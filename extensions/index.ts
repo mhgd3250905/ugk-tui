@@ -333,8 +333,9 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			if (arg === "clear") {
+				const language = getUiLanguage();
 				clearUiLanguage();
-				ctx.ui.notify("界面语言已清除,回到默认: 简体中文", "info");
+				ctx.ui.notify(uiText("界面语言已清除,回到默认: 简体中文", "UI language cleared; back to default: Simplified Chinese", language), "info");
 				return;
 			}
 			const set = setUiLanguage(raw);
@@ -373,10 +374,14 @@ export default function (pi: ExtensionAPI) {
 			return { block: true, reason: "Dangerous command blocked (no UI for confirmation)" };
 		}
 
-			const choice = await ctx.ui.select(`⚠️ 危险命令:\n\n  ${command}\n\n是否允许?`, ["允许", "拒绝"]);
-			if (choice !== "允许") {
-				return { block: true, reason: "用户已拒绝" };
-			}
+		const options = uiText(["允许", "拒绝"], ["Yes", "No"]);
+		const choice = await ctx.ui.select(
+			uiText(`⚠️ 危险命令:\n\n  ${command}\n\n是否允许?`, `⚠️ Dangerous command:\n\n  ${command}\n\nAllow?`),
+			options,
+		);
+		if (choice !== options[0]) {
+			return { block: true, reason: "Blocked by user" };
+		}
 
 		return undefined;
 	});

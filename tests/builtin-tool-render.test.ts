@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import registerBuiltinToolRenderers from "../extensions/builtin-tool-render.ts";
 
 const theme = {
@@ -9,6 +12,20 @@ const theme = {
 
 function renderText(component: { render(width: number): string[] }): string {
 	return component.render(120).join("\n").trimEnd();
+}
+
+async function withUiLanguage(language: string, fn: () => Promise<void> | void) {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-render-language-"));
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: language }));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		await fn();
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		fs.rmSync(agentDir, { recursive: true, force: true });
+	}
 }
 
 test("builtin renderer registers only bash and edit", () => {
@@ -39,6 +56,30 @@ test("bash renderer summarizes success and failure output", () => {
 		{},
 	);
 	assert.equal(renderText(failure), "exit 2 (2 行)");
+});
+
+test("builtin renderers follow UI language", async () => {
+	await withUiLanguage("en-US", () => {
+		const tools: any[] = [];
+		registerBuiltinToolRenderers({ registerTool: (tool: any) => tools.push(tool) } as any);
+		const bash = tools.find((tool) => tool.name === "bash");
+
+		const running = bash.renderResult(
+			{ content: [], details: {} },
+			{ expanded: false, isPartial: true },
+			theme,
+			{},
+		);
+		assert.equal(renderText(running), "running...");
+
+		const success = bash.renderResult(
+			{ content: [{ type: "text", text: "one\n" }], details: {} },
+			{ expanded: false, isPartial: false },
+			theme,
+			{},
+		);
+		assert.equal(renderText(success), "done (1 lines)");
+	});
 });
 
 test("bash renderer falls back to red exit when error output has no code", () => {

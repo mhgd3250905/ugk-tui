@@ -1,6 +1,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { uiText } from "./shared/ui-language.ts";
 
 interface QuestionOption {
 	value: string;
@@ -62,10 +63,10 @@ export default function registerQuestionnaire(pi: ExtensionAPI): void {
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (!ctx.hasUI || !ctx.ui?.select || !ctx.ui?.editor) {
-				return errorResult("错误:UI 不可用(当前为非交互模式)");
+				return errorResult(uiText("错误:UI 不可用(当前为非交互模式)", "Error: UI unavailable (current mode is non-interactive)"));
 			}
 			if (!Array.isArray(params.questions) || params.questions.length === 0) {
-				return errorResult("错误:没有提供问题");
+				return errorResult(uiText("错误:没有提供问题", "Error: no questions provided"));
 			}
 
 			const answers: Answer[] = [];
@@ -78,7 +79,7 @@ export default function registerQuestionnaire(pi: ExtensionAPI): void {
 				});
 				// 强制每题都有「填写其他答案」—— LLM 不可控,工具层兜底。
 				// 即使 question.allowOther === false 也照加(用户原则:必须有这个其他回答)。
-				const display = `${question.options.length + 1}. 填写其他答案。`;
+				const display = `${question.options.length + 1}. ${uiText("填写其他答案。", "Type another answer.")}`;
 				displaySelections.set(display, { kind: "other" });
 				options.push(display);
 
@@ -99,7 +100,7 @@ export default function registerQuestionnaire(pi: ExtensionAPI): void {
 				}
 
 				if (selection?.kind !== "option") {
-					return errorResult("错误:无效的问卷选择");
+					return errorResult(uiText("错误:无效的问卷选择", "Error: invalid questionnaire selection"));
 				}
 
 				const { option, index } = selection;
@@ -131,27 +132,27 @@ export default function registerQuestionnaire(pi: ExtensionAPI): void {
 				.filter(Boolean)
 				.slice(0, 3)
 				.join(", ");
-			let text = theme.fg("toolTitle", theme.bold(`questionnaire  ${count} 个问题`));
+			let text = theme.fg("toolTitle", theme.bold(`questionnaire  ${count} ${uiText("个问题", "questions")}`));
 			if (labels) text += theme.fg("dim", ` (${labels}${count > 3 ? "..." : ""})`);
 			return new Text(text, 0, 0);
 		},
 
 		renderResult(result, { expanded, isPartial }, theme) {
-			if (isPartial) return new Text(theme.fg("warning", "提问中..."), 0, 0);
+			if (isPartial) return new Text(theme.fg("warning", uiText("提问中...", "asking...")), 0, 0);
 
 			const details = result.details as { answers?: Answer[]; cancelled?: boolean } | undefined;
 			const answers = details?.answers ?? [];
 			const cancelled = details?.cancelled === true;
 
 			if (cancelled) {
-				let text = theme.fg("warning", `✗ 取消,已回答 ${answers.length} 个`);
+				let text = theme.fg("warning", uiText(`✗ 取消,已回答 ${answers.length} 个`, `✗ cancelled, ${answers.length} answered`));
 				if (expanded && answers.length > 0) {
 					text += "\n" + answers.map(formatAnswerLine).join("\n");
 				}
 				return new Text(text, 0, 0);
 			}
 
-			let text = theme.fg("success", `✓ 已回答 ${answers.length} 个问题`);
+			let text = theme.fg("success", uiText(`✓ 已回答 ${answers.length} 个问题`, `✓ answered ${answers.length} questions`));
 			if (expanded && answers.length > 0) {
 				text += "\n" + answers.map(formatAnswerLine).join("\n");
 			}
@@ -162,6 +163,6 @@ export default function registerQuestionnaire(pi: ExtensionAPI): void {
 
 function formatAnswerLine(answer: Answer): string {
 	return answer.wasCustom
-		? `${answer.id}: 用户填写: ${answer.label}`
-		: `${answer.id}: 用户选择: ${answer.index}. ${answer.label}`;
+		? `${answer.id}: ${uiText("用户填写", "user typed")}: ${answer.label}`
+		: `${answer.id}: ${uiText("用户选择", "user selected")}: ${answer.index}. ${answer.label}`;
 }

@@ -31,6 +31,32 @@ function registerCommands() {
 	return commands;
 }
 
+function registerWithHandlers() {
+	const commands = new Map<string, { handler: Function }>();
+	const handlers = new Map<string, Function[]>();
+	const pi = {
+		registerTool() {},
+		registerCommand(name: string, options: { handler: Function }) {
+			commands.set(name, options);
+		},
+		registerFlag() {},
+		registerShortcut() {},
+		on(eventName: string, handler: Function) {
+			const existing = handlers.get(eventName) ?? [];
+			existing.push(handler);
+			handlers.set(eventName, existing);
+		},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	registerUgkExtension(pi as any);
+	return { commands, handlers };
+}
+
 test("/ugk renders a structured status panel", async () => {
 	const previousApiKey = process.env.DEEPSEEK_API_KEY;
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -184,6 +210,69 @@ test("/ui-language switches UGK UI copy without changing agent reply language", 
 		const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
 		assert.equal(settings.uiLanguage, "en-US");
 		assert.equal("language" in settings, false);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("/ui-language clear follows the active UI language before resetting", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = tempAgentDir();
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: "en-US" }));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const commands = registerCommands();
+		const notifications: string[] = [];
+
+		await commands.get("ui-language")!.handler("clear", {
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+			},
+		});
+
+		assert.equal(notifications.at(-1), "UI language cleared; back to default: Simplified Chinese");
+		const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+		assert.equal("uiLanguage" in settings, false);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("dangerous bash gate localizes the prompt but preserves the block reason contract", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = tempAgentDir();
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: "en-US" }));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const { handlers } = registerWithHandlers();
+		const selections: Array<{ title: string; options: string[] }> = [];
+		const toolCallHandlers = handlers.get("tool_call") ?? [];
+		assert.ok(toolCallHandlers.length > 0);
+
+		let result: unknown;
+		for (const handler of toolCallHandlers) {
+			result = await handler(
+				{ toolName: "bash", input: { command: "rm -rf tmp" } },
+				{
+					hasUI: true,
+					ui: {
+						select(title: string, options: string[]) {
+							selections.push({ title, options });
+							return options[1];
+						},
+					},
+				},
+			);
+			if (result) break;
+		}
+
+		assert.match(selections[0].title, /Dangerous command/);
+		assert.deepEqual(selections[0].options, ["Yes", "No"]);
+		assert.deepEqual(result, { block: true, reason: "Blocked by user" });
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

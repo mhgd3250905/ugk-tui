@@ -524,6 +524,49 @@ test("/mcp reload treats command contexts with confirm UI as interactive even wi
 	await waitForNoProcess(/mcp-stub-server\.mjs/);
 });
 
+test("MCP confirmation prompts follow UI language", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-language-confirm-"));
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: "en-US" }));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-confirm-language-"));
+	writeProjectConfig(cwd, {
+		alpha: { command: process.execPath, args: [stubServerPath] },
+	});
+	const pi = makePi();
+	const selections: Array<{ title: string; options: string[] }> = [];
+	const ctx = {
+		cwd,
+		hasUI: true,
+		ui: {
+			async select(title: string, options: string[]) {
+				selections.push({ title, options });
+				return options[0];
+			},
+			notify() {},
+		},
+	};
+
+	try {
+		registerMcpForTest(pi);
+		await emit(pi, "session_start", { reason: "startup" }, ctx);
+		assert.match(selections[0].title, /Allow MCP server/);
+		assert.deepEqual(selections[0].options, ["Allow", "Deny"]);
+
+		const echo = pi.registeredTools.get("alpha__echo");
+		await echo.execute("call-1", { message: "hello" }, undefined, undefined, ctx);
+		assert.match(selections[1].title, /Allow MCP tool/);
+		assert.deepEqual(selections[1].options, ["Allow once", "Allow for session", "Deny"]);
+
+		await emit(pi, "session_shutdown", { reason: "quit" }, ctx);
+		await waitForNoProcess(/mcp-stub-server\.mjs/);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		fs.rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
 test("/mcp reload without confirm or select still fail-closes project scope servers", async () => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ugk-mcp-reload-no-ui-"));
 	writeProjectConfig(cwd, {

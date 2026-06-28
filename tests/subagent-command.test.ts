@@ -119,3 +119,40 @@ test("/subagent lists user and project agents", async () => {
 		assert.ok(seenOptions.some((option) => option.startsWith("project-agent ")));
 	});
 });
+
+test("/subagent menu follows UI language", async () => {
+	await withTempAgentDir(async (agentDir, cwd) => {
+		fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: "en-US" }));
+		fs.writeFileSync(
+			path.join(agentDir, "agents", "scout.md"),
+			"---\nname: scout\ndescription: Scan code\n---\nPrompt\n",
+			"utf8",
+		);
+
+		let handler: Function | undefined;
+		registerSubagentCommand({
+			registerCommand(name: string, options: { handler: Function }) {
+				if (name === "subagent") handler = options.handler;
+			},
+		} as any);
+		assert.ok(handler);
+
+		const selections: Array<{ title: string; options: string[] }> = [];
+		const notices: string[] = [];
+		await handler("", {
+			cwd,
+			modelRegistry: { getAvailable: () => [] },
+			ui: {
+				select(title: string, options: string[]) {
+					selections.push({ title, options });
+					return options[0];
+				},
+				notify: (message: string) => notices.push(message),
+			},
+		});
+
+		assert.equal(selections[0].title, "Subagents");
+		assert.match(selections[0].options[0], /inherit/);
+		assert.match(notices.at(-1) ?? "", /No models available/);
+	});
+});

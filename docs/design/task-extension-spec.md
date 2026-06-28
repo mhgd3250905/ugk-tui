@@ -391,6 +391,8 @@ verify 失败时,checker 拿到结构化失败 JSON,产出**给 worker 的反馈
 - spawn 模式天然进程隔离,worker context 不污染 main
 - driver-session 是为 Judge 实时监督设计的重底座,过重
 
+> 注:driver-session 和整个 Judge 模块已于 `ddd5520`(2026-06-27)删除,当前 /task 用 spawn 模式。本条作为设计决策记录保留,解释为何从一开始就没采用 driver-session。
+
 具体做法:`extensions/subagent.ts:73` 的 `runSingleAgent` 是完整范本,可逐行照搬。建议先把它和 `getPiInvocation` 从 `subagent.ts` export 出来,`/task` 直接 import 复用——最小改动。如果不愿动 subagent.ts,就 fork 一份到 `task-worker.ts`。
 
 **不引入新依赖**。全 Node stdlib(`child_process`/`fs`/`path`)+ 复用 UGK 现有模块。verify 用 `.mjs` 保证 ESM import。

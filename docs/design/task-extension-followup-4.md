@@ -120,7 +120,7 @@ if (!summary?.trim()) {
    - 存进 `state.summary`,**不再问用户**
    - `continue-review` action 删掉"强制要摘要"的逻辑(见改动 2)
 
-**参考**:Judge 的 `judge-driver.ts:347-415` 已经在做类似的事(维护 pathsTried、artifacts),可以借鉴数据结构和格式化方式。
+**参考**:(历史)已删除的 judge 模块的 `judge-driver.ts` 曾做过类似的事(维护 pathsTried、artifacts),数据结构可借鉴。该模块已整体删除,仅作历史参考。
 
 **验收**:
 - execute 阶段调过的 bash/write/edit 都被记录进 `state.executeProcessLog`

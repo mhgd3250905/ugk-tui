@@ -83,7 +83,7 @@ resolveChromeCdpTarget(state, { target }) = params.target ?? state.sessionTabId
 
 ## 可观测性
 
-`tab-session.ts` 的 `tabLog` 把每次 open/close/error 写一行到 `~/.pi/agent/logs/cdp-tab.log`（照 `judge-driver.ts` 的 `appendFileSync` 模式，可 `tail -f`）：
+`tab-session.ts` 的 `tabLog` 把每次 open/close/error 写一行到 `~/.pi/agent/logs/cdp-tab.log`（简单的 `appendFileSync` + 时间戳前缀,可 `tail -f`）：
 
 ```
 [2026-06-26T08:25:48.546Z] OPEN  port=9222 tab=F4E6... url=about:blank

@@ -227,7 +227,7 @@ function hasInteractiveUi(ctx: McpRuntimeContext | undefined): boolean {
 全部 T1-T5 做完后:
 
 1. **全量 mcp 测试**:`node --test tests/mcp-*.test.ts`(含新增 mcp-exit-timing)全绿
-2. **全量回归**:`npm test` 不破坏现有(注意 shared-driver-session.test.ts 固有 40s 慢,批量跑要给足 timeout)
+2. **全量回归**:`npm test` 不破坏现有
 3. **npm pack 验证**:
    - `npm pack --dry-run` → version 1.2.0
    - docs/ 不在包内

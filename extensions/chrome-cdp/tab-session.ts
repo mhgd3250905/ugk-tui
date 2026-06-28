@@ -67,7 +67,7 @@ export function makeCdpTabLifecycle(port: number, deps: CdpTabLifecycleDeps = {}
 	// 测试传 deps.log=()=>{} 禁用日志;生产不传 → tabLog(写文件,默认开)。
 	const log = deps.log ?? tabLog;
 	// ponytail: launch DI。生产走 launchChromeCdpAndWait(真起 Chrome + 轮询就绪);
-	// 测试注入 fake 避免真 spawn。解析延迟到调用点,让测试能注入、生产能 tree-shake 不用就不加载。
+	// 测试注入 fake 避免真 spawn。延迟到调用点解析,让测试能注入 fake、生产走真实 launcher。
 	const launch = deps.launch ?? ((p: number) => launchChromeCdpAndWait(p));
 	let tabId: string | undefined;
 	// ponytail: openTab = 在当前 client 上开一个 about:blank tab。抽出来让 beforeSpawn 的

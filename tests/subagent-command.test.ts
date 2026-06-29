@@ -41,8 +41,12 @@ test("/subagent writes selected model into agent frontmatter", async () => {
 			cwd,
 			modelRegistry: { getAvailable: () => [fakeModel("deepseek-v4-flash", "DeepSeek V4 Flash")] },
 			ui: {
+				// 第一步选 agent:随包 install agent 也出现在列表里,必须按名精确选 scout(不能靠 model 字符串碰运气)。
+				// 第二步选 model:选项含完整 "deepseek/deepseek-v4-flash" id。
 				select: (_title: string, options: string[]) =>
-					options.find((option) => option.includes("deepseek/")) ?? options[0],
+					options.find((option) => option.startsWith("scout ·")) ??
+					options.find((option) => option.includes("deepseek/deepseek-v4-flash")) ??
+					options[0],
 				notify: (message: string) => notices.push(message),
 			},
 		});
@@ -70,7 +74,10 @@ test("/subagent can clear an agent model override", async () => {
 			cwd,
 			modelRegistry: { getAvailable: () => [fakeModel("deepseek-v4-flash", "DeepSeek V4 Flash")] },
 			ui: {
-				select: (_title: string, options: string[]) => options[0],
+				// 第一步选 agent:随包 install agent 在列表里,按名精确选 scout。
+				// 第二步选 model:options[0] = 继承(清除 override,正是本测试要验证的)。
+				select: (_title: string, options: string[]) =>
+					options.find((option) => option.startsWith("scout ·")) ?? options[0],
 				notify: () => {},
 			},
 		});
@@ -152,7 +159,9 @@ test("/subagent menu follows UI language", async () => {
 		});
 
 		assert.equal(selections[0].title, "Subagents");
-		assert.match(selections[0].options[0], /inherit/);
+		// scout 是继承 model 的(无 frontmatter model),它一定在列表里 → 应有含 inherit 的选项。
+		// 不能断言 options[0]:随包 install agent(checker/planner/...)带 model,可能排在 scout 前面。
+		assert.ok(selections[0].options.some((o) => /inherit/i.test(o)), `expected an inherit option, got: ${JSON.stringify(selections[0].options)}`);
 		assert.match(notices.at(-1) ?? "", /No models available/);
 	});
 });

@@ -14,7 +14,7 @@ export interface UsageStats {
 
 export interface SingleResult {
 	agent: string;
-	agentSource: "user" | "project" | "unknown";
+	agentSource: "install" | "user" | "project" | "unknown";
 	task: string;
 	exitCode: number;
 	messages: Message[];

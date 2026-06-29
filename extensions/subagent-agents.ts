@@ -20,9 +20,16 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 
 export type AgentScope = "user" | "project" | "both";
+
+// 随包 agents/ 目录(scout/planner/reviewer/checker/worker)。本文件位于 extensions/,
+// dirname/.. 即仓库/包根,与 index.ts:115 的 packageRoot 同公式。
+// 让 discoverAgents 自动加载随包 agent → 出厂预装,用户无需手动 cp 到 ~/.pi/agent/agents/。
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const installAgentsDir = path.join(packageRoot, "agents");
 
 export interface AgentConfig {
 	name: string;
@@ -30,7 +37,7 @@ export interface AgentConfig {
 	tools?: string[];
 	model?: string;
 	systemPrompt: string;
-	source: "user" | "project";
+	source: "install" | "user" | "project";
 	filePath: string;
 }
 
@@ -39,7 +46,7 @@ export interface AgentDiscoveryResult {
 	projectAgentsDir: string | null;
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
+function loadAgentsFromDir(dir: string, source: AgentConfig["source"]): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
 	if (!fs.existsSync(dir)) {
@@ -119,6 +126,12 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
 
 	const agentMap = new Map<string, AgentConfig>();
+
+	// 随包 install agent 最先 set,优先级最低:被 user/project 同名 agent 覆盖。
+	// 无论 scope 如何都加载 —— install 是可信的随包默认,不触发 confirmProjectAgents(只筛 source==="project")。
+	// user 目录为空时,install 作兜底实现"装即用";非空时用户自定义覆盖随包默认。
+	const installAgents = loadAgentsFromDir(installAgentsDir, "install");
+	for (const agent of installAgents) agentMap.set(agent.name, agent);
 
 	if (scope === "both") {
 		for (const agent of userAgents) agentMap.set(agent.name, agent);

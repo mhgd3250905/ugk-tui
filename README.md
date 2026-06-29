@@ -56,24 +56,14 @@ ugk 在 Windows 上默认找 bash,但**只查 `C:\Program Files\Git`** 两个标
 
 ---
 
-## 🤖 安装 subagent 预设 agent(可选,但强烈推荐)
+## 🤖 subagent 预设 agent(随包自动加载)
 
-subagent 工具随包自动加载,但 4 个预设 agent(`scout`/`planner`/`reviewer`/`worker`)
-需要复制到用户目录才生效。**不装也能用 subagent 工具,只是没有现成的 agent 可调。**
+subagent 工具和 5 个预设 agent(`scout`/`planner`/`reviewer`/`checker`/`worker`)**都随包自动加载,开箱即用,无需手动复制。**
 
-**Windows(cmd / PowerShell)**:
-```cmd
-mkdir "%USERPROFILE%\.pi\agent\agents" 2>nul
-xcopy /Y agents\*.md "%USERPROFILE%\.pi\agent\agents\"
-```
+进 ugk 后输入 `@scout 列出当前目录`,能调起 scout 就说明可用了。可用 `/subagent` 查看所有 subagent,并给单个 subagent 设置模型。
 
-**Git Bash**:
-```bash
-mkdir -p ~/.pi/agent/agents
-cp agents/*.md ~/.pi/agent/agents/
-```
+**自定义/覆盖预设 agent**:把改后的 `.md` 放到 `~/.pi/agent/agents/`,同名会覆盖随包默认(`user` 优先级高于随包 `install`)。
 
-验证:进 ugk 后输入 `@scout 列出当前目录`,能调起 scout 就说明装好了。可用 `/subagent` 查看所有 subagent,并给单个 subagent 设置模型。
 详见 `skills/subagent-guide/SKILL.md`。
 
 ---
@@ -86,7 +76,7 @@ cp agents/*.md ~/.pi/agent/agents/
 | --- | --- |
 | `/ugk` | 弹出状态(列全部能力) |
 | `帮我看看当前目录结构` | agent 正常读取并总结项目 |
-| `@scout 列出项目目录` | 调 `subagent` 委派 scout(需先装预设 agent) |
+| `@scout 列出项目目录` | 调 `subagent` 委派 scout(随包预装,直接可用) |
 | `/subagent` | 列出所有 subagent,选择后设置该 subagent 的模型 |
 | `/plan` | 切换只读探索模式 |
 | `/mcp status` | 查看已配置/已连接的 MCP server |
@@ -386,7 +376,7 @@ ugk-core/
 │   └── ui-*.ts               # UI 美化(品牌层含 header/footer/title+spinner、状态条)
 ├── cron/
 │   └── service.ts            # 常驻定时服务(node-cron + HTTP,npm run cron:start)
-├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)
+├── agents/                   # 预设 subagent 定义(随包自动加载;同名 user 副本覆盖)
 │   ├── scout.md planner.md reviewer.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
 ├── themes/                   # ugk-geek(默认)+ 16 个社区主题(atom/catppuccin/dracula/gruvbox/nord/solarized),见 NOTICE.md
@@ -405,7 +395,7 @@ A: 重开一个 cmd/PowerShell 窗口(让 PATH 刷新)。还不行就检查 `npm
 A: 见上面「Windows 用户:修复 bash 工具」,配 `shellPath`。
 
 **Q: `@scout` 没反应 / 报 "Unknown agent"?**
-A: 没装预设 agent。跑上面的「安装 subagent 预设 agent」复制 .md 文件。
+A: 预设 agent 随包自动加载,正常不应出现。若出现,确认 ugk 是最新版(老版本需手动复制);或检查 `~/.pi/agent/agents/` 是否放了空的/损坏的 `.md` 占用了 `scout` 这个名字。
 
 
 **Q: cron 工具报"服务未启动"?**

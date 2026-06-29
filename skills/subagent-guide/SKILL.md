@@ -1,6 +1,6 @@
 ---
 name: subagent-guide
-description: 子代理(subagent)委派指南。把任务交给隔离 context 的专用 agent 处理,主对话只收摘要。涵盖 @mention 手动触发、single/parallel/chain 三种模式、自定义 agent、安装预设 agent。当用户提到委派、subagent、子代理、并行调查、@scout、@reviewer、隔离 context、不改主对话，或明确要求用 reviewer/隔离上下文做代码审查时使用本 skill；普通代码审查不必触发。
+description: 子代理(subagent)委派指南。把任务交给隔离 context 的专用 agent 处理,主对话只收摘要。涵盖 @mention 手动触发、single/parallel/chain 三种模式、自定义 agent、随包预设 agent。当用户提到委派、subagent、子代理、并行调查、@scout、@reviewer、隔离 context、不改主对话，或明确要求用 reviewer/隔离上下文做代码审查时使用本 skill；普通代码审查不必触发。
 ---
 
 # 子代理(subagent)委派指南
@@ -22,22 +22,15 @@ subagent = 把一个子任务交给一个**隔离 context window** 的专用 age
 
 ---
 
-## ⚠️ 第一步:安装预设 agent(新环境必做)
+## ✅ 预设 agent(随包自动加载)
 
-预设 agent 的 `.md` 文件在**项目仓库的 `agents/` 目录**,但 pi 只从 `~/.pi/agent/agents/` 加载。需要复制过去:
+5 个预设 agent(`scout`/`planner`/`reviewer`/`checker`/`worker`)**随包自动加载,开箱即用,无需手动复制**。
 
-```bash
-# Windows (Git Bash)
-mkdir -p ~/.pi/agent/agents
-cp /e/AII/ugk-core/agents/*.md ~/.pi/agent/agents/
+- ugk 启动时 `discoverAgents` 会读随包 `agents/` 目录(install 级),作为兜底默认。
+- 若 `~/.pi/agent/agents/` 有同名 `.md`(user 级),会覆盖随包默认 —— 用这个机制做自定义。
+- 优先级:`install`(随包,最低) < `user`(`~/.pi/agent/agents/`) < `project`(项目 `.pi/agents/`,最高,且需交互确认)。
 
-# 验证
-ls ~/.pi/agent/agents/
-# 应看到 scout.md planner.md reviewer.md worker.md
-```
-
-> 复制后重启 ugk 生效。以后改了仓库里的 .md,再 cp 一次即可。
-> 也可直接编辑 `~/.pi/agent/agents/` 里的副本——但那样不进版本管理,不推荐。
+**自定义预设 agent**:把改后的 `.md` 放到 `~/.pi/agent/agents/`,同名即覆盖随包默认。改完重启 ugk 生效。
 
 ---
 
@@ -132,7 +125,7 @@ model: deepseek/deepseek-v4-flash
 2. **只回摘要**:subagent 默认只返回最终输出(最后一条 assistant 消息),并行任务上限 50KB。这是设计如此,不是 bug。
 3. **隔离即清洁**:subagent 的工具调用不会进主对话 context——这正是它的价值。
 4. **运行中只看短尾**:运行中的折叠视图只显示最近几条日志;展开或完成后再看完整输出。
-5. **@mention 名字要对**:必须匹配已安装的 agent 名(见 `~/.pi/agent/agents/`),否则 @mention 不生效(会当普通文本)。
-6. **未安装提示**:调 subagent 报 "Unknown agent" 或可用列表为空 → 引导用户跑上面的「安装预设 agent」步骤。
+5. **@mention 名字要对**:必须匹配已加载的 agent 名(随包 5 个 + `~/.pi/agent/agents/` 自定义),否则 @mention 不生效(会当普通文本)。用 `/subagent` 查看当前全部可用 agent。
+6. **"Unknown agent" 排查**:随包 agent 应自动可用;若报 "Unknown agent" 或可用列表为空,检查 ugk 是否最新版(老版本需手动复制),或 `~/.pi/agent/agents/` 是否放了损坏 `.md`。
 7. **单层**:subagent 不能再开 subagent(业界一致,Claude Code 也是单层)。
 8. **普通 review 不强行委派**:只有用户要求 `@reviewer`、隔离 context、并行审查或不污染主对话时,才用本 skill 处理代码审查。

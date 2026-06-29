@@ -456,7 +456,7 @@ test("end-to-end registered MCP tool calls the stub server", async () => {
 	await waitForNoProcess(/mcp-stub-server\.mjs/);
 });
 
-test("root extension wires MCP command, hooks, and doctor check", async () => {
+test("root extension wires MCP command, hooks, and guided doctor entrypoint", async () => {
 	const pi = {
 		...makePi(),
 		registerFlag() {},
@@ -484,7 +484,9 @@ test("root extension wires MCP command, hooks, and doctor check", async () => {
 			},
 		},
 	});
+	assert.match(notifications.join("\n"), /UGK Environment Doctor/);
 	assert.match(notifications.join("\n"), /MCP/);
+	assert.doesNotMatch(notifications.join("\n"), /configured: \d+/);
 });
 
 test("/mcp reload treats command contexts with confirm UI as interactive even without hasUI", async () => {

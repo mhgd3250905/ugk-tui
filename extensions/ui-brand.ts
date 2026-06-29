@@ -128,7 +128,7 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 			.replace("◆ Recent Updates", theme.bold(theme.fg("success", "◆ Recent Updates")))
 			.replace("/plan", theme.fg("success", "/plan"))
 			.replace("/implement", theme.fg("success", "/implement"))
-			.replace("/check-env", theme.fg("success", "/check-env"))
+			.replace("/doctor", theme.fg("success", "/doctor"))
 			.replace("@agent", theme.fg("success", "@agent"));
 		return colorStatefulText(colored, theme);
 	}
@@ -139,7 +139,7 @@ function colorHeaderLine(line: string, index: number, theme: any): string {
 		.replace("Model", theme.fg("dim", "Model"))
 		.replace("/plan", theme.fg("success", "/plan"))
 		.replace("/implement", theme.fg("success", "/implement"))
-		.replace("/check-env", theme.fg("success", "/check-env"))
+		.replace("/doctor", theme.fg("success", "/doctor"))
 		.replace("@agent", theme.fg("success", "@agent"));
 }
 

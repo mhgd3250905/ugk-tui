@@ -135,12 +135,12 @@ after restoring the server config.
 
 ## Doctor
 
-`/doctor` includes an MCP check. It is read-only:
+`/doctor` now points users to guided environment troubleshooting. For MCP, use this skill plus `/mcp status`:
 
-- validates config
-- reports configured servers by scope
-- reads the current registry status
-- never spawns MCP server processes
+- validate config
+- report configured servers by scope
+- read the current registry status
+- avoid spawning untrusted project/local servers without approval
 
 ## Troubleshooting
 

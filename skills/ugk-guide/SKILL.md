@@ -19,8 +19,6 @@ description: UGK project context guide. Use for ugk-core repository conventions,
 | `run_task` 编排 | `docs/design/subtask-extension-spec.md` |
 | MCP 配置/权限/排障 | `skills/mcp-guide/SKILL.md` |
 | Chrome CDP 本地浏览器控制 | `skills/chrome-cdp-guide/SKILL.md` |
-| 安卓投屏 | `skills/scrcpy-guide/SKILL.md` |
-| adb 调试 | `skills/adb-guide/SKILL.md` |
 
 ## 工作原则
 

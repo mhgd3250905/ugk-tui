@@ -158,8 +158,7 @@ test("checkChromeCdp reports reachable and unreachable status", async () => {
 	assert.deepEqual(offline.nextSteps, ["/cdp launch", "/cdp status"]);
 });
 
-test("createCoreDoctorChecks excludes Android checks", () => {
+test("createCoreDoctorChecks keeps the core check list fixed", () => {
 	const ids = createCoreDoctorChecks().map((check) => check.id);
 	assert.deepEqual(ids, ["shell.bash", "api.deepseek", "chrome.binary", "chrome.cdp"]);
-	assert.equal(ids.some((id) => /adb|scrcpy|android/i.test(id)), false);
 });

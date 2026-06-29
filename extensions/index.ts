@@ -16,8 +16,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import registerBuiltinToolRenderers from "./builtin-tool-render.ts";
-import { checkEnv } from "./device-env.ts";
-import { scrcpyTool } from "./scrcpy-tool.ts";
 import registerSubagent from "./subagent.ts";
 import registerSubagentCommand from "./subagent-command.ts";
 import { discoverAgents } from "./subagent-agents.ts";
@@ -29,8 +27,7 @@ import registerTask from "./task/task.ts";
 import registerQuestionnaire from "./questionnaire.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
-import { createCoreDoctorChecks } from "./doctor/checks.ts";
-import registerMcp, { createMcpDoctorCheck } from "./mcp/index.ts";
+import registerMcp from "./mcp/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { renderTerminalTable } from "./terminal-table.ts";
@@ -100,9 +97,9 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const apiIcon = apiConfigured ? "✅" : "❌";
 	const apiSummary = formatDeepSeekSummary(deepseekStatus, language);
 	const rows = [
-		[uiText("🧰 工具", "🧰 Tools", language), "✅ scrcpy  ✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ mcp"],
+		[uiText("🧰 工具", "🧰 Tools", language), "✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ mcp"],
 		[uiText("🤖 代理", "🤖 Agents", language), uiText("✅ @agent 提及  ✅ /implement 流水线  ✅ 隔离摘要", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries", language)],
-		[uiText("⌨️ 命令", "⌨️ Commands", language), "/ugk  /doctor  /check-env  /update  /plan  /cdp  /mcp  /ugk-ui  /ui-language  /ugk-autopilot  /language"],
+		[uiText("⌨️ 命令", "⌨️ Commands", language), "/ugk  /doctor  /update  /plan  /cdp  /mcp  /ugk-ui  /ui-language  /ugk-autopilot  /language"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		[uiText("🛡️ 防护", "🛡️ Guardrails", language), uiText("危险 bash 门禁已启用", "Dangerous bash gate enabled", language)],
 	] as const;
@@ -120,8 +117,6 @@ export default function (pi: ExtensionAPI) {
 	// 0) 内置工具精简渲染(必须最先,覆盖默认 bash/edit)
 	registerBuiltinToolRenderers(pi);
 
-	// 1) 自定义工具
-	pi.registerTool(scrcpyTool);
 
 	// 1.1) subagent 工具(从官方 subagent 示例搬运 + Windows spawn 适配)
 	registerSubagent(pi);
@@ -154,10 +149,10 @@ export default function (pi: ExtensionAPI) {
 	registerChromeCdp(pi);
 
 	// 1.3c.1) mcp:外部 MCP stdio tools 集成(/mcp + session lifecycle)
-	const mcpState = registerMcp(pi, { packageRoot });
+	registerMcp(pi, { packageRoot });
 
-	// 1.3c.2) doctor:只读核心能力体检(bash / api / chrome / mcp)
-	registerDoctor(pi, { checks: [...createCoreDoctorChecks(), createMcpDoctorCheck({ registry: mcpState.registry, packageRoot })] });
+	// 1.3c.2) doctor: legacy entrypoint for guided environment troubleshooting skill.
+	registerDoctor(pi);
 
 	// 1.3d) UGK 自管更新:只暴露 UGK 更新,不暴露 pi update
 	registerUgkUpdate(pi);
@@ -347,13 +342,6 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// 2.1) /check-env:一键自检 adb / scrcpy / 设备连接,新环境首次用投屏前跑这个
-	pi.registerCommand("check-env", {
-		description: "自检 adb/scrcpy/设备连接,缺失项给安装命令",
-		handler: async (_args, ctx) => {
-			ctx.ui.notify(checkEnv(), "info");
-		},
-	});
 
 	// 3) 权限门(照搬 permission-gate.ts 模式)
 	//    拦截危险 bash 命令,交互模式弹确认,非交互模式直接拦截(fail-safe)

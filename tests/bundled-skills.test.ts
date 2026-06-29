@@ -13,6 +13,15 @@ const mcpGuidePath = new URL("../skills/mcp-guide/SKILL.md", import.meta.url);
 const mcpConfigureScriptPath = new URL("../skills/mcp-guide/scripts/configure_mcp.py", import.meta.url);
 const bashGuidePath = new URL("../skills/bash-guide/SKILL.md", import.meta.url);
 const chromeCdpGuidePath = new URL("../skills/chrome-cdp-guide/SKILL.md", import.meta.url);
+const environmentDoctorPath = new URL("../skills/ugk-environment-doctor/SKILL.md", import.meta.url);
+const environmentDoctorRefs = [
+	"windows-shell.md",
+	"chrome-cdp.md",
+	"mcp.md",
+	"node-npm.md",
+	"api-models.md",
+].map((name) => new URL(`../skills/ugk-environment-doctor/references/${name}`, import.meta.url));
+const environmentDoctorShellScript = new URL("../skills/ugk-environment-doctor/scripts/set_shell_path.mjs", import.meta.url);
 
 test("bundles Anthropic skill creator as a preinstalled skill", () => {
 	const skill = fs.readFileSync(skillCreatorPath, "utf8");
@@ -40,9 +49,42 @@ test("bundles Bash guide as a preinstalled skill", () => {
 
 	assert.match(skill, /^---\s*\nname: bash-guide/m);
 	assert.match(skill, /settings\.json.*shellPath/i);
-	assert.match(skill, /\/doctor/);
+	assert.match(skill, /ugk-environment-doctor/);
 	assert.match(skill, /subagent/i);
 	assert.match(skill, /不要.*反复.*which bash|avoid repeated .*which bash/i);
+});
+
+test("bundles guided environment doctor skill", () => {
+	const skill = fs.readFileSync(environmentDoctorPath, "utf8");
+	const shellRef = fs.readFileSync(environmentDoctorRefs[0], "utf8");
+	const cdpRef = fs.readFileSync(environmentDoctorRefs[1], "utf8");
+	const mcpRef = fs.readFileSync(environmentDoctorRefs[2], "utf8");
+	const nodeRef = fs.readFileSync(environmentDoctorRefs[3], "utf8");
+	const apiRef = fs.readFileSync(environmentDoctorRefs[4], "utf8");
+	const { frontmatter } = parseFrontmatter(skill);
+
+	assert.equal(frontmatter.name, "ugk-environment-doctor");
+	assert.match(frontmatter.description as string, /environment setup and troubleshooting/i);
+	assert.match(frontmatter.description as string, /doctor|bash unavailable|Chrome CDP|MCP|Node\/npm|API\/model/i);
+	assert.match(skill, /one failing area at a time/i);
+	assert.match(skill, /API and model switching are guidance, not required health checks/i);
+	assert.match(skill, /If the user provides a `bash\.exe` path/);
+	assert.match(skill, /When the user provides a path, port, JSON config, environment variable name, or other concrete setting/);
+	assert.match(skill, /verify it and apply the UGK-side config yourself/);
+	assert.match(skill, /set_shell_path\.mjs/);
+	assert.match(shellRef, /set_shell_path\.mjs/);
+	assert.match(shellRef, /do not ask the user to edit JSON/i);
+	assert.match(shellRef, /Never tell a beginner user to manually edit `settings\.json`/i);
+	assert.match(cdpRef, /\/cdp port <port>/);
+	assert.match(cdpRef, /Do not ask the user to edit settings manually/i);
+	assert.match(mcpRef, /configure_mcp\.py/);
+	assert.match(mcpRef, /instead of asking the user to paste JSON into a config file manually/i);
+	assert.match(nodeRef, /Do not ask for manual PATH changes until the binaries have been verified/i);
+	assert.match(apiRef, /Apply supported UGK-side config yourself/i);
+	assert.equal(fs.existsSync(environmentDoctorShellScript), true);
+	for (const ref of environmentDoctorRefs) {
+		assert.equal(fs.existsSync(ref), true);
+	}
 });
 
 test("bundles Chrome CDP guide with broad tool-first trigger guidance", () => {

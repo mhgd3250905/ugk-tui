@@ -226,7 +226,7 @@ function buildUgkWelcomePanelLines(options: UgkHeaderOptions): string[] {
 		uiText("◆ 入门提示", "◆ Getting Started", language),
 		uiText("› /plan      修改前先拟计划", "› /plan      Plan before editing", language),
 		uiText("› /implement 运行引导流程", "› /implement Run guided flow", language),
-		uiText("› /doctor 检查本地工具", "› /doctor Check local tools", language),
+		uiText("› /doctor 环境配置引导", "› /doctor Environment help", language),
 		"",
 		uiText("◆ 最近更新", "◆ Recent Updates", language),
 		uiText("› task 显示 worker 进度", "› task shows worker progress", language),

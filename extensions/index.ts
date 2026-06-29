@@ -27,8 +27,7 @@ import registerTask from "./task/task.ts";
 import registerQuestionnaire from "./questionnaire.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerDoctor from "./doctor/index.ts";
-import { createCoreDoctorChecks } from "./doctor/checks.ts";
-import registerMcp, { createMcpDoctorCheck } from "./mcp/index.ts";
+import registerMcp from "./mcp/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { renderTerminalTable } from "./terminal-table.ts";
@@ -150,10 +149,10 @@ export default function (pi: ExtensionAPI) {
 	registerChromeCdp(pi);
 
 	// 1.3c.1) mcp:外部 MCP stdio tools 集成(/mcp + session lifecycle)
-	const mcpState = registerMcp(pi, { packageRoot });
+	registerMcp(pi, { packageRoot });
 
-	// 1.3c.2) doctor:只读核心能力体检(bash / api / chrome / mcp)
-	registerDoctor(pi, { checks: [...createCoreDoctorChecks(), createMcpDoctorCheck({ registry: mcpState.registry, packageRoot })] });
+	// 1.3c.2) doctor: legacy entrypoint for guided environment troubleshooting skill.
+	registerDoctor(pi);
 
 	// 1.3d) UGK 自管更新:只暴露 UGK 更新,不暴露 pi update
 	registerUgkUpdate(pi);

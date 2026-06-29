@@ -32,10 +32,10 @@ test("registerDoctor registers /doctor command", () => {
 	const { pi, commands } = makePi();
 	registerDoctor(pi as any, { checks: [] });
 	assert.ok(commands.has("doctor"));
-	assert.match(commands.get("doctor").description, /core UGK/);
+	assert.match(commands.get("doctor").description, /environment/i);
 });
 
-test("/doctor reports check results without throwing", async () => {
+test("/doctor points users to the guided environment skill", async () => {
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx();
 	registerDoctor(pi as any, {
@@ -62,15 +62,17 @@ test("/doctor reports check results without throwing", async () => {
 	await assert.doesNotReject(() => commands.get("doctor").handler("", ctx));
 
 	assert.equal(notifications.length, 1);
-	assert.match(notifications[0], /UGK Doctor/);
-	assert.match(notifications[0], /│\s*✅\s*│\s*Shell/);
-	assert.match(notifications[0], /│\s*❌\s*│\s*API/);
-	assert.match(notifications[0], /Set DEEPSEEK_API_KEY or run \/login\./);
+	assert.match(notifications[0], /UGK Environment Doctor/);
+	assert.match(notifications[0], /ask the agent/i);
+	assert.match(notifications[0], /bash unavailable/i);
+	assert.match(notifications[0], /Chrome CDP/i);
+	assert.doesNotMatch(notifications[0], /DeepSeek missing/);
 });
 
-test("/doctor converts thrown checks into failure rows", async () => {
+test("/doctor migration notice does not run legacy checks", async () => {
 	const { pi, commands } = makePi();
 	const { ctx, notifications } = makeCtx();
+	let ran = false;
 	registerDoctor(pi as any, {
 		checks: [
 			{
@@ -78,6 +80,7 @@ test("/doctor converts thrown checks into failure rows", async () => {
 				title: "Chrome",
 				category: "chrome",
 				run: async () => {
+					ran = true;
 					throw new Error("boom");
 				},
 			},
@@ -86,5 +89,7 @@ test("/doctor converts thrown checks into failure rows", async () => {
 
 	await commands.get("doctor").handler("", ctx);
 
-	assert.match(notifications[0], /│\s*❌\s*│\s*Chrome\s*│\s*chrome\.cdp check failed: boom/);
+	assert.equal(ran, false);
+	assert.match(notifications[0], /UGK Environment Doctor/);
+	assert.doesNotMatch(notifications[0], /boom/);
 });

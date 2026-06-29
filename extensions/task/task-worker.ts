@@ -4,7 +4,7 @@
 import { peekWorkerLifecycleFactory } from "../shared/worker-lifecycle.ts";
 import { discoverAgents } from "../subagent-agents.ts";
 import { getFinalOutput, isFailedResult, type SingleResult, type UsageStats } from "../subagent-runtime.ts";
-import { runSingleAgent } from "../subagent.ts";
+import { runSingleAgent, type OnUpdateCallback } from "../subagent.ts";
 
 export interface TaskWorkerInput {
 	skill: string;
@@ -63,6 +63,49 @@ export function buildTaskWorkerPrompt(input: TaskWorkerInput, taskDir?: string):
 	].filter(Boolean).join("\n");
 }
 
+// ponytail: worker 干活(连 CDP/抓页面/写文件)主要靠工具调用,但旧 onUpdate 只取 LLM 文本流,
+// worker 思考或调工具时几乎不打字 → 运行中日志稀疏,第一轮失败常看不到原因。
+// subagent 的 emitUpdate 已把 messages(含 ToolCall/toolResult)塞进 partial.details.results[0],
+// 数据本来就有,这里把它提取出来转成进度行,塞进现有 progress 管道(下游 formatProgressLines 做去重/截断)。
+const PROGRESS_ARG_KEYS = ["action", "command", "url", "path", "file_path", "query", "target", "method", "file", "name"];
+const PATH_ARG_KEYS = new Set(["url", "path", "file_path", "file"]);
+
+function shortenPath(value: string): string {
+	// 长 run 路径(如 .tasks/runs/task-x-search-.../output/x.json)占满 widget,取 basename 更可读。
+	return value.length > 40 ? value.slice(Math.max(0, value.replace(/\\/g, "/").lastIndexOf("/") + 1)) : value;
+}
+
+function pickToolArgSummary(args: Record<string, unknown>): string {
+	for (const key of PROGRESS_ARG_KEYS) {
+		const value = args?.[key];
+		if (typeof value === "string" && value.trim()) {
+			return PATH_ARG_KEYS.has(key) ? shortenPath(value.trim()) : value.trim();
+		}
+	}
+	return "";
+}
+
+// 把单条 subagent message 转成进度行。TextContent/ThinkingContent 不处理(文本由旧路径覆盖,thinking 不展示)。
+function formatMessageProgress(message: SingleResult["messages"][number]): string[] {
+	const lines: string[] = [];
+	if (message.role === "assistant") {
+		for (const part of message.content) {
+			if (part.type === "toolCall") {
+				const summary = pickToolArgSummary(part.arguments);
+				lines.push(summary ? `🔧 ${part.name} ${summary}` : `🔧 ${part.name}`);
+			}
+		}
+		return lines;
+	}
+	if (message.role === "toolResult") {
+		const firstText = message.content.find((part) => part.type === "text")?.text ?? "";
+		const head = firstText.split(/\r?\n/).find((line) => line.trim()) ?? "";
+		const detail = head.length > 80 ? `${head.slice(0, 77)}...` : head;
+		lines.push(detail ? `${message.isError ? "✖" : "✔"} ${message.toolName}: ${detail}` : `${message.isError ? "✖" : "✔"} ${message.toolName}`);
+	}
+	return lines;
+}
+
 export async function dispatchWorker(
 	input: TaskWorkerInput,
 	opts: { cwd: string; signal?: AbortSignal; onUpdate?: (text: string) => void; env?: Record<string, string | undefined> },
@@ -87,10 +130,24 @@ export async function dispatchWorker(
 			undefined,
 			opts.signal,
 			opts.onUpdate
-				? (partial) => {
-					const text = partial.content.find((part) => part.type === "text")?.text;
-					if (typeof text === "string") opts.onUpdate?.(text);
-				}
+				? (() => {
+					// 增量索引:每次 onUpdate 只发上次之后新增的 message,避免重发全部历史。
+					// 下游 appendUniqueProgressLines 仍兜底去重。
+					let lastSeenIndex = 0;
+					return (partial: Parameters<OnUpdateCallback>[0]) => {
+						const result = partial.details?.results?.[0];
+						// details/messages 缺失(部分模拟场景)→ fallback 到旧文本路径。
+						if (!result?.messages) {
+							const text = partial.content.find((part) => part.type === "text")?.text;
+							if (typeof text === "string") opts.onUpdate?.(text);
+							return;
+						}
+						for (let i = lastSeenIndex; i < result.messages.length; i += 1) {
+							for (const line of formatMessageProgress(result.messages[i])) opts.onUpdate?.(line);
+						}
+						lastSeenIndex = result.messages.length;
+					};
+				})()
 				: undefined,
 			(results) => ({
 				mode: "single",

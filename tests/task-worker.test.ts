@@ -189,3 +189,68 @@ test("worker agent inherits all tools and forbids subagent in prompt", () => {
 	// 复制提示仍在
 	assert.match(source, /~\/\.pi\/agent\/agents\/worker\.md/);
 });
+
+// ponytail: 进度自证 —— onUpdate 必须把 worker 的工具调用(ToolCall/toolResult)转成进度行。
+// 这是"第一轮失败想看具体原因"的关键:旧实现只取 LLM 文本流,worker 调 chrome_cdp/bash 时全程静默。
+test("dispatchWorker streams tool-call and tool-result as progress lines via onUpdate", async () => {
+	const updates: string[] = [];
+	// args[7] = onUpdate。模拟 subagent 的 emitUpdate 发来的 partial:
+	// 第一次 onUpdate: assistant message 含一个 ToolCall(chrome_cdp navigate)
+	// 第二次 onUpdate: toolResult message(成功)
+	// 第三次 onUpdate: toolResult message(失败)
+	// 增量索引应让每条 message 只发一次,不重复。
+	const runnerCalls: any[] = [];
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		runnerCalls.push(args);
+		const onUpdate = args[7];
+		const makeDetails = args[8];
+		const mkPartial = (messages: any[]) => ({
+			content: [{ type: "text", text: "running" }],
+			details: makeDetails([{ agent: "worker", agentSource: "user", task: "t", exitCode: 0, messages, stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 } }]),
+		});
+		if (onUpdate) {
+			onUpdate(mkPartial([{
+				role: "assistant",
+				content: [{ type: "toolCall", id: "c1", name: "chrome_cdp", arguments: { action: "navigate", url: "https://example.com" } }],
+				usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "toolUse", api: "anthropic-messages", provider: "anthropic", timestamp: 0,
+			}]));
+			onUpdate(mkPartial([
+				{ role: "assistant", content: [{ type: "toolCall", id: "c1", name: "chrome_cdp", arguments: { action: "navigate", url: "https://example.com" } }], usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "toolUse", api: "anthropic-messages", provider: "anthropic", timestamp: 0 },
+				{ role: "toolResult", toolCallId: "c1", toolName: "chrome_cdp", content: [{ type: "text", text: "navigated ok" }], isError: false, timestamp: 0 },
+			]));
+			// 第三条:messages 累积(真实 subagent emitUpdate 发的是完整历史),新增 bash 失败 + write 长路径
+			const longPath = "E:/AII/TUI/TUI-0627/.tasks/runs/task-x-search-1782696234776/output/x_search_results.json";
+			onUpdate(mkPartial([
+				{ role: "assistant", content: [{ type: "toolCall", id: "c1", name: "chrome_cdp", arguments: { action: "navigate", url: "https://example.com" } }], usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "toolUse", api: "anthropic-messages", provider: "anthropic", timestamp: 0 },
+				{ role: "toolResult", toolCallId: "c1", toolName: "chrome_cdp", content: [{ type: "text", text: "navigated ok" }], isError: false, timestamp: 0 },
+				{ role: "toolResult", toolCallId: "c2", toolName: "bash", content: [{ type: "text", text: "command not found\nline2" }], isError: true, timestamp: 0 },
+				{ role: "assistant", content: [{ type: "toolCall", id: "c3", name: "write", arguments: { path: longPath } }], usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "toolUse", api: "anthropic-messages", provider: "anthropic", timestamp: 0 },
+			]));
+		}
+		return { agent: "worker", agentSource: "user", task: "t", exitCode: 0, messages: [{ role: "assistant", content: [{ type: "text", text: "done" }], usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "stop", api: "anthropic-messages", provider: "anthropic", timestamp: 0 }], stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 } } as any;
+	});
+	try {
+		const progress: string[] = [];
+		await dispatchWorker({
+			skill: "# Skill",
+			contract: {},
+			runtimeInput: {},
+			outputDir: "E:/out",
+		}, { cwd: process.cwd(), onUpdate: (text) => progress.push(text) });
+
+		// 工具调用行:含 name + 知名参数(url)摘要
+		assert.ok(progress.some((line) => /🔧 chrome_cdp navigate/.test(line)), `expected chrome_cdp navigate line, got: ${JSON.stringify(progress)}`);
+		// 工具结果行(成功):✔ + toolName + text 首行
+		assert.ok(progress.some((line) => /✔ chrome_cdp.*navigated ok/.test(line)), `expected success tool-result line, got: ${JSON.stringify(progress)}`);
+		// 工具结果行(失败):✖ + toolName + 错误首行
+		assert.ok(progress.some((line) => /✖ bash.*command not found/.test(line)), `expected error tool-result line, got: ${JSON.stringify(progress)}`);
+		// 增量:同一条 navigate ToolCall 出现在两次 partial,不应重复推(下游也兜底去重,这里再加一层保险)
+		const navCount = progress.filter((line) => /🔧 chrome_cdp navigate/.test(line)).length;
+		assert.equal(navCount, 1, `tool-call line should be emitted once via incremental index, got ${navCount}`);
+		// 长路径短化成 basename(>40 字符的 path/url/file),提升 widget 可读性
+		assert.ok(progress.some((line) => /🔧 write x_search_results\.json/.test(line)), `expected shortened write path, got: ${JSON.stringify(progress)}`);
+		assert.ok(!progress.some((line) => /🔧 write E:\/AII\/TUI/.test(line)), `full long path should be shortened, got: ${JSON.stringify(progress)}`);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+	}
+});

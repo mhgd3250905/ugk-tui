@@ -603,6 +603,10 @@ test("run_task parallel returns per-task output directories and aggregate count"
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async () => workerOk("done"));
 	setTaskDispatcherForTests(async (_ctx, _skill, _contract, rawInput) => ({ text: rawInput }));
+	// ponytail: 必须也 mock checker。否则 bad-task verify 失败后,runTaskWithRetry 会真实
+	// spawn checker 子进程(runSingleAgent),在全量套件(无 API key/网络)下挂起数分钟。
+	// 返回 abort 让重试内核立即停止,与"1/2 succeeded"断言一致。
+	setTaskCheckerRunnerForTests(checkerAbortMock());
 	try {
 		await saveFixtureTask(cwd, "ok-task");
 		await saveFixtureTask(cwd, "bad-task", "console.log(JSON.stringify([{assertion:'ok',expected:'true',actual:'false'}])); process.exit(1);\n");
@@ -622,6 +626,7 @@ test("run_task parallel returns per-task output directories and aggregate count"
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
+		setTaskCheckerRunnerForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });

@@ -1282,6 +1282,10 @@ async function handleTaskRun(
 	const outputDir = resolveRunOutputDir(loaded.contract, path.join(runDir, "output"));
 	await mkdir(runDir, { recursive: true });
 	await mkdir(outputDir, { recursive: true });
+	// ponytail: 对称缺口修复 —— headless 路径(executeSubtask,见 1124)在 dispatcher 调用前已显示
+	// "正在解析输入...",交互式路径(/task run)漏了这一步,导致回车后到 worker spawn 之间
+	// 有数秒~十几秒静默期(dispatcher 是一次阻塞 LLM 调用)。此处补齐,消除空白 ╌╌ 体验。
+	setTaskRunWidget(ctx, [`⏳ taskbook "${finalName}" 准备中...`, "正在解析输入..."]);
 	const runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, finalRawInput ?? "");
 	const maxRetry = 3;
 	const abortController = new AbortController();

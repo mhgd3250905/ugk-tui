@@ -24,7 +24,7 @@ test("checkBash persists resolved Windows Git Bash path for child agent sessions
 	const result = await checkBash({
 		platform: "win32",
 		agentDir,
-		resolveBash: () => ({ command: "D:\\Git\\bin\\bash.exe", source: "common Git Bash location" }),
+		resolveBash: () => ({ command: "C:\\Program Files\\Git\\bin\\bash.exe", source: "common Git Bash location" }),
 		exec: async () => ({ stdout: "ok\n" }),
 		readFile: () => JSON.stringify({ model: "deepseek-v4-pro" }),
 		writeFile: (filePath: string, content: string) => writes.set(filePath, content),
@@ -38,7 +38,7 @@ test("checkBash persists resolved Windows Git Bash path for child agent sessions
 	const settings = JSON.parse(writes.get(settingsPath) ?? "{}");
 	assert.deepEqual(settings, {
 		model: "deepseek-v4-pro",
-		shellPath: "D:\\Git\\bin\\bash.exe",
+		shellPath: "C:\\Program Files\\Git\\bin\\bash.exe",
 	});
 });
 
@@ -55,7 +55,7 @@ test("checkBash fails when bash cannot execute", async () => {
 });
 
 test("resolveBashCommand prefers Windows shellPath from settings", () => {
-	const shellPath = "E:\\Application\\Git\\usr\\bin\\bash.exe";
+	const shellPath = "C:\\Program Files\\Git\\usr\\bin\\bash.exe";
 	const result = resolveBashCommand({
 		platform: "win32",
 		agentDir: "C:\\Users\\tester\\.pi\\agent",
@@ -67,7 +67,7 @@ test("resolveBashCommand prefers Windows shellPath from settings", () => {
 });
 
 test("resolveBashCommand falls back to common Windows Git Bash locations", () => {
-	const shellPath = "D:\\Git\\bin\\bash.exe";
+	const shellPath = "C:\\Program Files\\Git\\bin\\bash.exe";
 	const result = resolveBashCommand({
 		platform: "win32",
 		agentDir: "C:\\Users\\tester\\.pi\\agent",
@@ -83,7 +83,7 @@ test("checkBash does not overwrite an unreadable settings file", async () => {
 	const result = await checkBash({
 		platform: "win32",
 		agentDir: "C:\\Users\\tester\\.pi\\agent",
-		resolveBash: () => ({ command: "D:\\Git\\bin\\bash.exe", source: "common Git Bash location" }),
+		resolveBash: () => ({ command: "C:\\Program Files\\Git\\bin\\bash.exe", source: "common Git Bash location" }),
 		exec: async () => ({ stdout: "ok\n" }),
 		exists: () => true,
 		readFile: () => "{broken",
@@ -101,7 +101,7 @@ test("checkBash passes when persisting the resolved bash path fails", async () =
 	const result = await checkBash({
 		platform: "win32",
 		agentDir: "C:\\Users\\tester\\.pi\\agent",
-		resolveBash: () => ({ command: "D:\\Git\\bin\\bash.exe", source: "common Git Bash location" }),
+		resolveBash: () => ({ command: "C:\\Program Files\\Git\\bin\\bash.exe", source: "common Git Bash location" }),
 		exec: async () => ({ stdout: "ok\n" }),
 		readFile: () => "{}",
 		writeFile: () => {

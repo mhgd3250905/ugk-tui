@@ -93,13 +93,14 @@ export function resolveBashCommand(deps: BashCheckDeps = {}): BashResolution {
 		return { command: shellPath, source: "settings.json shellPath" };
 	}
 
+	// Git for Windows 官方默认安装路径(64/32 位 Program Files)。
+	// 不写死 D:\Git / E:\Application\Git 等个人安装位置 —— 那是臆造路径,对其他用户无意义;
+	// 装在别处的用户由 doctor 引导提供路径 + set_shell_path.mjs 写入 settings.json。
 	const candidates = [
-		"D:\\Git\\bin\\bash.exe",
-		"D:\\Git\\usr\\bin\\bash.exe",
-		"E:\\Application\\Git\\bin\\bash.exe",
-		"E:\\Application\\Git\\usr\\bin\\bash.exe",
 		"C:\\Program Files\\Git\\bin\\bash.exe",
 		"C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+		"C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+		"C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe",
 	];
 	const candidate = candidates.find((item) => exists(item));
 	if (candidate) return { command: candidate, source: "common Git Bash location" };

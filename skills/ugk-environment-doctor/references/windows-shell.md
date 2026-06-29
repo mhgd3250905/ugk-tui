@@ -20,11 +20,11 @@ UGK needs a bash-compatible shell for some child-agent and script workflows.
 ```text
 C:\Program Files\Git\bin\bash.exe
 C:\Program Files\Git\usr\bin\bash.exe
-D:\Git\bin\bash.exe
-D:\Git\usr\bin\bash.exe
-E:\Application\Git\bin\bash.exe
-E:\Application\Git\usr\bin\bash.exe
+C:\Program Files (x86)\Git\bin\bash.exe
+C:\Program Files (x86)\Git\usr\bin\bash.exe
 ```
+
+These are the official Git for Windows default install locations. If Git is installed elsewhere, ask the user for their `bash.exe` path and write it with `set_shell_path.mjs` — do not guess other drive letters.
 
 ## Guided Fix
 

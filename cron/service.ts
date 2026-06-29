@@ -107,7 +107,8 @@ async function executeJob(job: CronJob) {
 	appendRun(run);
 	console.log(`[${run.startedAt}] 触发任务: ${job.name} (${runId})`);
 
-	// 构造命令:优先 ugk(npm i -g ugk-agent),没有则 pi(开发环境)
+	// 构造命令:优先 ugk(npm i -g ugk-agent PATH 上有),否则 node + 随包 bin/ugk.js(克隆/本地兜底)。
+	// getCronAgentBin 在后者场景返回带引号的 "node abs/path" 字符串,必须经 shell 执行才能正确解析。
 	const agentBin = getCronAgentBin();
 	const args = ["--print", job.prompt];
 	if (job.model) {
@@ -116,7 +117,7 @@ async function executeJob(job: CronJob) {
 
 	const child = spawn(agentBin, args, {
 		cwd: job.cwd || process.cwd(),
-		shell: process.platform === "win32", // Windows 适配(同 subagent)
+		shell: true, // cron 非交互,统一 shell 执行(兼容裸命令名和 "node abspath" 两种形态)
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 

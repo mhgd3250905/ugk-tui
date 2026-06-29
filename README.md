@@ -6,9 +6,21 @@
 
 ---
 
-## 🚀 安装(2 步,约 2 分钟)
+## 🚀 安装
 
-### 第 1 步:安装
+### 方式一:一键安装(推荐,适合新手)
+
+```cmd
+npx ugk-install
+```
+
+交互式安装器会自动完成:检测 Node/npm → 安装 ugk → 引导你配置 DeepSeek API key(验证有效性后自动写入)。装完直接能跑 `ugk`。
+
+> 需要先有 Node.js 18+(安装器会检测,缺失会引导你去 [nodejs.org](https://nodejs.org) 装 LTS)。
+
+### 方式二:手动两步
+
+#### 第 1 步:安装
 
 ```cmd
 npm i -g ugk-agent
@@ -18,7 +30,7 @@ npm i -g ugk-agent
 > ugk 内置 pi 作为依赖,**不用单独装 pi、不用 clone 本仓库、不用 pi install**。
 > pi 是 UGK 的内部运行时依赖,版本由 UGK 发行版固定管理;用户不要单独运行 `pi update`。
 
-### 第 2 步:配置 API key
+#### 第 2 步:配置 API key
 
 ugk 默认用 DeepSeek。去 [platform.deepseek.com](https://platform.deepseek.com) 申请 key:
 
@@ -404,6 +416,13 @@ A: 预设 agent 随包自动加载,正常不应出现。若出现,确认 ugk 是
 
 **Q: cron 工具报"服务未启动"?**
 A: cron 是独立常驻服务,在本仓库目录跑 `npm install && npm run cron:start`(需要先 clone 本仓库)。
+
+**Q: `npm i -g` 报 `EACCES`(权限错误)?**
+A: 这是 npm 全局安装最常见的坑。推荐配一个用户级的 npm 全局目录,免 sudo/免管理员:
+- **Windows(PowerShell)**:`npm config set prefix "$env:APPDATA\npm"`,然后重开终端重跑安装。
+- **macOS/Linux**:`mkdir -p ~/.npm-global && npm config set prefix '~/.npm-global'`,把 `~/.npm-global/bin` 加进 PATH,重开终端重跑。
+- 详见 [npm 官方文档](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally)。
+- 或者直接用一键安装器 `npx ugk-install`,它检测到权限错误会给出同样的修复指引。
 
 **Q: 怎么换模型(不用 DeepSeek)?**
 A: 设对应的环境变量(如 `OPENAI_API_KEY`),启动时加 `--provider openai --model gpt-4o`。详见 pi 官方文档。

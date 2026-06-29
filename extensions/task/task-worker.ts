@@ -63,22 +63,25 @@ export function buildTaskWorkerPrompt(input: TaskWorkerInput, taskDir?: string):
 	].filter(Boolean).join("\n");
 }
 
+// 取 text 的首个非空行(两分支共用)。
+function firstNonEmptyLine(content: SingleResult["messages"][number]["content"]): string {
+	const text = content.find((part) => part.type === "text")?.text ?? "";
+	return text.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
+}
+
 // ponytail: 用户要"大概步骤 + 关键节点(失败)"。
 // 大概步骤 = worker 每轮决策后写的文字 summary(它会说"正在搜索/抓取/写入"),取首行。
 // 关键节点 = 工具调用失败 —— 失败的 toolResult 成一行 ✖。
 // 成功的工具调用和 toolResult 是噪音(逐条报太繁琐),不推。
+// 截断交给下游 formatProgressLines(它对每条 onUpdate 文本都做 120 截断),这里不重复。
 function formatMessageProgress(message: SingleResult["messages"][number]): string[] {
 	if (message.role === "assistant") {
-		// 每轮 assistant 的文字 summary —— 取首行,作为"大概步骤"。下游 formatProgressLines 会截到 120 字。
-		const text = message.content.find((part) => part.type === "text")?.text ?? "";
-		const head = text.split(/\r?\n/).find((line) => line.trim()) ?? "";
-		return head.trim() ? [head.trim()] : [];
+		const head = firstNonEmptyLine(message.content);
+		return head ? [head] : [];
 	}
 	if (message.role === "toolResult" && message.isError) {
-		const firstText = message.content.find((part) => part.type === "text")?.text ?? "";
-		const head = firstText.split(/\r?\n/).find((line) => line.trim()) ?? "";
-		const detail = head.length > 120 ? `${head.slice(0, 117)}...` : head;
-		return [detail ? `✖ ${message.toolName}: ${detail}` : `✖ ${message.toolName}`];
+		const head = firstNonEmptyLine(message.content);
+		return [`✖ ${message.toolName}: ${head}`];
 	}
 	return [];
 }
@@ -107,24 +110,19 @@ export async function dispatchWorker(
 			undefined,
 			opts.signal,
 			opts.onUpdate
-				? (() => {
-					// 增量索引:每次 onUpdate 只发上次之后新增的 message,避免重发全部历史。
-					// 下游 appendUniqueProgressLines 仍兜底去重。
-					let lastSeenIndex = 0;
-					return (partial: Parameters<OnUpdateCallback>[0]) => {
-						const result = partial.details?.results?.[0];
-						// details/messages 缺失(部分模拟场景)→ fallback 到旧文本路径。
-						if (!result?.messages) {
-							const text = partial.content.find((part) => part.type === "text")?.text;
-							if (typeof text === "string") opts.onUpdate?.(text);
-							return;
-						}
-						for (let i = lastSeenIndex; i < result.messages.length; i += 1) {
-							for (const line of formatMessageProgress(result.messages[i])) opts.onUpdate?.(line);
-						}
-						lastSeenIndex = result.messages.length;
-					};
-				})()
+				? (partial: Parameters<OnUpdateCallback>[0]) => {
+					const result = partial.details?.results?.[0];
+					// details/messages 缺失(部分模拟场景)→ fallback 到旧文本路径。
+					if (!result?.messages) {
+						const text = partial.content.find((part) => part.type === "text")?.text;
+						if (typeof text === "string") opts.onUpdate?.(text);
+						return;
+					}
+					// 全量遍历,重复由下游 appendUniqueProgressLines 去重(worker 轮次有限,遍历成本可忽略)。
+					for (const message of result.messages) {
+						for (const line of formatMessageProgress(message)) opts.onUpdate?.(line);
+					}
+				}
 				: undefined,
 			(results) => ({
 				mode: "single",

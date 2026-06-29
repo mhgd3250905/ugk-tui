@@ -63,47 +63,18 @@ export function buildTaskWorkerPrompt(input: TaskWorkerInput, taskDir?: string):
 	].filter(Boolean).join("\n");
 }
 
-// ponytail: worker 干活(连 CDP/抓页面/写文件)主要靠工具调用,但旧 onUpdate 只取 LLM 文本流,
-// worker 思考或调工具时几乎不打字 → 运行中日志稀疏,第一轮失败常看不到原因。
-// subagent 的 emitUpdate 已把 messages(含 ToolCall/toolResult)塞进 partial.details.results[0],
-// 数据本来就有,这里把它提取出来转成进度行,塞进现有 progress 管道(下游 formatProgressLines 做去重/截断)。
-const PROGRESS_ARG_KEYS = ["action", "command", "url", "path", "file_path", "query", "target", "method", "file", "name"];
-const PATH_ARG_KEYS = new Set(["url", "path", "file_path", "file"]);
-
-function shortenPath(value: string): string {
-	// 长 run 路径(如 .tasks/runs/task-x-search-.../output/x.json)占满 widget,取 basename 更可读。
-	return value.length > 40 ? value.slice(Math.max(0, value.replace(/\\/g, "/").lastIndexOf("/") + 1)) : value;
-}
-
-function pickToolArgSummary(args: Record<string, unknown>): string {
-	for (const key of PROGRESS_ARG_KEYS) {
-		const value = args?.[key];
-		if (typeof value === "string" && value.trim()) {
-			return PATH_ARG_KEYS.has(key) ? shortenPath(value.trim()) : value.trim();
-		}
-	}
-	return "";
-}
-
-// 把单条 subagent message 转成进度行。TextContent/ThinkingContent 不处理(文本由旧路径覆盖,thinking 不展示)。
+// ponytail: 用户只要"大概步骤 + 关键节点(失败/重试)"。
+// 大概步骤 = worker 的 LLM 文本流(它会说"正在搜索/抓取/写入"等),由 onUpdate 旧路径覆盖。
+// 关键节点 = 工具调用失败 —— 这里只提取失败的 toolResult 成一行,推给 progress 管道。
+// 成功的工具调用和 toolResult 是噪音(逐条报太繁琐),不推。
 function formatMessageProgress(message: SingleResult["messages"][number]): string[] {
-	const lines: string[] = [];
-	if (message.role === "assistant") {
-		for (const part of message.content) {
-			if (part.type === "toolCall") {
-				const summary = pickToolArgSummary(part.arguments);
-				lines.push(summary ? `🔧 ${part.name} ${summary}` : `🔧 ${part.name}`);
-			}
-		}
-		return lines;
-	}
-	if (message.role === "toolResult") {
+	if (message.role === "toolResult" && message.isError) {
 		const firstText = message.content.find((part) => part.type === "text")?.text ?? "";
 		const head = firstText.split(/\r?\n/).find((line) => line.trim()) ?? "";
-		const detail = head.length > 80 ? `${head.slice(0, 77)}...` : head;
-		lines.push(detail ? `${message.isError ? "✖" : "✔"} ${message.toolName}: ${detail}` : `${message.isError ? "✖" : "✔"} ${message.toolName}`);
+		const detail = head.length > 120 ? `${head.slice(0, 117)}...` : head;
+		return [detail ? `✖ ${message.toolName}: ${detail}` : `✖ ${message.toolName}`];
 	}
-	return lines;
+	return [];
 }
 
 export async function dispatchWorker(

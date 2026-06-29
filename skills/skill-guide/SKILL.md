@@ -9,7 +9,7 @@ UGK skills come from exactly two sources, both inside the ugk install directory.
 
 ## Two sources
 
-1. **System skills** — `<ugk>/skills/` (ugk-guide, adb-guide, mcp-guide, bash-guide, chrome-cdp-guide, skill-creator, docx, skill-guide, ...). Ship with ugk. **Read-only** — a ugk update overwrites them.
+1. **System skills** — `<ugk>/skills/` (ugk-guide, mcp-guide, bash-guide, chrome-cdp-guide, skill-creator, docx, skill-guide, ...). Ship with ugk. **Read-only** — a ugk update overwrites them.
 2. **User skills** — `<ugk>/user-skills/`. Where every skill you install or create goes. Travels with the ugk install: clone ugk to a new machine and these come along.
 
 `<ugk>` is the ugk install root — the repo dir if you `git clone`d, or the npm package dir if you installed globally. It is the same place for every `ugk` launch, regardless of which folder you run it from.

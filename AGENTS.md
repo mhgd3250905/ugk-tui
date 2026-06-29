@@ -20,7 +20,6 @@
 
 ### 自定义工具
 
-- `scrcpy` — 安卓投屏控制(start/stop/status/version)
 - `subagent` — 子代理委派(single/parallel/chain 三模式,隔离 context 只回摘要)
 - `cron` — 定时任务管理(status/list/add/remove/history)
 - `chrome_cdp` — 受保护的本地登录态 Chrome 控制(status/launch/tabs/navigate/evaluate/screenshot,默认 ask-gated)
@@ -74,7 +73,6 @@
 
 - `/ugk` — 看 agent 状态
 - `/welcome` — 欢迎模板
-- `/check-env` — 自检 adb/scrcpy/设备连接
 - `/update` — 手动检查 GitHub main 并提示更新
 - `/cdp` — 管理 Chrome CDP
 - `/mcp` — 管理 MCP server
@@ -99,7 +97,7 @@
 
 UGK 的 skill 只有两个来源,都在 ugk 安装目录下:
 
-1. **系统自带**(`<ugk>/skills/`):ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/bash-guide/skill-guide/skill-creator 等,跟包走,更新覆盖。
+1. **系统自带**(`<ugk>/skills/`):ugk-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/bash-guide/skill-guide/skill-creator/task-creator 等,跟包走,更新覆盖。
 2. **用户 skill**(`<ugk>/user-skills/`):用户手动安装或创建,跟着 ugk 安装目录走,在任何文件夹运行 ugk 都用同一批。
 
 外部目录(`~/.agents/skills`、`~/.pi/agent/skills`、`<cwd>/.pi/skills` 等)被 ugk 的 `!skills/**` 排除,不会加载。创建/安装新 skill 一律到 `<ugk>/user-skills/<name>/`,来源是多 skill 包仓库时打平安装(只取每个 skill 包本体,丢弃仓库包裹层),详见 skill-guide。

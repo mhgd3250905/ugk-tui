@@ -85,7 +85,6 @@ cp agents/*.md ~/.pi/agent/agents/
 | 输入 | 期望 |
 | --- | --- |
 | `/ugk` | 弹出状态(列全部能力) |
-| `/check-env` | 自检 adb/scrcpy/设备(没装会提示安装命令) |
 | `帮我看看当前目录结构` | agent 正常读取并总结项目 |
 | `@scout 列出项目目录` | 调 `subagent` 委派 scout(需先装预设 agent) |
 | `/subagent` | 列出所有 subagent,选择后设置该 subagent 的模型 |
@@ -152,7 +151,6 @@ Release notes: https://github.com/mhgd3250905/ugk-tui/commits/main
 
 | 工具 | 作用 |
 | --- | --- |
-| `scrcpy` | 安卓投屏控制(start/stop/status/version) |
 | `subagent` | 子代理委派(single/parallel/chain 三模式) |
 | `cron` | 定时任务管理(status/list/add/remove/history) |
 | `chrome_cdp` | 受保护的本地登录态 Chrome 控制(status/launch/tabs/navigate/evaluate/screenshot) |
@@ -195,7 +193,6 @@ UGK_CLEAR_STARTUP=0 ugk
 | --- | --- |
 | `/ugk` | 看 agent 状态 |
 | `/welcome` | 欢迎模板 |
-| `/check-env` | 一键自检 adb/scrcpy/设备连接 |
 | `/subagent` | 列出 subagent 并设置单个 subagent 模型 |
 | `/update` | 检查并更新 UGK |
 | `/cdp` | 管理本地 Chrome CDP 访问模式、端口、启动和标签页 |
@@ -342,8 +339,6 @@ npm run cron:start   # 启动常驻服务(127.0.0.1:17741)
 | skill | 作用 |
 | --- | --- |
 | `ugk-guide` | 占位示例 |
-| `adb-guide` | Android adb 操作大全(8 文件) |
-| `scrcpy-guide` | scrcpy 投屏安装与使用 |
 | `subagent-guide` | 子代理委派指南 |
 | `cron-guide` | 定时任务指南 |
 | `chrome-cdp-guide` | 本地登录态 Chrome/CDP 使用边界与安全流程 |
@@ -367,8 +362,7 @@ ugk-core/
 ├── extensions/
 │   ├── index.ts              # 主入口:工具/命令注册 + @mention + 权限门 + resources_discover
 │   ├── deepseek-status.ts    # /ugk 状态里识别 DEEPSEEK_API_KEY 和 pi /login auth
-│   ├── device-env.ts         # adb/scrcpy 探测 + getUgkBin(命令自适应)
-│   ├── scrcpy-tool.ts        # scrcpy 投屏工具
+│   ├── device-env.ts         # getUgkBin(子进程命令自适应)
 │   ├── cron.ts + cron-contract.ts  # cron 工具 + 共享类型
 │   ├── subagent.ts + subagent-runtime/rendering/agents.ts  # 子代理委派
 │   ├── plan-mode.ts + plan-mode-utils/state.ts  # plan 模式
@@ -380,7 +374,6 @@ ugk-core/
 ├── agents/                   # 预设 subagent 定义(需复制到 ~/.pi/agent/agents/)
 │   ├── scout.md planner.md reviewer.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
-│   └── ugk-guide/adb-guide/scrcpy-guide/subagent-guide/cron-guide/chrome-cdp-guide/mcp-guide/skill-creator
 ├── themes/                   # ugk-geek(默认)+ 16 个社区主题(atom/catppuccin/dracula/gruvbox/nord/solarized),见 NOTICE.md
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)
 └── tests/                    # Node test runner 逻辑覆盖
@@ -399,8 +392,6 @@ A: 见上面「Windows 用户:修复 bash 工具」,配 `shellPath`。
 **Q: `@scout` 没反应 / 报 "Unknown agent"?**
 A: 没装预设 agent。跑上面的「安装 subagent 预设 agent」复制 .md 文件。
 
-**Q: scrcpy 投屏起不来?**
-A: 跑 `/check-env` 自检,它会告诉你缺什么(adb/scrcpy 都能 winget 装)。
 
 **Q: cron 工具报"服务未启动"?**
 A: cron 是独立常驻服务,在本仓库目录跑 `npm install && npm run cron:start`(需要先 clone 本仓库)。
@@ -421,7 +412,7 @@ A: `ugk` 首次启动会默认在 `~/.pi/agent/settings.json` 写入:
 }
 ```
 
-`clearStartupScreen` 会让新会话启动页清理当前终端视口并占满终端高度。`skills` 会隐藏 `~/.agents/skills` 下的用户全局 skills,避免系统里装过的个人 skill 干扰 ugk。ugk 通过扩展注入的 `adb-guide` / `scrcpy-guide` / `subagent-guide` / `cron-guide` / `chrome-cdp-guide` / `ugk-guide` / `skill-creator` 仍会加载。
+`clearStartupScreen` 会让新会话启动页清理当前终端视口并占满终端高度。`skills` 会隐藏 `~/.agents/skills` 下的用户全局 skills,避免系统里装过的个人 skill 干扰 ugk。ugk 通过扩展注入的 `subagent-guide` / `cron-guide` / `chrome-cdp-guide` / `ugk-guide` / `skill-creator` 仍会加载。
 
 已有用户如果之前手动配置过 `clearStartupScreen` 或 `skills`,ugk 不会覆盖;需要启用默认行为时可手动补上对应字段。
 

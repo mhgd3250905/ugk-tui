@@ -9,15 +9,25 @@ import { fileURLToPath } from "node:url";
 const scriptPath = fileURLToPath(new URL("../skills/ugk-environment-doctor/scripts/set_shell_path.mjs", import.meta.url));
 
 function findRealBash(): string | undefined {
-	const candidates = process.platform === "win32"
-		? [
-				"E:\\Application\\Git\\bin\\bash.exe",
-				"E:\\Application\\Git\\usr\\bin\\bash.exe",
-				"C:\\Program Files\\Git\\bin\\bash.exe",
-				"C:\\Program Files\\Git\\usr\\bin\\bash.exe",
-			]
-		: ["/bin/bash", "/usr/bin/bash"];
-	return candidates.find((candidate) => fs.existsSync(candidate));
+	// ponytail: 不能硬编码本机路径(原写死 E:\Application\Git\...)——在别的机器/CI 上找不到
+	// 会导致两个测试恒定 SKIP,等于零覆盖。用 where/which 动态发现候选,再逐个跑 echo ok 验证。
+	// 验证是必须的:Windows 上 C:\Windows\System32\bash.exe 是 WSL 入口,不是 Git Bash,会误判。
+	const lister = process.platform === "win32" ? "where" : "which";
+	let candidates: string[] = [];
+	try {
+		const out = execFileSync(lister, ["bash"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+		candidates = out.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+	} catch {
+		candidates = [];
+	}
+	return candidates.find((candidate) => {
+		try {
+			const out = execFileSync(candidate, ["-c", "echo ok"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+			return out.trim() === "ok";
+		} catch {
+			return false;
+		}
+	});
 }
 
 const realBash = findRealBash();

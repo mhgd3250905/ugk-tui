@@ -344,11 +344,15 @@ npm run cron:start   # 启动常驻服务(127.0.0.1:17741)
 | skill | 作用 |
 | --- | --- |
 | `ugk-guide` | 占位示例 |
-| `subagent-guide` | 子代理委派指南 |
+| `subagent-guide` | 子代理委派指南(含随包预设 agent 自动加载) |
 | `cron-guide` | 定时任务指南 |
 | `chrome-cdp-guide` | 本地登录态 Chrome/CDP 使用边界与安全流程 |
 | `mcp-guide` | MCP server 配置、权限、命令和排障指南 |
+| `bash-guide` | bash 工具/Git Bash 配置与排障 |
+| `skill-guide` | skill 加载机制与 user-skills 安装 |
 | `skill-creator` | 创建、改进和评测 agent skill(来自 Anthropic skills, Apache-2.0) |
+| `task-creator` | 固定 task(taskbook)的创建流程与机制全景 |
+| `ugk-environment-doctor` | 引导式环境配置与排障(Shell/CDP/MCP/Node/API) |
 
 ### 权限门
 
@@ -377,7 +381,7 @@ ugk-core/
 ├── cron/
 │   └── service.ts            # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent 定义(随包自动加载;同名 user 副本覆盖)
-│   ├── scout.md planner.md reviewer.md worker.md
+│   ├── scout.md planner.md reviewer.md checker.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
 ├── themes/                   # ugk-geek(默认)+ 16 个社区主题(atom/catppuccin/dracula/gruvbox/nord/solarized),见 NOTICE.md
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)

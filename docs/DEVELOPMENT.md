@@ -58,7 +58,7 @@
 ## 5. agent 定义与部署
 
 - subagent 的 agent 定义在仓库 `agents/*.md`(版本管理)
-- **需复制到 `~/.pi/agent/agents/` 才生效**(见 subagent-guide skill)
+- **随包自动加载**: `discoverAgents`(subagent-agents.ts)读随包 `agents/` 作 install 级默认,无需手动复制。用户在 `~/.pi/agent/agents/` 放同名 `.md`(user 级)可覆盖随包默认;`.pi/agents/`(project 级)优先级最高
 
 ---
 
@@ -86,7 +86,8 @@
 
 ## 8. bash 部署路径
 
-- bash 工具走 Git Bash(`D:\Git\bin\bash.exe`),命令用 Linux 语法,Windows 路径用正斜杠 `/`
+- bash 工具走 Git Bash,命令用 Linux 语法,Windows 路径用正斜杠 `/`
+- Git Bash 路径由 `doctor/checks.ts` 按 Program Files 默认位置解析,或用户经 `settings.json` 的 `shellPath` 提供(由 environment-doctor skill + `set_shell_path.mjs` 引导写入)。不要在代码/文档里硬编码个人安装盘符
 - bash 工具若报 WSL 错(`WSL ERROR: execvpe /bin/bash failed 2`),按 README "Windows 用户:修复 bash 工具"一节,把 Git Bash 路径写进 `%USERPROFILE%\.pi\agent\settings.json` 的 `shellPath`
 
 ---

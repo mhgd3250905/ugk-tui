@@ -63,11 +63,17 @@ export function buildTaskWorkerPrompt(input: TaskWorkerInput, taskDir?: string):
 	].filter(Boolean).join("\n");
 }
 
-// ponytail: 用户只要"大概步骤 + 关键节点(失败/重试)"。
-// 大概步骤 = worker 的 LLM 文本流(它会说"正在搜索/抓取/写入"等),由 onUpdate 旧路径覆盖。
-// 关键节点 = 工具调用失败 —— 这里只提取失败的 toolResult 成一行,推给 progress 管道。
+// ponytail: 用户要"大概步骤 + 关键节点(失败)"。
+// 大概步骤 = worker 每轮决策后写的文字 summary(它会说"正在搜索/抓取/写入"),取首行。
+// 关键节点 = 工具调用失败 —— 失败的 toolResult 成一行 ✖。
 // 成功的工具调用和 toolResult 是噪音(逐条报太繁琐),不推。
 function formatMessageProgress(message: SingleResult["messages"][number]): string[] {
+	if (message.role === "assistant") {
+		// 每轮 assistant 的文字 summary —— 取首行,作为"大概步骤"。下游 formatProgressLines 会截到 120 字。
+		const text = message.content.find((part) => part.type === "text")?.text ?? "";
+		const head = text.split(/\r?\n/).find((line) => line.trim()) ?? "";
+		return head.trim() ? [head.trim()] : [];
+	}
 	if (message.role === "toolResult" && message.isError) {
 		const firstText = message.content.find((part) => part.type === "text")?.text ?? "";
 		const head = firstText.split(/\r?\n/).find((line) => line.trim()) ?? "";

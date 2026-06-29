@@ -192,11 +192,11 @@ test("worker agent inherits all tools and forbids subagent in prompt", () => {
 
 // ponytail: 进度自证 —— onUpdate 必须把 worker 的工具调用(ToolCall/toolResult)转成进度行。
 // 这是"第一轮失败想看具体原因"的关键:旧实现只取 LLM 文本流,worker 调 chrome_cdp/bash 时全程静默。
-test("dispatchWorker streams failed tool results only as progress lines via onUpdate", async () => {
-	const updates: string[] = [];
-	// ponytail: 用户只要"大概步骤 + 关键节点(失败)"。
-	// 大概步骤 = LLM 文本流(旧路径覆盖);关键节点 = 工具调用失败。
-	// 所以:成功的 toolResult 和 ToolCall 不应进 progress(逐条报太繁琐),只有失败的 toolResult 才报。
+test("dispatchWorker streams assistant summary + failed tool results via onUpdate", async () => {
+	// ponytail: 用户要"大概步骤 + 关键节点(失败)"。
+	// 大概步骤 = worker 每轮 assistant 的文字 summary(取首行);
+	// 关键节点 = 工具调用失败(失败的 toolResult 成一行 ✖)。
+	// 成功的工具调用和 toolResult、ToolCall 是噪音,不推。
 	setTaskWorkerRunnerForTests(async (...args: any[]) => {
 		const onUpdate = args[7];
 		const makeDetails = args[8];
@@ -205,15 +205,18 @@ test("dispatchWorker streams failed tool results only as progress lines via onUp
 			details: makeDetails([{ agent: "worker", agentSource: "user", task: "t", exitCode: 0, messages, stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 } }]),
 		});
 		if (onUpdate) {
-			// 第一轮:ToolCall(navigate)+ 成功 toolResult —— 都不该报
+			// 第一轮:assistant 带 summary("正在导航到搜索页")+ ToolCall + 成功 toolResult
+			// summary 应该报(大概步骤),ToolCall 和成功 toolResult 不该报
 			onUpdate(mkPartial([
-				{ role: "assistant", content: [{ type: "toolCall", id: "c1", name: "chrome_cdp", arguments: { action: "navigate", url: "https://example.com" } }], usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "toolUse", api: "anthropic-messages", provider: "anthropic", timestamp: 0 },
+				{ role: "assistant", content: [{ type: "text", text: "正在导航到搜索页\n开始抓取" }, { type: "toolCall", id: "c1", name: "chrome_cdp", arguments: { action: "navigate", url: "https://example.com" } }], usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "toolUse", api: "anthropic-messages", provider: "anthropic", timestamp: 0 },
 				{ role: "toolResult", toolCallId: "c1", toolName: "chrome_cdp", content: [{ type: "text", text: "navigated ok" }], isError: false, timestamp: 0 },
 			]));
-			// 第二轮:新增失败的 bash toolResult —— 应该报(关键节点)
+			// 第二轮:新增 assistant summary("解析结果失败")+ 失败的 bash toolResult
+			// 新 summary 应该报,失败 toolResult 应该报(关键节点)
 			onUpdate(mkPartial([
-				{ role: "assistant", content: [{ type: "toolCall", id: "c1", name: "chrome_cdp", arguments: { action: "navigate", url: "https://example.com" } }], usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "toolUse", api: "anthropic-messages", provider: "anthropic", timestamp: 0 },
+				{ role: "assistant", content: [{ type: "text", text: "正在导航到搜索页\n开始抓取" }, { type: "toolCall", id: "c1", name: "chrome_cdp", arguments: { action: "navigate", url: "https://example.com" } }], usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "toolUse", api: "anthropic-messages", provider: "anthropic", timestamp: 0 },
 				{ role: "toolResult", toolCallId: "c1", toolName: "chrome_cdp", content: [{ type: "text", text: "navigated ok" }], isError: false, timestamp: 0 },
+				{ role: "assistant", content: [{ type: "text", text: "运行命令解析结果" }, { type: "toolCall", id: "c2", name: "bash", arguments: { command: "jq ..." } }], usage: { input: 1, output: 1, cost: { total: 0 }, totalTokens: 2 }, model: "m", stopReason: "toolUse", api: "anthropic-messages", provider: "anthropic", timestamp: 0 },
 				{ role: "toolResult", toolCallId: "c2", toolName: "bash", content: [{ type: "text", text: "command not found\nline2" }], isError: true, timestamp: 0 },
 			]));
 		}
@@ -228,7 +231,12 @@ test("dispatchWorker streams failed tool results only as progress lines via onUp
 			outputDir: "E:/out",
 		}, { cwd: process.cwd(), onUpdate: (text) => progress.push(text) });
 
-		// 关键节点:失败的 bash toolResult 必须报(含错误首行)
+		// 大概步骤:每轮 assistant 的 summary 首行应该报
+		assert.ok(progress.some((line) => /正在导航到搜索页/.test(line)), `expected first-round summary, got: ${JSON.stringify(progress)}`);
+		assert.ok(progress.some((line) => /运行命令解析结果/.test(line)), `expected second-round summary, got: ${JSON.stringify(progress)}`);
+		// 多行 summary 只取首行(不把"开始抓取"也推)
+		assert.ok(!progress.some((line) => /开始抓取/.test(line)), `only first line of summary should be pushed, got: ${JSON.stringify(progress)}`);
+		// 关键节点:失败的 bash toolResult 必须报
 		assert.ok(progress.some((line) => /✖ bash.*command not found/.test(line)), `expected failed tool-result line, got: ${JSON.stringify(progress)}`);
 		// ToolCall 不该报(太细节)
 		assert.ok(!progress.some((line) => /🔧 chrome_cdp/.test(line)), `tool-call should NOT be streamed, got: ${JSON.stringify(progress)}`);

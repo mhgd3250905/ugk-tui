@@ -108,6 +108,86 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	header.dispose?.();
 });
 
+test("ugk footer totals subagent and run_task api usage by model", async () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand() {},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	let footerFactory: Function | undefined;
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "deepseek-v4-pro" },
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => [
+				{
+					type: "message",
+					message: {
+						role: "toolResult",
+						toolName: "subagent",
+						details: {
+							results: [
+								{ model: "deepseek-v4-pro", usage: { input: 1000000, output: 200000, cacheRead: 10000, cacheWrite: 0, cost: 0.02 } },
+							],
+						},
+					},
+				},
+				{
+					type: "message",
+					message: {
+						role: "toolResult",
+						toolName: "run_task",
+						details: {
+							results: [
+								{
+									model: "deepseek-v4-flash",
+									usage: { input: 9000000, output: 900000, cacheRead: 0, cacheWrite: 0, cost: 0.03 },
+									apiUsage: [
+										{ model: "deepseek-v4-flash", usage: { input: 500000, output: 50000, cacheRead: 0, cacheWrite: 0, cost: 0.003 } },
+										{ model: "deepseek-v4-pro", usage: { input: 300000, output: 40000, cacheRead: 0, cacheWrite: 0, cost: 0.004 } },
+									],
+								},
+							],
+						},
+					},
+				},
+			],
+			getBranch: () => [],
+		},
+		getContextUsage: () => ({ percent: 12.3, contextWindow: 1000000 }),
+		ui: {
+			setHeader: () => {},
+			setFooter: (factory: unknown) => {
+				footerFactory = factory as Function;
+			},
+			setTitle: () => {},
+		},
+	};
+
+	registerUgkBrandUi(pi as any);
+	await handlers.get("session_start")!({ reason: "startup" }, ctx);
+
+	const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+	const footerData = { getGitBranch: () => null, getExtensionStatuses: () => new Map([["ready", "就绪"]]), onBranchChange: () => () => {} };
+	const footer = footerFactory!({ requestRender() {} }, theme, footerData);
+	const text = footer.render(160).join("\n");
+
+	assert.match(text, /deepseek-v4-pro Σ1\.55M ↑1\.30M ↓0\.24M R0\.01M/);
+	assert.match(text, /deepseek-v4-flash Σ0\.55M ↑0\.50M ↓0\.05M/);
+	assert.doesNotMatch(text, /9\.90M/);
+	assert.match(text, /就绪/);
+});
+
 test("ugk brand header and footer tolerate stale extension ctx during render", async () => {
 	const handlers = new Map<string, Function>();
 	const pi = {

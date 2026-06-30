@@ -11,6 +11,7 @@ import {
 	classifyUgkStatusTone,
 	resolveUgkDisplayModelId,
 	UGK_BLOCK_LOGO_TONES,
+	type UgkApiUsage,
 	type UgkFooterUsage,
 } from "./ui-brand-utils.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
@@ -235,6 +236,10 @@ function getCurrentModel(source: BrandUiSessionSource): { id?: string; contextWi
 	}
 }
 
+function collectEntries(source: BrandUiSessionSource): unknown[] {
+	return source.sessionManager?.getEntries?.() ?? source.sessionManager?.getBranch?.() ?? [];
+}
+
 class UgkHeader implements Component {
 	private readonly source: BrandUiSessionSource;
 	private readonly theme: any;
@@ -274,8 +279,7 @@ function collectUsage(source: BrandUiSessionSource): UgkFooterUsage {
 	let cacheRead = 0;
 	let cacheWrite = 0;
 	let cost = 0;
-	const entries = source.sessionManager?.getEntries?.() ?? source.sessionManager?.getBranch?.() ?? [];
-	for (const entry of entries) {
+	for (const entry of collectEntries(source)) {
 		const message = (entry as any).message as AssistantMessage | undefined;
 		if ((entry as any).type !== "message" || message?.role !== "assistant" || !message.usage) continue;
 		input += message.usage.input || 0;
@@ -299,6 +303,40 @@ function collectUsage(source: BrandUiSessionSource): UgkFooterUsage {
 		contextPercent: context?.percent ?? null,
 		contextWindow: context?.contextWindow ?? getCurrentModel(source)?.contextWindow ?? 0,
 	};
+}
+
+function usageValue(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function addApiUsage(target: Map<string, UgkApiUsage>, model: unknown, usage: any): void {
+	const key = typeof model === "string" && model.trim() ? model.trim() : "unknown";
+	const current = target.get(key) ?? { model: key, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+	current.input += usageValue(usage?.input);
+	current.output += usageValue(usage?.output);
+	current.cacheRead += usageValue(usage?.cacheRead);
+	current.cacheWrite += usageValue(usage?.cacheWrite);
+	current.cost += usageValue(usage?.cost);
+	target.set(key, current);
+}
+
+function collectApiUsage(source: BrandUiSessionSource): UgkApiUsage[] {
+	const totals = new Map<string, UgkApiUsage>();
+	for (const entry of collectEntries(source)) {
+		const message = (entry as any).message;
+		if ((entry as any).type !== "message" || message?.role !== "toolResult") continue;
+		if (message.toolName !== "subagent" && message.toolName !== "run_task") continue;
+		const results = Array.isArray(message.details?.results) ? message.details.results : [];
+		for (const result of results) {
+			const apiUsage = Array.isArray(result?.apiUsage) ? result.apiUsage : undefined;
+			if (apiUsage) {
+				for (const item of apiUsage) addApiUsage(totals, item?.model, item?.usage);
+			} else {
+				addApiUsage(totals, result?.model, result?.usage);
+			}
+		}
+	}
+	return [...totals.values()];
 }
 
 class UgkFooter implements Component {
@@ -333,14 +371,19 @@ class UgkFooter implements Component {
 			thinkingLevel: this.source.thinkingLevel,
 			statuses,
 			usage: collectUsage(this.source),
+			apiUsage: collectApiUsage(this.source),
 			width,
 			uiLanguage: language,
 		});
 
-		const [pwd, usage, status] = lines;
+		const [pwd, usage, ...rest] = lines;
 		const coloredPwd = pwd.replace(/^ugk/, this.theme.fg("success", "ugk"));
 		const rendered = [this.theme.fg("dim", coloredPwd), colorFooterUsageLine(usage, this.theme)];
-		if (status.trim()) rendered.push(colorFooterStatusLine(statuses, status, this.theme));
+		for (let i = 0; i < rest.length; i += 1) {
+			const line = rest[i];
+			if (!line.trim()) continue;
+			rendered.push(i === rest.length - 1 ? colorFooterStatusLine(statuses, line, this.theme) : this.theme.fg("dim", line));
+		}
 		return rendered.map((line) => {
 			if (visibleWidth(line) <= width) return line;
 			return truncateToWidth(line, width, this.theme.fg("dim", "..."));

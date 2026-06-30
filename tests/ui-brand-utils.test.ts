@@ -197,6 +197,34 @@ test("buildUgkFooterLines keeps useful session status and truncates to width", (
 	assert.match(lines[2], /第 3 轮完成/);
 });
 
+test("buildUgkFooterLines renders api model token totals in M tokens", () => {
+	const lines = buildUgkFooterLines({
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		branch: "feature/api-usage",
+		modelId: "deepseek-v4-pro",
+		statuses: ["就绪"],
+		usage: {
+			input: 127000,
+			output: 24100,
+			cacheRead: 9000,
+			cacheWrite: 0,
+			cost: 0,
+			contextPercent: 9.8,
+			contextWindow: 1000000,
+		},
+		apiUsage: [
+			{ model: "deepseek-v4-pro", input: 1100000, output: 320000, cacheRead: 0, cacheWrite: 0, cost: 0.08 },
+			{ model: "deepseek-v4-flash", input: 31000, output: 7000, cacheRead: 0, cacheWrite: 0, cost: 0.001 },
+		],
+		width: 120,
+	});
+
+	assert.equal(lines.length, 4);
+	assert.match(lines[2], /API deepseek-v4-pro Σ1\.42M ↑1\.10M ↓0\.32M/);
+	assert.match(lines[2], /deepseek-v4-flash Σ0\.04M ↑0\.03M ↓0\.01M/);
+	assert.doesNotMatch(lines[2], /\$/);
+});
+
 test("buildUgkFooterLines renders an empty context progress bar", () => {
 	const lines = buildUgkFooterLines({
 		cwd: "/Users/shengkai/projects/ugk-tui",

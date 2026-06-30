@@ -59,10 +59,12 @@ test("resolveRuntimeInputFromText merges dispatcher output with defaults", async
 	}
 });
 
-test("resolveRuntimeInputFromText keeps explicit local field=value over dispatcher/default", async () => {
-	// ponytail: 修 P2a。"https://x, page=2":local 抽 page=2(确定性 field=value),
-	// dispatcher 抽 url。合并后 page 必须保留 2,不能被 default=1 覆盖。
-	setTaskDispatcherForTests(async () => ({ url: "https://x" }));
+test("resolveRuntimeInputFromText sends explicit field=value through dispatcher", async () => {
+	let dispatcherCalled = false;
+	setTaskDispatcherForTests(async () => {
+		dispatcherCalled = true;
+		return { url: "https://x", page: 2 };
+	});
 	try {
 		const value = await resolveRuntimeInputFromText({}, "# Skill", {
 			runtimeInput: ["url", "page"],
@@ -71,18 +73,80 @@ test("resolveRuntimeInputFromText keeps explicit local field=value over dispatch
 				page: { default: 1, required: false },
 			},
 		}, "https://x, page=2", undefined, true);
+		assert.equal(dispatcherCalled, true);
 		assert.deepEqual(value, { url: "https://x", page: 2 });
 	} finally {
 		setTaskDispatcherForTests(undefined);
 	}
 });
 
-test("resolveRuntimeInputFromText parses explicit structured topN input locally", async () => {
-	const topNContract = { runtimeInput: ["topN"] };
+test("resolveRuntimeInputFromText does not let invalid allowedValues override dispatcher canonical output", async () => {
+	setTaskDispatcherForTests(async () => ({ subtitlePath: "zh.srt", voice: "苏打" }));
+	try {
+		const value = await resolveRuntimeInputFromText({}, "# Skill", {
+			runtimeInput: ["subtitlePath", "voice"],
+			runtimeInputMeta: {
+				subtitlePath: { required: true },
+				voice: { default: "冰糖", allowedValues: ["冰糖", "苏打", "白桦"] },
+			},
+		}, "zh.srt voice=年轻男声", undefined, true);
 
-	// JSON 和 field=value 是确定性结构化语法,本地直接出,不调 dispatcher。
-	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "{\"topN\":3}", undefined, true), { topN: 3 });
-	assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "topN: 3", undefined, true), { topN: 3 });
+		assert.deepEqual(value, { subtitlePath: "zh.srt", voice: "苏打" });
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("resolveRuntimeInputFromText rejects dispatcher values outside allowedValues", async () => {
+	setTaskDispatcherForTests(async () => ({ subtitlePath: "zh.srt", verbosity: "verbose" }));
+	try {
+		await assert.rejects(
+			() => resolveRuntimeInputFromText({}, "# Skill", {
+				runtimeInput: ["subtitlePath", "verbosity"],
+				runtimeInputMeta: {
+					subtitlePath: { required: true },
+					verbosity: { default: "normal", allowedValues: ["normal", "talkative"] },
+				},
+			}, "zh.srt 话痨模式", undefined, true),
+			/字段值不在允许范围.*verbosity/,
+		);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("resolveRuntimeInputFromText rejects invalid local allowedValues when dispatcher does not canonicalize them", async () => {
+	setTaskDispatcherForTests(async () => ({ subtitlePath: "zh.srt" }));
+	try {
+		await assert.rejects(
+			() => resolveRuntimeInputFromText({}, "# Skill", {
+				runtimeInput: ["subtitlePath", "voice"],
+				runtimeInputMeta: {
+					subtitlePath: { required: true },
+					voice: { default: "冰糖", allowedValues: ["冰糖", "苏打", "白桦"] },
+				},
+			}, "zh.srt voice=年轻男声", undefined, true),
+			/dispatcher 未输出显式字段.*voice/,
+		);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("resolveRuntimeInputFromText sends explicit structured topN input through dispatcher", async () => {
+	const topNContract = { runtimeInput: ["topN"] };
+	let calls = 0;
+	setTaskDispatcherForTests(async () => {
+		calls += 1;
+		return { topN: 3 };
+	});
+	try {
+		assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "{\"topN\":3}", undefined, true), { topN: 3 });
+		assert.deepEqual(await resolveRuntimeInputFromText({}, "# Skill", topNContract, "topN: 3", undefined, true), { topN: 3 });
+		assert.equal(calls, 2);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
 });
 
 test("resolveRuntimeInputFromText routes natural-language topN to dispatcher", async () => {
@@ -156,6 +220,40 @@ test("task dispatcher uses the current session model", async () => {
 	}
 });
 
+test("resolveRuntimeInputFromText reports dispatcher model usage", async () => {
+	const faux = registerFauxProvider();
+	const response = fauxAssistantMessage("```json\n{\"text\":\"Hello 世界\",\"section\":\"技术\"}\n```") as any;
+	response.usage = {
+		input: 120000,
+		output: 30000,
+		cacheRead: 5000,
+		cacheWrite: 0,
+		totalTokens: 155000,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.002 },
+	};
+	faux.setResponses([response]);
+	const model = faux.getModel();
+	const usage: any[] = [];
+	try {
+		const value = await resolveRuntimeInputFromText({
+			model,
+			modelRegistry: {
+				async getApiKeyAndHeaders() {
+					return { ok: true, apiKey: "sk-test", headers: {} };
+				},
+			},
+		}, "# Skill", { runtimeInput: ["text", "section"], runtimeInputMeta: { text: {}, section: {} } }, "Hello 世界", undefined, false, (item: any) => usage.push(item));
+
+		assert.deepEqual(value, { text: "Hello 世界", section: "技术" });
+		assert.equal(usage.length, 1);
+		assert.equal(usage[0].model, "faux/faux-1");
+		assert.ok(usage[0].usage.input > 0);
+		assert.ok(usage[0].usage.output > 0);
+	} finally {
+		faux.unregister();
+	}
+});
+
 test("task dispatcher uses contract dispatcherModel override when available", async () => {
 	// ponytail: 多字段,强制走 dispatcher。测的是 dispatcherModel 覆盖解析,不是解析路径本身。
 	const faux = registerFauxProvider();
@@ -188,7 +286,7 @@ test("task dispatcher uses contract dispatcherModel override when available", as
 
 // === required 门禁测试 ===
 // 复现报告场景:contract 有 url(required) + page(optional, default:1)。
-// 验证 local 部分命中(只抽到 page)时不再 short-circuit,会让 dispatcher 补全 required 的 url。
+// 显式 field=value 也必须经过 dispatcher,local 只用于发现 dispatcher 是否漏字段。
 const biliContract = {
 	runtimeInput: ["url", "page"],
 	runtimeInputMeta: {
@@ -197,14 +295,11 @@ const biliContract = {
 	},
 };
 
-test("required gate: local partial hit (page only) falls through to dispatcher to fill url", async () => {
-	// 模拟 dispatcher 能从 "URL, page=1" 里抽出 url
-	setTaskDispatcherForTests(async () => ({ url: "https://space.bilibili.com/12890453/upload/video" }));
+test("required gate: local partial hit still requires dispatcher to emit the explicit field", async () => {
+	setTaskDispatcherForTests(async () => ({ url: "https://space.bilibili.com/12890453/upload/video", page: 1 }));
 	try {
-		// 输入 "URL, page=1":local 只抽到 page,缺 required 的 url → 走 dispatcher 补全
 		const value = await resolveRuntimeInputFromText({}, "# Skill", biliContract, "https://space.bilibili.com/12890453/upload/video, page=1");
 
-		// 结果必须同时含 url(dispatcher 补) 和 page(local 抽),且 page 补 default 后仍是 1
 		assert.deepEqual(value, {
 			url: "https://space.bilibili.com/12890453/upload/video",
 			page: 1,
@@ -214,14 +309,16 @@ test("required gate: local partial hit (page only) falls through to dispatcher t
 	}
 });
 
-test("required gate: full local hit (url + page) skips dispatcher entirely", async () => {
+test("required gate: full local hit still goes through dispatcher", async () => {
 	let dispatcherCalled = false;
-	setTaskDispatcherForTests(async () => { dispatcherCalled = true; return {}; });
+	setTaskDispatcherForTests(async () => {
+		dispatcherCalled = true;
+		return { url: "https://space.bilibili.com/12890453/upload/video", page: 1 };
+	});
 	try {
-		// 输入 "url=... page=1":local 抽全 required → 直接返回,dispatcher 不该被调用
 		const value = await resolveRuntimeInputFromText({}, "# Skill", biliContract, "url=https://space.bilibili.com/12890453/upload/video page=1");
 
-		assert.equal(dispatcherCalled, false);
+		assert.equal(dispatcherCalled, true);
 		assert.deepEqual(value, {
 			url: "https://space.bilibili.com/12890453/upload/video",
 			page: 1,
@@ -269,20 +366,15 @@ test("required gate: contract without required:true declarations does NOT gate (
 	}
 });
 
-test("required gate: legacy contract with partial input does NOT throw in headless (no required field gated)", async () => {
-	// 关键回归保护:旧式 contract(runtimeInput 有多个字段,但都没声明 required:true),
-	// 输入只抽到部分字段。改之前(bf0ed04^):静默返回部分结果。
-	// 改之后(bf0ed04):误判成必填 → headless 抛错(破坏旧行为)。
-	// 本修复:保守语义,无 required:true 不门禁 → 不抛错,返回部分结果(补 default)。
+test("structured legacy input still requires dispatcher", async () => {
 	const legacyMultiContract = {
 		runtimeInput: ["a", "b"],
 		// 无 runtimeInputMeta,或 meta 里没有 required:true
 	};
-	// dispatcher 不可用,local 只抽到 a(URL 不是 field=value,但 a=... 能抽)
-	// 这模拟"用户输入不完整 + dispatcher 也补不全"的真实场景
-	const value = await resolveRuntimeInputFromText({}, "# Skill", legacyMultiContract, "a=hello", undefined, true);
-	// 不抛错,返回部分结果 {a:hello}(无 default 可补,b 缺失但不是门禁字段)
-	assert.deepEqual(value, { a: "hello" });
+	await assert.rejects(
+		() => resolveRuntimeInputFromText({}, "# Skill", legacyMultiContract, "a=hello", undefined, true),
+		/dispatcher 模型不可用/,
+	);
 });
 
 // === dispatcher 是唯一参数解析路径 ===
@@ -355,6 +447,7 @@ test("buildTaskDispatcherPrompt instructs bare-value mapping and natural-languag
 	const prompt = buildTaskDispatcherPrompt("# Skill", { runtimeInput: ["url", "page"] }, "https://x");
 	assert.match(prompt, /裸值.*按字段名或 description.*判断/);
 	assert.match(prompt, /自然语言句子.*抽出字段的真实值/);
+	assert.match(prompt, /参考词.*术语.*人名/);
 	assert.match(prompt, /不要.*当字段值/);
 	assert.match(prompt, /不要编造/);
 });
@@ -506,4 +599,43 @@ test("buildTaskDispatcherPrompt injects the real current date so dispatcher comp
 	assert.match(prompt, /当前时间.*算相对时间时必须以此为基准/, "prompt 应明示当前时间作为计算基准");
 	assert.ok(prompt.includes(expectedIsoPrefix), "prompt 应含真实当前日期 " + expectedIsoPrefix);
 	assert.match(prompt, /星期几|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday/, "prompt 应提供星期几(用于判断自然周边界)");
+});
+
+test("interactive UI prefills dispatcher's valid partial output instead of re-asking all fields", async () => {
+	// ponytail: 钉死预填回归。dispatcher 部分成功(算对 keyword、漏 requiredField)时,
+	// 交互式逐字段问询应预填 dispatcher 算出的有效值,而非用 contract 默认值全量重问。
+	// 旧行为:partial 出 if 块作用域就丢,UI 用 inputDefault(contract) 全量重问,dispatcher 成果白费。
+	const twoFieldContract = {
+		runtimeInput: ["keyword", "requiredField"],
+		runtimeInputMeta: {
+			keyword: { required: true },
+			requiredField: { required: true },
+		},
+	};
+	// dispatcher 算出 keyword 的有效值,但漏了 requiredField → coversRequired false → 落交互路径。
+	setTaskDispatcherForTests(async () => ({ keyword: "算好的关键词" }));
+	try {
+		const inputs: Array<{ title: string; prefill: string }> = [];
+		const ctx = {
+			ui: {
+				input(title: string, prefill: string) {
+					inputs.push({ title, prefill });
+					// 用户只在 requiredField 填新值,keyword 用预填回车确认。
+					return title.includes("requiredField") ? "用户补的值" : prefill;
+				},
+			},
+		};
+		const value = await resolveRuntimeInputFromText(ctx, "# Skill", twoFieldContract, "某个关键词", undefined, false);
+		// 最终值:keyword 用 dispatcher 的 + 用户确认,requiredField 用用户补的。
+		assert.deepEqual(value, { keyword: "算好的关键词", requiredField: "用户补的值" });
+		// 关键断言:keyword 的预填应是 dispatcher 算出的值,不是 contract 默认值。
+		const keywordInput = inputs.find((i) => i.title.includes("keyword"));
+		assert.ok(keywordInput, "应问询 keyword");
+		assert.equal(keywordInput.prefill, "算好的关键词", "keyword 预填应为 dispatcher 算出的有效值,而非 contract 默认");
+		// requiredField dispatcher 没算出,预填回退到 contract 默认。
+		const requiredInput = inputs.find((i) => i.title.includes("requiredField"));
+		assert.ok(requiredInput, "应问询 requiredField");
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
 });

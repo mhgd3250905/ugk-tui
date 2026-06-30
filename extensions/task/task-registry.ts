@@ -11,8 +11,10 @@ function formatInputField(contract: unknown, field: string): string {
 	const meta = (contract as Record<string, unknown>).runtimeInputMeta;
 	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return field;
 	const fieldMeta = (meta as Record<string, unknown>)[field];
-	if (!fieldMeta || typeof fieldMeta !== "object" || Array.isArray(fieldMeta) || !("default" in fieldMeta)) return field;
-	return `${field}=${String((fieldMeta as Record<string, unknown>).default)}`;
+	if (!fieldMeta || typeof fieldMeta !== "object" || Array.isArray(fieldMeta)) return field;
+	const base = "default" in fieldMeta ? `${field}=${String((fieldMeta as Record<string, unknown>).default)}` : field;
+	const allowed = (fieldMeta as Record<string, unknown>).allowedValues;
+	return Array.isArray(allowed) && allowed.length > 0 ? `${base}{${allowed.map(String).join("|")}}` : base;
 }
 
 function formatTaskbookLine(item: Awaited<ReturnType<typeof listTaskbooks>>[number]): string {

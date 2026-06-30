@@ -14,12 +14,21 @@ export interface TaskWorkerInput {
 	feedback?: unknown;
 }
 
+export interface TaskWorkerUsage {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
+}
+
 export interface TaskWorkerResult {
 	ok: boolean;
 	outputDir: string;
 	summary: string;
 	errorMessage?: string;
-	usage: { input: number; output: number; cost: number };
+	usage: TaskWorkerUsage;
+	model?: string;
 	phases?: Record<string, number>; // ponytail: 诊断用,worker 子进程各阶段耗时(ms)
 }
 
@@ -30,10 +39,12 @@ export function setTaskWorkerRunnerForTests(runner: RunSingleAgentLike | undefin
 	workerRunnerForTests = runner;
 }
 
-function compactUsage(usage: UsageStats): TaskWorkerResult["usage"] {
+function compactUsage(usage: UsageStats): TaskWorkerUsage {
 	return {
 		input: usage.input,
 		output: usage.output,
+		cacheRead: usage.cacheRead,
+		cacheWrite: usage.cacheWrite,
 		cost: usage.cost,
 	};
 }
@@ -147,7 +158,7 @@ export async function dispatchWorker(
 				outputDir: input.outputDir,
 				summary: "",
 				errorMessage: "worker 被中断",
-				usage: { input: 0, output: 0, cost: 0 },
+				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 			};
 		}
 		throw error;
@@ -159,6 +170,7 @@ export async function dispatchWorker(
 		outputDir: input.outputDir,
 		summary,
 		errorMessage: failed ? (result.errorMessage || result.stderr || summary || `worker exit ${result.exitCode}`) : undefined,
+		model: result.model,
 		usage: compactUsage(result.usage),
 		phases: result.phases,
 	};

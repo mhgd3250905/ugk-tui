@@ -112,7 +112,18 @@ function sendCdpCommand(
 			reject(new Error(`CDP WebSocket error: ${String(event)}`));
 		};
 		socket.onmessage = (event) => {
-			const message = JSON.parse(String(event.data));
+			// ponytail: Chrome 发来的帧理论上是合法 JSON,但畸形帧(多帧拼接/二进制/协议错)
+			// 会让 JSON.parse 抛出。无 try/catch 时 cleanup() 不会执行、timer 不清、socket 不关,
+			// promise 挂起到 timeout(最长 5min)。parse 失败立即 cleanup + reject,不挂起。
+			let message: any;
+			try {
+				message = JSON.parse(String(event.data));
+			} catch {
+				cleanup();
+				try { socket.close(); } catch {}
+				reject(new Error(`CDP returned malformed message: ${String(event.data).slice(0, 200)}`));
+				return;
+			}
 			if (message.id !== id) return;
 			cleanup();
 			socket.close();

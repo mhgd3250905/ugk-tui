@@ -249,3 +249,43 @@ test("closeChromeTab GETs /json/close/<id> without throwing", async () => {
 	assert.equal(calls[0].url, "http://127.0.0.1:9222/json/close/tab-xyz");
 	assert.equal(calls[0].method, "GET");
 });
+
+// ponytail: 钉死畸形 JSON 帧回归。旧 onmessage 无 try/catch,Chrome 发非 JSON 帧(多帧拼接/
+// 二进制/协议错)时 JSON.parse 抛出,但 cleanup/socket.close/timer 清理全没执行,promise 挂起
+// 到 timeout(最长 5min)。修复后应立即 reject + 关 socket,不挂起。
+test("sendCdpCommand rejects cleanly on malformed JSON response without hanging", async () => {
+	// 专用 WebSocket:send 时回发一段非 JSON 字符串(模拟畸形帧)。
+	let socketClosed = false;
+	class MalformedWebSocket {
+		readonly url: string;
+		onopen: (() => void) | null = null;
+		onmessage: ((event: { data: string }) => void) | null = null;
+		onerror: ((event: unknown) => void) | null = null;
+		onclose: (() => void) | null = null;
+		constructor(url: string) {
+			this.url = url;
+			queueMicrotask(() => this.onopen?.());
+		}
+		send() {
+			// 故意发非法 JSON(尾部多余字符,JSON.parse 会抛)
+			queueMicrotask(() => this.onmessage?.({ data: "{not valid json" }));
+		}
+		close() { socketClosed = true; this.onclose?.(); }
+	}
+	const client = createChromeCdpClient({
+		port: 9222,
+		fetch: makeFetch(sampleTabs),
+		WebSocket: MalformedWebSocket as any,
+	});
+
+	// 用 evaluate 触发 sendCdpCommand。应在合理时间内 reject(不挂等到 timeout)。
+	const start = Date.now();
+	await assert.rejects(
+		evaluateChromeExpression(client, "tab-1", "document.title", 1000),
+		/malformed message/i,
+	);
+	const elapsed = Date.now() - start;
+	// 5s 远小于钳位后的 1000ms timeout × 容忍,挂起的旧代码会等到 ~1s;这里主要断言不挂死。
+	assert.ok(elapsed < 5000, `不应挂起,实际 ${elapsed}ms`);
+	assert.equal(socketClosed, true, "畸形帧后应关闭 socket");
+});

@@ -18,7 +18,17 @@ function formatInputField(contract: unknown, field: string): string {
 function formatTaskbookLine(item: Awaited<ReturnType<typeof listTaskbooks>>[number]): string {
 	const fields = inputFields(item.contract);
 	const input = fields.length > 0 ? ` (input: ${fields.map((field) => formatInputField(item.contract, field)).join(", ")})` : "";
-	return `- ${item.name} — ${item.description}${input}`;
+	// ponytail: 展示外部 CLI 依赖,让 agent 一眼看到"这 task 要 yt-dlp/ffmpeg"——可移植性的迁移说明书。
+	const binaries = binariesLine(item.contract);
+	return `- ${item.name} — ${item.description}${input}${binaries}`;
+}
+
+function binariesLine(contract: unknown): string {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return "";
+	const requiredBinaries = (contract as Record<string, unknown>).requiredBinaries;
+	if (!Array.isArray(requiredBinaries) || requiredBinaries.length === 0) return "";
+	const names = requiredBinaries.filter((item) => typeof item === "string");
+	return names.length > 0 ? ` [needs: ${names.join(", ")}]` : "";
 }
 
 export async function buildTaskbookPrompt(cwd: string): Promise<string> {

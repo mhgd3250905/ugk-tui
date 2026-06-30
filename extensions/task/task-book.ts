@@ -116,6 +116,12 @@ export function assertValidContract(contract: unknown): void {
 	if (!contract || typeof contract !== "object" || Array.isArray(contract)) throw new Error("Invalid contract.json");
 	const record = contract as Record<string, unknown>;
 	if (record.runtimeInput !== undefined && !isStringArray(record.runtimeInput)) throw new Error("Invalid contract.runtimeInput");
+	// ponytail: 依赖声明字段都设可选 + 同为 string[]。这三个之前完全不校验(独立 bug),
+	// contract 可乱写、运行时才炸。requiredBinaries 是这次新增的外部 CLI 依赖,
+	// requiredEnv/requiredTools 已存在但同样没校验,顺手补齐。
+	if (record.requiredEnv !== undefined && !isStringArray(record.requiredEnv)) throw new Error("Invalid contract.requiredEnv");
+	if (record.requiredTools !== undefined && !isStringArray(record.requiredTools)) throw new Error("Invalid contract.requiredTools");
+	if (record.requiredBinaries !== undefined && !isStringArray(record.requiredBinaries)) throw new Error("Invalid contract.requiredBinaries");
 	if (record.runtimeInputMeta === undefined) return;
 	if (!record.runtimeInputMeta || typeof record.runtimeInputMeta !== "object" || Array.isArray(record.runtimeInputMeta)) throw new Error("Invalid contract.runtimeInputMeta");
 	const fields = new Set(isStringArray(record.runtimeInput) ? record.runtimeInput : []);

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { findCommandOnPath } from "../shared/binary.ts";
 
 export interface ChromeLaunchCommand {
 	command: string;
@@ -42,28 +43,6 @@ function findWindowsChrome(): string | null {
 			if (fs.existsSync(c)) return c;
 		} catch {
 			/* 忽略权限/路径错误,继续找下一个 */
-		}
-	}
-	return null;
-}
-
-function findCommandOnPath(command: string, env: NodeJS.ProcessEnv = process.env): string | null {
-	const pathValue = env.PATH ?? "";
-	const extensions =
-		process.platform === "win32"
-			? (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean)
-			: [""];
-	for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
-		const lowerCommand = command.toLowerCase();
-		const candidates = extensions.map((ext) =>
-			path.join(dir, lowerCommand.endsWith(ext.toLowerCase()) ? command : `${command}${ext}`),
-		);
-		for (const candidate of candidates) {
-			try {
-				if (fs.existsSync(candidate)) return candidate;
-			} catch {
-				// Ignore unreadable PATH entries.
-			}
 		}
 	}
 	return null;

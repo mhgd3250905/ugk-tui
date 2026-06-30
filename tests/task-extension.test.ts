@@ -1564,6 +1564,86 @@ test("/task run prompts for missing requiredEnv and passes it to worker", async 
 	}
 });
 
+// ponytail: contract 依赖字段校验(顺带修的独立 bug)。requiredEnv/requiredTools/requiredBinaries
+// 都必须是可选 string[],之前完全不校验、乱写运行时才炸。
+test("assertValidContract rejects malformed requiredEnv/requiredTools/requiredBinaries", () => {
+	// 合法:三个都是可选 string[]
+	assertValidContract({ runtimeInput: [], artifacts: [], requiredEnv: ["A"], requiredTools: ["chrome_cdp"], requiredBinaries: ["yt-dlp"] });
+	// 合法:缺省也行(老 taskbook 兼容)
+	assertValidContract({ runtimeInput: [], artifacts: [] });
+	// 非法:不是数组
+	assert.throws(() => assertValidContract({ requiredEnv: "MIMO_API_KEY" }), /Invalid contract.requiredEnv/);
+	assert.throws(() => assertValidContract({ requiredTools: "chrome_cdp" }), /Invalid contract.requiredTools/);
+	assert.throws(() => assertValidContract({ requiredBinaries: "yt-dlp" }), /Invalid contract.requiredBinaries/);
+	// 非法:数组里含非字符串
+	assert.throws(() => assertValidContract({ requiredBinaries: ["yt-dlp", 123] }), /Invalid contract.requiredBinaries/);
+});
+
+// ponytail: /task run(交互式)缺外部 CLI → notify warning + 不跑 worker。
+// 钉死可移植性闭环:依赖缺失前置拦截,引导用户安装,而不是跑一半才炸。
+test("/task run blocks before worker when contract requiredBinaries is missing", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	let workerCalled = false;
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => {
+		workerCalled = true;
+		throw new Error("worker should not run");
+	});
+	try {
+		await saveTaskbook("project", cwd, "needs-binary", {
+			description: "needs yt-dlp",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { runtimeInput: [], artifacts: [], requiredBinaries: ["definitely-missing-xyz-12345"] },
+		});
+
+		await commands.get("task").handler("run needs-binary", ctx);
+		await waitForTaskRunForTests();
+
+		assert.equal(workerCalled, false);
+		assert.match(notifications.at(-1)?.message ?? "", /definitely-missing-xyz-12345/);
+		assert.match(notifications.at(-1)?.message ?? "", /重新调用 run_task/);
+		const loaded = await loadTaskbook(cwd, "needs-binary");
+		assert.equal(loaded?.taskbook.runs.length, 0);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// ponytail: requiredBinaries 声明的是已存在的 CLI(node 一定在)→ 正常跑 worker,不误拦。
+test("/task run proceeds when declared requiredBinaries are all available", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => ({
+		agent: "worker", agentSource: "user", task: "task", exitCode: 0,
+		messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+	} as any));
+	try {
+		await saveTaskbook("project", cwd, "has-node", {
+			description: "needs node",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { runtimeInput: [], artifacts: [], requiredBinaries: ["node"] },
+		});
+
+		await commands.get("task").handler("run has-node", ctx);
+		await waitForTaskRunForTests();
+
+		const loaded = await loadTaskbook(cwd, "has-node");
+		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("/task run uses absolute contract outputDir as the final output directory", async () => {
 	const { pi, commands, sentMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();

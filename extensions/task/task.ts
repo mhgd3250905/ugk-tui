@@ -59,6 +59,7 @@ import { runVerify, type VerifyFailure } from "./task-verify.ts";
 import { dispatchWorker, type TaskWorkerResult } from "./task-worker.ts";
 import { mapWithConcurrencyLimit } from "../subagent-runtime.ts";
 import { isAutopilotOn } from "../shared/autopilot.ts";
+import { isBinaryAvailable } from "../shared/binary.ts";
 
 const TASK_STATE_TYPE = "task-state";
 const TASK_PLAN_CONTEXT_TYPE = "task-plan-context";
@@ -416,11 +417,29 @@ function summarizeRequiredTools(contract: unknown): string {
 		: "未声明受保护工具";
 }
 
+// ponytail: 外部 CLI 依赖( yt-dlp/ffmpeg/python 等)的展示。task 可移植的关键:依赖自描述。
+function summarizeRequiredBinaries(contract: unknown): string {
+	const requiredBinaries = asRecord(contract).requiredBinaries;
+	return Array.isArray(requiredBinaries) && requiredBinaries.length > 0
+		? requiredBinaries.filter((item) => typeof item === "string").join(", ")
+		: "无外部 CLI 依赖";
+}
+
 function missingRequiredEnv(contract: unknown, env: Record<string, string | undefined> = process.env): string[] {
 	const requiredEnv = asRecord(contract).requiredEnv;
 	return Array.isArray(requiredEnv)
 		? requiredEnv.filter((name): name is string => typeof name === "string" && name.trim().length > 0)
 			.filter((name) => !env[name]?.trim())
+		: [];
+}
+
+// ponytail: 外部 CLI 依赖的缺失检查,与 missingRequiredEnv 同模式。用 isBinaryAvailable 查 PATH。
+// 不校验版本(YAGNI),只验"在不在"。缺失即 FAIL/notify,让 agent/人补装后重试。
+function missingRequiredBinaries(contract: unknown): string[] {
+	const requiredBinaries = asRecord(contract).requiredBinaries;
+	return Array.isArray(requiredBinaries)
+		? requiredBinaries.filter((name): name is string => typeof name === "string" && name.trim().length > 0)
+			.filter((name) => !isBinaryAvailable(name))
 		: [];
 }
 
@@ -533,6 +552,18 @@ function formatMissingEnvMessage(names: string[]): string {
 	].join("\n");
 }
 
+// ponytail: 外部 CLI 依赖缺失提示。关键设计:不写死安装命令(跨包管理器 pip/winget/brew/cargo),
+// 只列常见渠道作参考;但明确告诉 agent"装完重新调用 run_task",让 main agent 能自主补装后重试。
+// 这是 task 可移植 + agent 自治的闭环:校验失败 → 结构化反馈 → agent 装 → 重试。
+function formatMissingBinariesMessage(names: string[]): string {
+	return [
+		`缺少必需外部命令: ${names.join(", ")}`,
+		"请安装后重新调用 run_task(装完即可重试,无需改 task)。",
+		...names.map((name) => `常见安装渠道(按你的环境选): ${name} — pip install / winget install / brew install / npm i -g / 官网下载`),
+		"task 本身不负责安装,环境配置由你或 agent 决定。",
+	].join("\n");
+}
+
 function buildTaskGuideItems(loaded: LoadedTaskbook): TaskGuideItem[] {
 	const contract = loaded.contract;
 	return [
@@ -543,7 +574,8 @@ function buildTaskGuideItems(loaded: LoadedTaskbook): TaskGuideItem[] {
 		{ id: 5, title: "产物契约", detail: summarizeContractArtifacts(contract) },
 		{ id: 6, title: "运行输入", detail: summarizeRuntimeInput(contract) },
 		{ id: 7, title: "工具要求", detail: summarizeRequiredTools(contract) },
-		{ id: 8, title: "机器验证", detail: loaded.verify.trim().split(/\r?\n/).slice(0, 6).join(" ").replace(/\s+/g, " ").trim() || "空 verify" },
+		{ id: 8, title: "外部依赖", detail: summarizeRequiredBinaries(contract) },
+		{ id: 9, title: "机器验证", detail: loaded.verify.trim().split(/\r?\n/).slice(0, 6).join(" ").replace(/\s+/g, " ").trim() || "空 verify" },
 	];
 }
 
@@ -1255,6 +1287,20 @@ async function executeSubtask(
 			attempts: 0,
 		};
 	}
+	// ponytail: 外部 CLI 依赖前置校验,与 env 同位。缺则 FAIL + 安装提示,让 agent 补装后重试。
+	const missingBinaries = missingRequiredBinaries(loaded.contract);
+	if (missingBinaries.length > 0) {
+		return {
+			name: request.name,
+			status: "fail",
+			outputDir,
+			artifacts: [],
+			verifyFailures: [],
+			workerSummary: formatMissingBinariesMessage(missingBinaries),
+			duration: (Date.now() - startedAt) / 1000,
+			attempts: 0,
+		};
+	}
 	await mkdir(outputDir, { recursive: true });
 	const maxRetry = 3;
 	const title = `⏳ run_task 已启动: ${request.name}`;
@@ -1409,6 +1455,13 @@ async function handleTaskRun(
 	const missingEnv = await promptMissingRequiredEnv(ctx, loaded.contract);
 	if (missingEnv.length > 0) {
 		ctx.ui.notify(formatMissingEnvMessage(missingEnv), "warning");
+		return;
+	}
+	// ponytail: 外部 CLI 依赖校验。/task run 是交互式,这里 notify + 安装提示引导用户,
+	// 不自动装(task 原子单元,环境决策归人)。run_task 路径在 executeSubtask 已校验。
+	const missingBinaries = missingRequiredBinaries(loaded.contract);
+	if (missingBinaries.length > 0) {
+		ctx.ui.notify(formatMissingBinariesMessage(missingBinaries), "warning");
 		return;
 	}
 	const finalRawInput = !name && !rawInput.trim()

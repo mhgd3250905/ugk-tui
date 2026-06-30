@@ -379,6 +379,54 @@ test("run_task parallel hydrates requiredEnv once for the batch (dedup)", async 
 	}
 });
 
+// ponytail: parallel 路径缺 binary —— 该 task FAIL(workerSummary 含安装提示),不炸批次,
+// 其他 task 正常执行。钉死 task 可移植闭环:依赖缺失不污染并发兄弟。
+test("run_task parallel FAILs the missing-binary task without breaking the batch", async () => {
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => workerOk("done"));
+	setTaskDispatcherForTests(async (_ctx, _skill, _contract, rawInput) => ({ text: rawInput }));
+	try {
+		await saveTaskbook("project", cwd, "missing-bin", {
+			description: "missing bin",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { runtimeInput: [], artifacts: [], requiredBinaries: ["definitely-missing-xyz-12345"] },
+		});
+		await saveTaskbook("project", cwd, "has-node", {
+			description: "has node",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { runtimeInput: [], artifacts: [], requiredBinaries: ["node"] },
+		});
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", {
+			tasks: [
+				{ name: "missing-bin", input: "a" },
+				{ name: "has-node", input: "b" },
+			],
+		}, undefined, undefined, ctx);
+
+		// 批次不炸(没有 isError),各 task 独立结果
+		assert.equal(result.isError, undefined, "批次不应被单个缺 binary 任务炸掉");
+		const results = result.details.results;
+		const missingBinResult = results.find((r: any) => r.name === "missing-bin");
+		const hasNodeResult = results.find((r: any) => r.name === "has-node");
+		assert.equal(missingBinResult.status, "fail");
+		assert.match(missingBinResult.workerSummary, /definitely-missing-xyz-12345/);
+		assert.match(missingBinResult.workerSummary, /重新调用 run_task/);
+		assert.equal(hasNodeResult.status, "pass");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 // ponytail: 会话级授权缓存。报告场景:main 反复 run_task 同一个 cdp taskbook 下视频,
 // 每次都弹"允许受保护工具"打断用户。修复:本会话授权过该 taskbook 后不再弹。
 test("run_task remembers protected-tool grant across calls in the same session", async () => {

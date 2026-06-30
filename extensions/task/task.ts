@@ -483,8 +483,12 @@ async function hydrateRequiredEnvForTaskbooks(taskbooks: LoadedTaskbook[]): Prom
 	}
 }
 
-async function persistWindowsUserEnv(name: string, value: string): Promise<void> {
+async function persistWindowsUserEnv(name: string, value: string, ctx?: any): Promise<void> {
 	if (process.platform !== "win32" || process.env.UGK_REQUIRED_ENV_PERSIST === "0") return;
+	// ponytail: setx 失败要可观测。之前 error/close 都静默 resolve,用户填的 key 若因权限/策略没存进
+	// Windows User env,当前会话能跑(值在进程内存)但下次新开 ugk 又被问,困惑"不是配过了吗"。
+	// 这里捕获退出码,error/非0 都 notify 警告,让用户知道本次没持久化、需手动 setx。
+	let outcome: "ok" | "fail" | undefined;
 	await new Promise<void>((resolve) => {
 		const child = spawn("powershell.exe", [
 			"-NoProfile",
@@ -495,9 +499,15 @@ async function persistWindowsUserEnv(name: string, value: string): Promise<void>
 			env: { ...process.env, UGK_ENV_NAME: name, UGK_ENV_VALUE: value },
 			stdio: "ignore",
 		});
-		child.on("error", () => resolve());
-		child.on("close", () => resolve());
+		child.on("error", () => { outcome = "fail"; resolve(); });
+		child.on("close", (code) => { outcome = code === 0 ? "ok" : "fail"; resolve(); });
 	});
+	if (outcome === "fail") {
+		ctx?.ui?.notify?.(
+			`${name} 本次已生效,但持久化到 Windows 失败(权限或策略),下次新开会话可能需要重新配置。手动持久化: setx ${name} "你的值"`,
+			"warning",
+		);
+	}
 }
 
 async function promptMissingRequiredEnv(ctx: any, contract: unknown): Promise<string[]> {
@@ -507,7 +517,7 @@ async function promptMissingRequiredEnv(ctx: any, contract: unknown): Promise<st
 		const value = await ctx.ui?.input?.(`缺少必要配置 ${name}`, "");
 		if (value?.trim()) {
 			process.env[name] = value.trim();
-			await persistWindowsUserEnv(name, value.trim());
+			await persistWindowsUserEnv(name, value.trim(), ctx);
 		}
 	}
 	return missingRequiredEnv(contract);

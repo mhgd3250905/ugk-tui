@@ -70,3 +70,33 @@ test("getChromeLaunchCommand falls back to chrome.exe on Windows if not found", 
 		delete process.env.LOCALAPPDATA;
 	}
 });
+
+// ponytail: 钉死 Chrome 进程 teardown 回归。launchChromeCdp 的 child 句柄曾丢弃 + detached +
+// unref,Chrome 永不被 kill(全仓 grep kill 零命中),--remote-debugging-port + 用户登录态永久驻留。
+// 测试不真 spawn Chrome:手动塞 fake ChildProcess 进 Set,调 teardown,断言 kill 被调用 + Set 清空。
+test("managed Chrome children are killed on teardown and cleared from the set", async () => {
+	const { __testOnly } = await import("../extensions/chrome-cdp/launcher.ts");
+	// 确保从干净状态开始(teardown 可能被其它测试触发过)。
+	__testOnly.teardown();
+
+	const killed: string[] = [];
+	// fake ChildProcess:只关心 kill() 和 exit 事件语义。
+	const makeFake = (id: string) => ({
+		pid: 1000 + Number(id),
+		kill(signal?: string) { killed.push(`${id}:${signal ?? "default"}`); return true; },
+		on(_event: string, _cb: Function) { /* no-op for fake */ },
+		ref() {}, unref() {},
+	}) as any;
+	__testOnly.managedChildren.add(makeFake("1"));
+	__testOnly.managedChildren.add(makeFake("2"));
+	__testOnly.managedChildren.add(makeFake("3"));
+	assert.equal(__testOnly.managedChildren.size, 3);
+
+	__testOnly.teardown();
+
+	assert.equal(__testOnly.managedChildren.size, 0, "teardown 后 Set 应清空");
+	assert.equal(killed.length, 3, "三个 fake 进程都应被 kill");
+	// 幂等:再 teardown 不炸也不再 kill(已清空)。
+	__testOnly.teardown();
+	assert.equal(killed.length, 3, "幂等:空 Set 再 teardown 不重复 kill");
+});

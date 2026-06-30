@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -89,6 +89,34 @@ export function getChromeLaunchCommand(options: {
 	};
 }
 
+// ponytail: ugk 自己起的调试 Chrome 句柄。agent 进程退出时主动回收,
+// 避免 --remote-debugging-port + 用户登录态 Chrome 永久驻留(持久攻击面)。
+// detached 保留:Chrome 用户可能想继续用窗口;但 agent 退出该清掉它启动的调试实例。
+const managedChromeChildren = new Set<ChildProcess>();
+let teardownHookInstalled = false;
+
+function teardownManagedChrome(): void {
+	for (const child of managedChromeChildren) {
+		try { child.kill(); } catch { /* best-effort:进程可能已退出 */ }
+	}
+	managedChromeChildren.clear();
+}
+
+function ensureTeardownHook(): void {
+	if (teardownHookInstalled) return;
+	teardownHookInstalled = true;
+	// beforeExit:Node 事件循环空了准备退出(正常退出路径)。
+	// exit:进程即将退出(同步,最后兜底)。
+	process.once("beforeExit", teardownManagedChrome);
+	process.once("exit", teardownManagedChrome);
+	// ponytail: 信号退出。Windows 无真实 SIGTERM/SIGKILL,但 Git Bash 下 SIGINT(Ctrl+C)可捕获。
+	// 注册失败(已被占用/平台不支持)不阻塞 launch 主流程。
+	try {
+		process.once("SIGINT", () => { teardownManagedChrome(); process.exit(130); });
+		process.once("SIGTERM", () => { teardownManagedChrome(); process.exit(143); });
+	} catch { /* 信号 hook 注册失败忽略 */ }
+}
+
 export function launchChromeCdp(port: number): string {
 	const { command, args, profilePath } = getChromeLaunchCommand({ port });
 	try {
@@ -99,6 +127,10 @@ export function launchChromeCdp(port: number): string {
 			stdio: "ignore",
 			shell: useShell,
 		});
+		managedChromeChildren.add(child);
+		// ponytail: Chrome 自行退出时(用户叉掉/崩溃)从 Set 清掉,teardown 不再 kill 已死进程。
+		child.on("exit", () => { managedChromeChildren.delete(child); });
+		ensureTeardownHook();
 		child.unref();
 		return `Started Chrome CDP on 127.0.0.1:${port}\nProfile: ${profilePath}\nBinary: ${command}`;
 	} catch (err) {
@@ -108,6 +140,13 @@ export function launchChromeCdp(port: number): string {
 		);
 	}
 }
+
+// ponytail: 测试专用导出。不真 spawn Chrome,直接验证 Set 注册 + teardown kill 语义。
+export const __testOnly = {
+	get managedChildren(): Set<ChildProcess> { return managedChromeChildren; },
+	teardown: teardownManagedChrome,
+	resetTeardownHook(): void { teardownHookInstalled = false; },
+};
 
 export interface ChromeCdpReadinessResult {
 	ready: boolean;

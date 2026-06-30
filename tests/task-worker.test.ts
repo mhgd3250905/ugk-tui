@@ -134,6 +134,38 @@ test("dispatchWorker passes extra env to the child agent", async () => {
 	}
 });
 
+test("dispatchWorker forwards progress partials when result messages are still empty", async () => {
+	const updates: string[] = [];
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		const onUpdate = args[7];
+		onUpdate?.({
+			content: [{ type: "text", text: "[download] 18.4% at 5.2MiB/s ETA 01:02" }],
+			details: { mode: "single", results: [{ messages: [] }] },
+		});
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	try {
+		await dispatchWorker({
+			skill: "# Skill",
+			contract: {},
+			runtimeInput: {},
+			outputDir: "E:/out",
+		}, { cwd: process.cwd(), onUpdate: (text) => updates.push(text) });
+
+		assert.deepEqual(updates, ["[download] 18.4% at 5.2MiB/s ETA 01:02"]);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+	}
+});
+
 test("dispatchWorker injects a CDP tab lifecycle only when UGK_TASK_ALLOW_CHROME_CDP is set", async () => {
 	let receivedLifecycle: unknown = undefined;
 	setTaskWorkerRunnerForTests(async (...args: any[]) => {

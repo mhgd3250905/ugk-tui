@@ -9,7 +9,7 @@ import { buildTaskbookPrompt } from "../extensions/task/task-registry.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
 import { setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
-import { resetTaskProtectedToolGrantsForTests } from "../extensions/task/task.ts";
+import { resetTaskProtectedToolGrantsForTests, setWindowsUserEnvReaderForTests } from "../extensions/task/task.ts";
 import { createAutopilotState, installAutopilotState } from "../extensions/shared/autopilot.ts";
 
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -319,6 +319,62 @@ test("run_task parallel confirms protected tools once for the batch", async () =
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// ponytail: parallel 入口集中 hydrate 去重。两个 task 声明同一个 requiredEnv,reader 只应被调一次
+// (去重后),不是 N×M 次。钉死回归:若 hydrate 退回 executeSubtask 内部各调,reader 会被调 2 次。
+test("run_task parallel hydrates requiredEnv once for the batch (dedup)", async () => {
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	const envName = "UGK_TEST_PARALLEL_HYDRATE";
+	const previous = process.env[envName];
+	delete process.env[envName];
+	let readerCalls = 0;
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => workerOk("done"));
+	setTaskDispatcherForTests(async (_ctx, _skill, _contract, rawInput) => ({ text: rawInput }));
+	// mock reader:模拟 Windows User env 有值,hydrate 后填进 process.env
+	setWindowsUserEnvReaderForTests(async (name) => {
+		readerCalls += 1;
+		return name === envName ? "hydrated-value" : undefined;
+	});
+	try {
+		await saveTaskbook("project", cwd, "needs-env-a", {
+			description: "needs env a",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { runtimeInput: [], artifacts: [], requiredEnv: [envName] },
+		});
+		await saveTaskbook("project", cwd, "needs-env-b", {
+			description: "needs env b",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { runtimeInput: [], artifacts: [], requiredEnv: [envName] },
+		});
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", {
+			tasks: [
+				{ name: "needs-env-a", input: "one" },
+				{ name: "needs-env-b", input: "two" },
+			],
+		}, undefined, undefined, ctx);
+
+		assert.equal(result.isError, undefined, "批次应成功(hydrate 后 env 就位)");
+		assert.equal(readerCalls, 1, "reader 应只调一次(批次级去重),实际: " + readerCalls);
+		assert.equal(process.env[envName], "hydrated-value", "hydrate 应把值填进 process.env");
+		const loadedA = await loadTaskbook(cwd, "needs-env-a");
+		assert.equal(loadedA?.taskbook.runs.at(-1)?.status, "pass");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		setWindowsUserEnvReaderForTests(undefined);
+		if (previous === undefined) delete process.env[envName];
+		else process.env[envName] = previous;
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });

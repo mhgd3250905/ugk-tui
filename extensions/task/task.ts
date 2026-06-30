@@ -135,6 +135,11 @@ export function waitForTaskRunForTests(): Promise<void> {
 	return taskRunPromiseForTests;
 }
 
+// ponytail: 测试 spy hook —— 验证 parallel 入口集中 hydrate 去重(批次级 reader 只调用去重后的次数)。
+export function setWindowsUserEnvReaderForTests(reader: ((name: string) => Promise<string | undefined>) | undefined): void {
+	readWindowsUserEnvImpl = reader ?? defaultReadWindowsUserEnvImpl;
+}
+
 const taskCompleteTool = defineTool({
 	name: "task_complete",
 	label: "Task Complete",
@@ -431,6 +436,13 @@ function requiredEnvValues(contract: unknown): Record<string, string> {
 
 async function readWindowsUserEnv(name: string): Promise<string | undefined> {
 	if (process.platform !== "win32") return undefined;
+	return await readWindowsUserEnvImpl(name);
+}
+
+// ponytail: test override —— 让测试能 spy hydrate 实际调用次数(验证 parallel 去重),
+// 不真开 powershell。生产路径用默认 impl。
+let readWindowsUserEnvImpl: (name: string) => Promise<string | undefined> = defaultReadWindowsUserEnvImpl;
+async function defaultReadWindowsUserEnvImpl(name: string): Promise<string | undefined> {
 	return await new Promise((resolve) => {
 		const child = spawn("powershell.exe", [
 			"-NoProfile",
@@ -456,6 +468,16 @@ async function readWindowsUserEnv(name: string): Promise<string | undefined> {
 
 async function hydrateRequiredEnv(contract: unknown): Promise<void> {
 	for (const name of missingRequiredEnv(contract)) {
+		const value = await readWindowsUserEnv(name);
+		if (value) process.env[name] = value;
+	}
+}
+
+// ponytail: 批次级 hydrate —— run_task parallel 入口一次性补齐所有 task 声明的 requiredEnv,
+// 避免每个 subtask 各开 powershell(N task × M env = N×M 次 spawn)。requiredEnv 去重后串行读一次即可。
+async function hydrateRequiredEnvForTaskbooks(taskbooks: LoadedTaskbook[]): Promise<void> {
+	const names = [...new Set(taskbooks.flatMap((item) => missingRequiredEnv(item.contract)))];
+	for (const name of names) {
 		const value = await readWindowsUserEnv(name);
 		if (value) process.env[name] = value;
 	}
@@ -1208,7 +1230,8 @@ async function executeSubtask(
 	const startedAt = Date.now();
 	const runDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${request.name}-${startedAt}-${Math.random().toString(36).slice(2, 8)}`);
 	const outputDir = path.join(runDir, "output");
-	await hydrateRequiredEnv(loaded.contract);
+	// ponytail: hydrate 已在 run_task 入口集中做(hydrateRequiredEnvForTaskbooks),这里只检查。
+	// /task run 单任务路径走 promptMissingRequiredEnv(内含 hydrate),也不经过这里。
 	const missingEnv = missingRequiredEnv(loaded.contract);
 	if (missingEnv.length > 0) {
 		return {
@@ -1825,6 +1848,9 @@ export function registerTask(pi: ExtensionAPI): void {
 					"正在装载 taskbook...",
 				]);
 				const loaded = await Promise.all(parsed.tasks.map((task) => loadSubtask(cwdOf(ctx), task.name)));
+				// ponytail: 批次级集中 hydrate —— 一次性补齐所有 task 的 requiredEnv(去重),
+				// 避免 executeSubtask 内每个 subtask 各开 powershell(parallel 下 N×M 次 spawn)。
+				await hydrateRequiredEnvForTaskbooks(loaded);
 				const workerEnv = await resolveTaskWorkerEnv(ctx, loaded, getActiveTaskTools());
 				if (workerEnv === null) throw new Error("run_task 需要受保护工具授权,但未获授权。");
 				const results = await mapWithConcurrencyLimit(parsed.tasks, SUBTASK_CONCURRENCY, async (task, index) =>

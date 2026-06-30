@@ -600,3 +600,42 @@ test("buildTaskDispatcherPrompt injects the real current date so dispatcher comp
 	assert.ok(prompt.includes(expectedIsoPrefix), "prompt 应含真实当前日期 " + expectedIsoPrefix);
 	assert.match(prompt, /星期几|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday/, "prompt 应提供星期几(用于判断自然周边界)");
 });
+
+test("interactive UI prefills dispatcher's valid partial output instead of re-asking all fields", async () => {
+	// ponytail: 钉死预填回归。dispatcher 部分成功(算对 keyword、漏 requiredField)时,
+	// 交互式逐字段问询应预填 dispatcher 算出的有效值,而非用 contract 默认值全量重问。
+	// 旧行为:partial 出 if 块作用域就丢,UI 用 inputDefault(contract) 全量重问,dispatcher 成果白费。
+	const twoFieldContract = {
+		runtimeInput: ["keyword", "requiredField"],
+		runtimeInputMeta: {
+			keyword: { required: true },
+			requiredField: { required: true },
+		},
+	};
+	// dispatcher 算出 keyword 的有效值,但漏了 requiredField → coversRequired false → 落交互路径。
+	setTaskDispatcherForTests(async () => ({ keyword: "算好的关键词" }));
+	try {
+		const inputs: Array<{ title: string; prefill: string }> = [];
+		const ctx = {
+			ui: {
+				input(title: string, prefill: string) {
+					inputs.push({ title, prefill });
+					// 用户只在 requiredField 填新值,keyword 用预填回车确认。
+					return title.includes("requiredField") ? "用户补的值" : prefill;
+				},
+			},
+		};
+		const value = await resolveRuntimeInputFromText(ctx, "# Skill", twoFieldContract, "某个关键词", undefined, false);
+		// 最终值:keyword 用 dispatcher 的 + 用户确认,requiredField 用用户补的。
+		assert.deepEqual(value, { keyword: "算好的关键词", requiredField: "用户补的值" });
+		// 关键断言:keyword 的预填应是 dispatcher 算出的值,不是 contract 默认值。
+		const keywordInput = inputs.find((i) => i.title.includes("keyword"));
+		assert.ok(keywordInput, "应问询 keyword");
+		assert.equal(keywordInput.prefill, "算好的关键词", "keyword 预填应为 dispatcher 算出的有效值,而非 contract 默认");
+		// requiredField dispatcher 没算出,预填回退到 contract 默认。
+		const requiredInput = inputs.find((i) => i.title.includes("requiredField"));
+		assert.ok(requiredInput, "应问询 requiredField");
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});

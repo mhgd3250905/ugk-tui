@@ -292,6 +292,10 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 			isValidRuntimeValue((input as Record<string, unknown>)[field]),
 		);
 
+	// ponytail: dispatcher 部分成功时算出的有效字段值,提到外层让交互式 UI 预填复用。
+	// 否则 dispatcher 算对 5 个字段、漏 1 个,落到下面的逐字段问询会全量重问,dispatcher 的
+	// 成果(如算好的 ISO 时间戳)白费,用户等完 LLM 又要手填全部。预填有效值,只问漏掉的。
+	let dispatcherPartial: Record<string, unknown> = {};
 	if (rawInput.trim()) {
 		const local = localRuntimeInput(contract, rawInput);
 		const localFields = objectFields(local);
@@ -299,6 +303,7 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 		// 错误已在 callDispatcher 内部 catch 成 undefined,不会到这里。
 		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride, onApiUsage);
 		const partial = dispatched ?? {};
+		dispatcherPartial = partial as Record<string, unknown>;
 		if (dispatched && coversRequired(dispatched) && allowedFieldsValid(contract, dispatched) && hasAllowedFieldValues(contract, dispatched, localFields)) return runtimeInputWithDefaults(contract, dispatched);
 		if (partial && headless) {
 			// ponytail: 区分"缺字段"和"字段值无效",给用户精准反馈。
@@ -326,10 +331,16 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 		if (fields.every((field) => Object.hasOwn(defaults, field))) return defaults;
 		throw new Error(`dispatcher 未能从输入解析出 runtimeInput(字段: ${fields.join(", ")}）。请用更明确、完整的 input 重试,或确认 taskbook 的 runtimeInput 定义。`);
 	}
+	// ponytail: 交互式逐字段问询。预填优先级:dispatcher 算出的有效值 > contract 默认值。
+	// 只预填"有效"值(isValidRuntimeValue),避免把 dispatcher 的残片/空值塞给用户编辑。
 	const entries: Array<[string, string]> = [];
 	for (const field of fields) {
-		const value = await ctx.ui?.input?.(inputTitle(contract, field), inputDefault(contract, field));
-		entries.push([field, value ?? inputDefault(contract, field)]);
+		const fromDispatcher = dispatcherPartial[field];
+		const prefill = Object.prototype.hasOwnProperty.call(dispatcherPartial, field) && isValidRuntimeValue(fromDispatcher)
+			? String(fromDispatcher)
+			: inputDefault(contract, field);
+		const value = await ctx.ui?.input?.(inputTitle(contract, field), prefill);
+		entries.push([field, value ?? prefill]);
 	}
 	return Object.fromEntries(entries);
 }

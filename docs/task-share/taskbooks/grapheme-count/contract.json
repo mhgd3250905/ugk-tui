@@ -1,0 +1,35 @@
+{
+	"outputDir": "<runtime>",
+	"artifacts": [
+		{
+			"name": "result.json",
+			"type": "file",
+			"required": true,
+			"schema": {
+				"type": "object",
+				"required": [
+					"input",
+					"graphemes"
+				],
+				"properties": {
+					"input": {
+						"type": "string"
+					},
+					"graphemes": {
+						"type": "number"
+					}
+				}
+			}
+		}
+	],
+	"runtimeInput": [
+		"text"
+	],
+	"runtimeInputMeta": {
+		"text": {
+			"type": "string",
+			"required": true,
+			"description": "要统计的文本"
+		}
+	}
+}

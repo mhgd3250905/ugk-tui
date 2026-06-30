@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>UGK Task Share</title>
+	<style>
+		:root {
+			color-scheme: dark;
+			--ink: #07110d;
+			--panel: #0d1b15;
+			--line: #294437;
+			--text: #e7fff1;
+			--muted: #9cb9aa;
+			--green: #75ff9a;
+			--cyan: #7ad7ff;
+			--amber: #ffd166;
+			--red: #ff6b6b;
+		}
+		* { box-sizing: border-box; }
+		body {
+			margin: 0;
+			min-height: 100vh;
+			background:
+				linear-gradient(90deg, rgba(117,255,154,.06) 1px, transparent 1px),
+				linear-gradient(rgba(117,255,154,.04) 1px, transparent 1px),
+				var(--ink);
+			background-size: 48px 48px;
+			color: var(--text);
+			font-family: "IBM Plex Mono", "Cascadia Code", "SFMono-Regular", monospace;
+		}
+		main {
+			width: min(1120px, calc(100% - 32px));
+			margin: 0 auto;
+			padding: 32px 0 48px;
+		}
+		header {
+			display: grid;
+			grid-template-columns: 1.1fr .9fr;
+			gap: 24px;
+			align-items: end;
+			border-bottom: 1px solid var(--line);
+			padding-bottom: 24px;
+			margin-bottom: 24px;
+		}
+		h1 {
+			margin: 0;
+			font-size: clamp(2rem, 7vw, 5.8rem);
+			line-height: .9;
+			letter-spacing: 0;
+			text-transform: uppercase;
+		}
+		.kicker {
+			color: var(--green);
+			font-size: .85rem;
+			text-transform: uppercase;
+			margin-bottom: 12px;
+		}
+		.lede {
+			color: var(--muted);
+			font-size: 1rem;
+			line-height: 1.7;
+			margin: 0;
+			max-width: 45rem;
+		}
+		.terminal {
+			border: 1px solid var(--line);
+			background: #050907;
+			border-radius: 8px;
+			padding: 16px;
+			box-shadow: 0 20px 60px rgba(0,0,0,.35);
+		}
+		.terminal pre {
+			margin: 0;
+			white-space: pre-wrap;
+			color: var(--green);
+			font-size: .95rem;
+			line-height: 1.6;
+		}
+		.catalog {
+			display: grid;
+			gap: 16px;
+		}
+		.task-card {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 20px;
+			align-items: center;
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			background: rgba(13, 27, 21, .88);
+			padding: 20px;
+		}
+		.task-name {
+			margin: 0 0 8px;
+			font-size: clamp(1.4rem, 3vw, 2.4rem);
+			letter-spacing: 0;
+		}
+		.meta {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 8px;
+			margin: 14px 0 0;
+		}
+		.badge {
+			border: 1px solid var(--line);
+			border-radius: 999px;
+			color: var(--muted);
+			padding: 5px 9px;
+			font-size: .78rem;
+		}
+		.actions {
+			display: grid;
+			grid-template-columns: 1fr 1fr;
+			gap: 8px;
+			min-width: min(360px, 100%);
+		}
+		a.button,
+		button {
+			appearance: none;
+			border: 1px solid var(--green);
+			border-radius: 6px;
+			background: transparent;
+			color: var(--green);
+			font: inherit;
+			font-weight: 700;
+			padding: 12px 14px;
+			text-decoration: none;
+			text-align: center;
+			cursor: pointer;
+		}
+		a.button:hover,
+		button:hover {
+			background: var(--green);
+			color: var(--ink);
+		}
+		.command {
+			grid-column: 1 / -1;
+			border: 1px dashed var(--line);
+			border-radius: 6px;
+			padding: 10px 12px;
+			color: var(--cyan);
+			overflow-wrap: anywhere;
+		}
+		.notice {
+			margin-top: 20px;
+			color: var(--muted);
+			border-left: 3px solid var(--amber);
+			padding-left: 12px;
+			line-height: 1.6;
+		}
+		@media (max-width: 760px) {
+			header,
+			.task-card {
+				grid-template-columns: 1fr;
+			}
+			.actions {
+				grid-template-columns: 1fr;
+				min-width: 0;
+			}
+		}
+	</style>
+</head>
+<body>
+	<main>
+		<header>
+			<section>
+				<div class="kicker">official taskbooks only</div>
+				<h1>UGK Task Share</h1>
+				<p class="lede">官方精选 taskbook。下载 zip 留作备份,或复制命令直接安装到本机 UGK。</p>
+			</section>
+			<aside class="terminal" aria-label="安装命令示例">
+				<pre>$ ugk task install grapheme-count
+已安装 taskbook "grapheme-count"
+下一步: /task run grapheme-count &lt;你的输入&gt;</pre>
+			</aside>
+		</header>
+
+		<section class="catalog" aria-label="官方 taskbook 列表">
+			<article class="task-card">
+				<div>
+					<h2 class="task-name">Grapheme Count</h2>
+					<p class="lede">统计文本中的 Unicode 字素数量,适合 emoji、组合字符和普通文本长度核对。</p>
+					<div class="meta">
+						<span class="badge">Node.js 18+</span>
+						<span class="badge">input: text</span>
+						<span class="badge">output: result.json</span>
+					</div>
+				</div>
+				<div class="actions">
+					<a class="button" href="downloads/grapheme-count.zip" download>Download zip</a>
+					<button type="button" data-copy="ugk task install grapheme-count">Copy command</button>
+					<code class="command">ugk task install grapheme-count</code>
+				</div>
+			</article>
+		</section>
+
+		<p class="notice">第一阶段只安装官方 manifest 中列出的 taskbook。任意 URL、用户上传和 zip 解包安装暂不开放。</p>
+	</main>
+	<script>
+		document.querySelectorAll("[data-copy]").forEach((button) => {
+			button.addEventListener("click", async () => {
+				await navigator.clipboard.writeText(button.dataset.copy);
+				button.textContent = "Copied";
+				setTimeout(() => { button.textContent = "Copy command"; }, 1400);
+			});
+		});
+	</script>
+</body>
+</html>

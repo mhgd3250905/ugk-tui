@@ -7,6 +7,8 @@ tests/
 .pi/
 *.log
 .tmp_*
+.tmp/
+.tmp
 .superpowers/
 .DS_Store
 **/.DS_Store

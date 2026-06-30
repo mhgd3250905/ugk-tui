@@ -89,8 +89,16 @@ type SubtaskResult = {
 	workerSummary: string;
 	duration: number;
 	attempts: number;
+	usage?: TaskWorkerResult["usage"];
+	model?: string;
+	apiUsage?: TaskApiUsage[];
 	phases?: Record<string, number>; // ponytail: 诊断用,各阶段耗时(ms)
 	parseFailed?: boolean; // ponytail: 此 FAIL 源自输入解析失败(非 worker/verify),run_task 层据此判断是否标 isError
+};
+
+type TaskApiUsage = {
+	model?: string;
+	usage: TaskWorkerResult["usage"];
 };
 
 type TaskRunFailure = {
@@ -770,8 +778,15 @@ export async function resolveTaskWorkerEnv(
 	};
 }
 
-async function resolveRuntimeInput(ctx: any, skill: string, contract: unknown, rawInput: string, headless = false): Promise<unknown> {
-	return await resolveRuntimeInputFromText(ctx, skill, contract, rawInput, taskbookModel(contract, "dispatcherModel"), headless);
+async function resolveRuntimeInput(
+	ctx: any,
+	skill: string,
+	contract: unknown,
+	rawInput: string,
+	headless = false,
+	onApiUsage?: (item: TaskApiUsage) => void,
+): Promise<unknown> {
+	return await resolveRuntimeInputFromText(ctx, skill, contract, rawInput, taskbookModel(contract, "dispatcherModel"), headless, onApiUsage);
 }
 
 async function resolveSelfCheckInput(ctx: any, contract: unknown): Promise<unknown> {
@@ -1160,7 +1175,23 @@ interface TaskRetryOutcome {
 	attempts: number; // 实际 worker 尝试次数 (1..maxRetry+1)
 	aborted: boolean; // worker 被中断(worker.ok===false 且 signal.aborted),区别于普通失败
 	checkerAborted?: boolean; // checker 主动判 abort 提前终止
+	apiUsage: TaskApiUsage[];
 	phases?: Record<string, number>; // ponytail: 纯诊断,各阶段累计耗时(ms)
+}
+
+function addTaskApiUsage(items: TaskApiUsage[], model: string | undefined, usage: TaskWorkerResult["usage"] | undefined): void {
+	if (!usage) return;
+	const key = model || "unknown";
+	let item = items.find((candidate) => (candidate.model || "unknown") === key);
+	if (!item) {
+		item = { model: key, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } };
+		items.push(item);
+	}
+	item.usage.input += usage.input;
+	item.usage.output += usage.output;
+	item.usage.cacheRead += usage.cacheRead;
+	item.usage.cacheWrite += usage.cacheWrite;
+	item.usage.cost += usage.cost;
 }
 
 async function runTaskWithRetry(
@@ -1189,6 +1220,7 @@ async function runTaskWithRetry(
 	// 不用 Boolean(signal.aborted):那样 verify/checker 期间被 abort 也会算 aborted,
 	// 而 worker 那轮其实成功了,会被 handleTaskRun 误判进 abort 分支或漏判 FAIL。
 	let workerAborted = false;
+	const apiUsage: TaskApiUsage[] = [];
 	// ponytail: 纯诊断计时。workerFirstOutput = 从 runTaskWithRetry 进入到 worker 子进程
 	// 首次产出(子进程启动 + 首轮 LLM 的延迟);workerMs/verifyMs = 各阶段累计。不改执行逻辑。
 	const runStartMs = Date.now();
@@ -1220,6 +1252,7 @@ async function runTaskWithRetry(
 			onUpdate: wrappedOnWorkerUpdate,
 		});
 		workerMs += Date.now() - workerStartMs;
+		addTaskApiUsage(apiUsage, workerResult.model, workerResult.usage);
 
 		// worker 失败不重试(与 /task run 一致)。worker 被中断专门标记,区别于普通失败。
 		if (!workerResult.ok) {
@@ -1242,6 +1275,7 @@ async function runTaskWithRetry(
 			outputDir,
 			retryBudget: maxRetry - attempt - 1,
 		}, { cwd, signal: opts.signal });
+		addTaskApiUsage(apiUsage, checkerResult.model, checkerResult.usage);
 		if (checkerResult.verdict === "abort") {
 			checkerAborted = true;
 			break;
@@ -1261,7 +1295,7 @@ async function runTaskWithRetry(
 	for (const [key, value] of Object.entries(workerResult?.phases ?? {})) {
 		phases[`worker.${key}`] = value;
 	}
-	return { workerResult: workerResult!, verifyResult, attempts, aborted: workerAborted, checkerAborted, phases };
+	return { workerResult: workerResult!, verifyResult, attempts, aborted: workerAborted, checkerAborted, apiUsage, phases };
 }
 
 async function executeSubtask(
@@ -1307,6 +1341,7 @@ async function executeSubtask(
 	const maxRetry = 3;
 	const title = `⏳ run_task 已启动: ${request.name}`;
 	const progress: string[] = [];
+	const apiUsage: TaskApiUsage[] = [];
 	setTaskRunWidget(ctx, [title, "正在解析输入..."]);
 	// ponytail: resolveRuntimeInput 的错误(如 dispatcher 缺必填字段)也要纳入单 task 隔离,
 	// 否则 parallel 模式下单个 task 的解析失败会上抛,穿过 mapWithConcurrencyLimit,
@@ -1315,7 +1350,7 @@ async function executeSubtask(
 	let runtimeInput: unknown;
 	let outcome: TaskRetryOutcome;
 	try {
-		runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, request.input, true);
+		runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, request.input, true, (item) => addTaskApiUsage(apiUsage, item.model, item.usage));
 		outcome = await runTaskWithRetry(loaded, runtimeInput, outputDir, cwdOf(ctx), {
 			env: { ...workerEnv, ...requiredEnvValues(loaded.contract) },
 			signal,
@@ -1364,6 +1399,7 @@ async function executeSubtask(
 			workerSummary: `执行异常: ${message}`,
 			duration: (Date.now() - startedAt) / 1000,
 			attempts: 1,
+			apiUsage,
 			// parseFailed 标记:此 FAIL 是输入解析失败(非 worker/verify 失败)。
 			// run_task 工具层据此判断:单任务(single)全 parseFailed → 标 isError 让 agent 知道是输入问题;
 			// 并行(parallel)部分 parseFailed → 不炸批次,各 task 独立 PASS/FAIL。
@@ -1371,6 +1407,7 @@ async function executeSubtask(
 		} as SubtaskResult;
 	}
 	const duration = (Date.now() - startedAt) / 1000;
+	for (const item of outcome.apiUsage) addTaskApiUsage(apiUsage, item.model, item.usage);
 	const status = outcome.workerResult.ok && outcome.verifyResult.passed ? "pass" : "fail";
 	await appendRunToTaskbook(loaded.scope, cwdOf(ctx), request.name, {
 		timestamp: new Date().toISOString(),
@@ -1390,6 +1427,9 @@ async function executeSubtask(
 		workerSummary: outcome.workerResult.ok ? outcome.workerResult.summary : (outcome.workerResult.errorMessage ?? "worker failed"),
 		duration,
 		attempts: outcome.attempts,
+		usage: outcome.workerResult.usage,
+		model: outcome.workerResult.model,
+		apiUsage,
 		phases: outcome.phases,
 	};
 }

@@ -1,5 +1,5 @@
 import { discoverAgents } from "../subagent-agents.ts";
-import { getFinalOutput, isFailedResult, type SingleResult } from "../subagent-runtime.ts";
+import { getFinalOutput, isFailedResult, type SingleResult, type UsageStats } from "../subagent-runtime.ts";
 import { runSingleAgent } from "../subagent.ts";
 import type { VerifyFailure } from "./task-book.ts";
 
@@ -14,6 +14,8 @@ export interface CheckerResult {
 	hint: string;
 	verdict: "retry" | "abort";
 	reason: string;
+	model?: string;
+	usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
 }
 
 type RunSingleAgentLike = typeof runSingleAgent;
@@ -77,6 +79,24 @@ export function parseCheckerResult(text: string): CheckerResult | undefined {
 		: undefined;
 }
 
+function compactUsage(usage: UsageStats): CheckerResult["usage"] {
+	return {
+		input: usage.input,
+		output: usage.output,
+		cacheRead: usage.cacheRead,
+		cacheWrite: usage.cacheWrite,
+		cost: usage.cost,
+	};
+}
+
+function usageDetails(result: SingleResult): Pick<CheckerResult, "model" | "usage"> {
+	const usage = compactUsage(result.usage)!;
+	return {
+		...(result.model ? { model: result.model } : {}),
+		...(usage.input + usage.output + usage.cacheRead + usage.cacheWrite > 0 ? { usage } : {}),
+	};
+}
+
 export async function dispatchChecker(
 	input: CheckerInput,
 	opts: { cwd: string; signal?: AbortSignal },
@@ -105,11 +125,14 @@ export async function dispatchChecker(
 			hint: result.stderr || output || "checker 执行失败",
 			verdict: "abort",
 			reason: "checker agent failed",
+			...usageDetails(result),
 		};
 	}
-	return parseCheckerResult(output) ?? {
+	const parsed = parseCheckerResult(output);
+	return parsed ? { ...parsed, ...usageDetails(result) } : {
 		hint: output || "checker 未输出结构化结果",
 		verdict: "abort",
 		reason: "checker output was not parseable JSON",
+		...usageDetails(result),
 	};
 }

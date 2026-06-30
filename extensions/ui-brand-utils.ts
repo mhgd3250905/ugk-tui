@@ -35,6 +35,15 @@ export interface UgkFooterUsage {
 	contextWindow: number;
 }
 
+export interface UgkApiUsage {
+	model: string;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
+}
+
 export interface UgkFooterOptions {
 	cwd: string;
 	branch: string | null;
@@ -42,6 +51,7 @@ export interface UgkFooterOptions {
 	thinkingLevel?: string;
 	statuses: string[];
 	usage: UgkFooterUsage;
+	apiUsage?: UgkApiUsage[];
 	width: number;
 	uiLanguage?: UiLanguage;
 }
@@ -102,6 +112,30 @@ function formatTokens(count: number): string {
 	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
 	if (count < 1000000) return `${Math.round(count / 1000)}k`;
 	return `${(count / 1000000).toFixed(1)}M`;
+}
+
+function formatMillionTokens(count: number): string {
+	return `${(count / 1000000).toFixed(2)}M`;
+}
+
+function totalApiTokens(item: UgkApiUsage): number {
+	return item.input + item.output + item.cacheRead + item.cacheWrite;
+}
+
+function formatApiUsageLine(items: UgkApiUsage[] | undefined): string {
+	const visible = (items ?? [])
+		.filter((item) => item.model && totalApiTokens(item) > 0)
+		.sort((a, b) => totalApiTokens(b) - totalApiTokens(a))
+		.slice(0, 3);
+	if (visible.length === 0) return "";
+	return `API ${visible.map((item) => [
+		item.model,
+		`Σ${formatMillionTokens(totalApiTokens(item))}`,
+		`↑${formatMillionTokens(item.input)}`,
+		`↓${formatMillionTokens(item.output)}`,
+		item.cacheRead ? `R${formatMillionTokens(item.cacheRead)}` : "",
+		item.cacheWrite ? `W${formatMillionTokens(item.cacheWrite)}` : "",
+	].filter(Boolean).join(" ")).join(" | ")}`;
 }
 
 function formatContextProgress(percent: number | null): string {
@@ -275,10 +309,12 @@ export function buildUgkFooterLines(options: UgkFooterOptions): string[] {
 		`🧠 ${formatContextProgress(options.usage.contextPercent)} ${context}`,
 	].filter(Boolean);
 	const model = options.thinkingLevel ? `🤖 ${options.modelId} · ${options.thinkingLevel}` : `🤖 ${options.modelId}`;
+	const apiUsage = formatApiUsageLine(options.apiUsage);
 
 	return [
 		hardTruncate(`ugk ${formatCwd(options.cwd)}${branch}`, options.width),
 		hardTruncate(`${usage.join(" ")}  ${model}`, options.width),
+		...(apiUsage ? [hardTruncate(apiUsage, options.width)] : []),
 		hardTruncate(options.statuses.join(" "), options.width),
 	];
 }

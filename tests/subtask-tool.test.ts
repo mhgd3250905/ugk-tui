@@ -96,10 +96,11 @@ function workerOk(summary = "done") {
 		agent: "worker",
 		agentSource: "user",
 		task: "task",
+		model: "deepseek-v4-pro",
 		exitCode: 0,
 		messages: [{ role: "assistant", content: [{ type: "text", text: summary }] }],
 		stderr: "",
-		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		usage: { input: 1000000, output: 200000, cacheRead: 10000, cacheWrite: 0, cost: 0.02, contextTokens: 1210000, turns: 1 },
 	} as any;
 }
 
@@ -170,6 +171,14 @@ test("run_task single returns machine-verifiable PASS and records the run", asyn
 		// (如"先抓列表再下载"的组合编排)。terminate 会截断多步编排的第一步。
 		assert.notEqual(result.terminate, true, "run_task 不应 terminate,要让 agent 决定是否继续");
 		assert.match(result.details.results[0].workerSummary, /写好了/, "workerSummary 仍在 details");
+		assert.equal(result.details.results[0].model, "deepseek-v4-pro");
+		assert.deepEqual(result.details.results[0].usage, {
+			input: 1000000,
+			output: 200000,
+			cacheRead: 10000,
+			cacheWrite: 0,
+			cost: 0.02,
+		});
 		assert.doesNotMatch(result.content[0].text, /workerSummary/, "workerSummary 不进 LLM context");
 		// ponytail: phases 纯诊断,落盘进 run 记录(回答"到底慢在哪")。
 		const runPhases = loaded?.taskbook.runs.at(-1)?.phases;
@@ -796,7 +805,8 @@ function checkerRetryMock() {
 		exitCode: 0,
 		messages: [{ role: "assistant", content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify({ hint: "修正 JSON 语法", verdict: "retry", reason: "JSON 非法,可修" })}\n\`\`\`` }] }],
 		stderr: "",
-		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		model: "deepseek-v4-flash",
+		usage: { input: 300000, output: 40000, cacheRead: 0, cacheWrite: 0, cost: 0.004, contextTokens: 340000, turns: 1 },
 	} as any);
 }
 
@@ -853,6 +863,16 @@ test("run_task retries worker after verify fail and passes on the second attempt
 		assert.match(result.content[0].text, /PASS/);
 		assert.equal(result.details.results[0].status, "pass");
 		assert.equal(result.details.results[0].attempts, 2, "worker 应被调 2 次");
+		assert.deepEqual(result.details.results[0].apiUsage, [
+			{
+				model: "deepseek-v4-pro",
+				usage: { input: 2000000, output: 400000, cacheRead: 20000, cacheWrite: 0, cost: 0.04 },
+			},
+			{
+				model: "deepseek-v4-flash",
+				usage: { input: 300000, output: 40000, cacheRead: 0, cacheWrite: 0, cost: 0.004 },
+			},
+		]);
 		assert.equal(workerCalls, 2);
 		assert.equal(checkerCalls, 1, "checker 必须被调用以生成 feedback");
 	} finally {

@@ -1,7 +1,11 @@
-import { complete } from "@earendil-works/pi-ai";
+import { complete, type AssistantMessage, type Usage } from "@earendil-works/pi-ai";
 import { normalizeAgentModelForCli } from "../subagent-runtime.ts";
 
 type Dispatcher = (ctx: any, skill: string, contract: unknown, rawInput: string) => Promise<unknown>;
+type ApiUsageSink = (item: {
+	model: string;
+	usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
+}) => void;
 let dispatcherForTests: Dispatcher | undefined;
 
 export function setTaskDispatcherForTests(dispatcher: Dispatcher | undefined): void {
@@ -186,7 +190,22 @@ function findModel(ctx: any, modelOverride?: string): any {
 	return ctx.modelRegistry?.find?.(normalized.slice(0, slash), normalized.slice(slash + 1)) ?? ctx.model;
 }
 
-async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInput: string, modelOverride?: string): Promise<unknown | undefined> {
+function usageSummary(usage: Usage): { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number } {
+	return {
+		input: usage.input || 0,
+		output: usage.output || 0,
+		cacheRead: usage.cacheRead || 0,
+		cacheWrite: usage.cacheWrite || 0,
+		cost: usage.cost?.total || 0,
+	};
+}
+
+function messageModelId(message: AssistantMessage): string {
+	const model = message.model || "";
+	return message.provider && model && !model.includes("/") ? `${message.provider}/${model}` : (model || message.provider || "unknown");
+}
+
+async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInput: string, modelOverride?: string, onApiUsage?: ApiUsageSink): Promise<unknown | undefined> {
 	if (dispatcherForTests) return await dispatcherForTests(ctx, skill, contract, rawInput);
 	const model = findModel(ctx, modelOverride);
 	const auth = model ? await ctx.modelRegistry?.getApiKeyAndHeaders?.(model) : undefined;
@@ -211,6 +230,7 @@ async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInp
 	} catch {
 		return undefined;
 	}
+	onApiUsage?.({ model: messageModelId(response), usage: usageSummary(response.usage) });
 	const text = response.content
 		.filter((block): block is { type: "text"; text: string } => block.type === "text")
 		.map((block) => block.text)
@@ -218,7 +238,7 @@ async function callDispatcher(ctx: any, skill: string, contract: unknown, rawInp
 	return extractRuntimeInputFromText(text);
 }
 
-export async function resolveRuntimeInputFromText(ctx: any, skill: string, contract: unknown, rawInput: string, modelOverride?: string, headless = false): Promise<unknown> {
+export async function resolveRuntimeInputFromText(ctx: any, skill: string, contract: unknown, rawInput: string, modelOverride?: string, headless = false, onApiUsage?: ApiUsageSink): Promise<unknown> {
 	const fields = runtimeFields(contract);
 	const required = runtimeRequiredFields(contract);
 	// ponytail: required 门禁从"字段 key 存在"升级到"字段有有效值"。dispatcher 作为唯一参数入口,
@@ -240,7 +260,7 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 		if (local && coversRequired(local)) return runtimeInputWithDefaults(contract, local);
 		// 不 .catch:dispatcher 配置错误(模型/auth 不可用)要透传给用户;complete() 的运行时
 		// 错误已在 callDispatcher 内部 catch 成 undefined,不会到这里。
-		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride);
+		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride, onApiUsage);
 		if (dispatched && coversRequired(dispatched)) {
 			// ponytail: dispatcher 补全 required 后,显式 local(field=value/JSON,用户手写)优先于
 			// dispatcher 的语义推断。修 "https://x, page=2":local 抽 page=2,dispatcher 抽 url,

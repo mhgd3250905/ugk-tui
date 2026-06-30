@@ -53,6 +53,7 @@ test("dispatchWorker maps subagent result to task worker result", async () => {
 			agent: agentName,
 			agentSource: "user",
 			task,
+			model: "deepseek-v4-pro",
 			exitCode: 0,
 			messages: [{
 				role: "assistant",
@@ -60,7 +61,7 @@ test("dispatchWorker maps subagent result to task worker result", async () => {
 				usage: { input: 10, output: 5, cost: { total: 0.01 }, totalTokens: 15 },
 			}],
 			stderr: "",
-			usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: 0.01, contextTokens: 15, turns: 1 },
+			usage: { input: 10, output: 5, cacheRead: 7, cacheWrite: 3, cost: 0.01, contextTokens: 25, turns: 1 },
 		} as any;
 	});
 	try {
@@ -74,7 +75,8 @@ test("dispatchWorker maps subagent result to task worker result", async () => {
 		assert.equal(result.ok, true);
 		assert.equal(result.outputDir, "E:/out");
 		assert.equal(result.summary, "生成了 report.json");
-		assert.deepEqual(result.usage, { input: 10, output: 5, cost: 0.01 });
+		assert.equal(result.model, "deepseek-v4-pro");
+		assert.deepEqual(result.usage, { input: 10, output: 5, cacheRead: 7, cacheWrite: 3, cost: 0.01 });
 		assert.match(receivedTask, /# Skill/);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);

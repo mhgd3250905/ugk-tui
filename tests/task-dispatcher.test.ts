@@ -156,6 +156,40 @@ test("task dispatcher uses the current session model", async () => {
 	}
 });
 
+test("resolveRuntimeInputFromText reports dispatcher model usage", async () => {
+	const faux = registerFauxProvider();
+	const response = fauxAssistantMessage("```json\n{\"text\":\"Hello 世界\",\"section\":\"技术\"}\n```") as any;
+	response.usage = {
+		input: 120000,
+		output: 30000,
+		cacheRead: 5000,
+		cacheWrite: 0,
+		totalTokens: 155000,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.002 },
+	};
+	faux.setResponses([response]);
+	const model = faux.getModel();
+	const usage: any[] = [];
+	try {
+		const value = await resolveRuntimeInputFromText({
+			model,
+			modelRegistry: {
+				async getApiKeyAndHeaders() {
+					return { ok: true, apiKey: "sk-test", headers: {} };
+				},
+			},
+		}, "# Skill", { runtimeInput: ["text", "section"], runtimeInputMeta: { text: {}, section: {} } }, "Hello 世界", undefined, false, (item: any) => usage.push(item));
+
+		assert.deepEqual(value, { text: "Hello 世界", section: "技术" });
+		assert.equal(usage.length, 1);
+		assert.equal(usage[0].model, "faux/faux-1");
+		assert.ok(usage[0].usage.input > 0);
+		assert.ok(usage[0].usage.output > 0);
+	} finally {
+		faux.unregister();
+	}
+});
+
 test("task dispatcher uses contract dispatcherModel override when available", async () => {
 	// ponytail: 多字段,强制走 dispatcher。测的是 dispatcherModel 覆盖解析,不是解析路径本身。
 	const faux = registerFauxProvider();

@@ -266,6 +266,7 @@ worker 退出，上下文销毁
 ```
 > - `outputDir` 固定写 `"<runtime>"`，由系统在运行时注入实际输出目录。
 > - `runtimeInput` 是**外部每次运行传入的参数名**，参数化任务全靠它。
+> - 枚举字段在 `runtimeInputMeta.<field>` 写 `allowedValues`，如 `["normal","talkative"]`；机制会把可选值展示给 main agent，并阻止非法 `field=value` 覆盖 dispatcher 的规范化结果。
 > - `requiredTools` 填 worker 需要的受保护工具（如 `chrome_cdp`），没有就空数组。
 
 ### 4. `skill.md` — worker 执行指令

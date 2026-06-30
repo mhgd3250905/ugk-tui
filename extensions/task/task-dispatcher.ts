@@ -39,6 +39,8 @@ export function buildTaskDispatcherPrompt(skill: string, contract: unknown, rawI
 		"提取规则:",
 		"- 逐个对照 contract.runtimeInput 的字段,从用户输入里找出每个字段的值。",
 		"- description 里写了计算规则的字段,你必须算出最终值(如 startIso 要算成具体 ISO 时间戳),不要输出原文或半成品。",
+		"- description 里要求抽取参考词/术语/人名时,从用户自然语言里整理出这些词并按 description 要求的格式输出;不要要求用户按标准格式填写。",
+		"- runtimeInputMeta.<field>.allowedValues 存在时,该字段只能输出其中一个值;把用户别名/自然语言描述映射到最接近的允许值。",
 		"- runtimeInputMeta.<field>.default 存在且用户未提供该字段时,省略该字段,系统会补默认值。",
 		"- 不要编造用户没给的、也没有 default 的字段值。",
 		"",
@@ -99,6 +101,44 @@ function runtimeDefaults(contract: unknown): Record<string, unknown> {
 		}
 	}
 	return defaults;
+}
+
+function fieldAllowedValues(contract: unknown, field: string): string[] | undefined {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return undefined;
+	const meta = (contract as Record<string, unknown>).runtimeInputMeta;
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+	const fieldMeta = (meta as Record<string, unknown>)[field];
+	if (!fieldMeta || typeof fieldMeta !== "object" || Array.isArray(fieldMeta)) return undefined;
+	const value = (fieldMeta as Record<string, unknown>).allowedValues;
+	return Array.isArray(value) && value.every((item) => typeof item === "string" || typeof item === "number")
+		? value.map(String)
+		: undefined;
+}
+
+function invalidAllowedFields(contract: unknown, input: unknown): string[] {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return [];
+	return runtimeFields(contract).filter((field) => {
+		if (!Object.prototype.hasOwnProperty.call(input, field)) return false;
+		const allowed = fieldAllowedValues(contract, field);
+		return !!allowed && !allowed.includes(String((input as Record<string, unknown>)[field]));
+	});
+}
+
+function allowedFieldsValid(contract: unknown, input: unknown): boolean {
+	return invalidAllowedFields(contract, input).length === 0;
+}
+
+function hasAllowedFieldValues(contract: unknown, input: unknown, fields: string[]): boolean {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return false;
+	return fields.every((field) => {
+		if (!Object.prototype.hasOwnProperty.call(input, field)) return false;
+		const allowed = fieldAllowedValues(contract, field);
+		return !allowed || allowed.includes(String((input as Record<string, unknown>)[field]));
+	});
+}
+
+function objectFields(input: unknown): string[] {
+	return input && typeof input === "object" && !Array.isArray(input) ? Object.keys(input as Record<string, unknown>) : [];
 }
 
 /**
@@ -254,26 +294,12 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 
 	if (rawInput.trim()) {
 		const local = localRuntimeInput(contract, rawInput);
-		// local 必须覆盖所有 required 字段才直接返回;否则缺 required 时不 short-circuit,
-		// 让 dispatcher 兜底补全(它更擅长理解自然语言里的裸 URL 等)。
-		// 修复:之前 local 抽到任意字段就返回,导致 "URL, page=1" 只抽到 page 就丢失 url。
-		if (local && coversRequired(local)) return runtimeInputWithDefaults(contract, local);
+		const localFields = objectFields(local);
 		// 不 .catch:dispatcher 配置错误(模型/auth 不可用)要透传给用户;complete() 的运行时
 		// 错误已在 callDispatcher 内部 catch 成 undefined,不会到这里。
 		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride, onApiUsage);
-		if (dispatched && coversRequired(dispatched)) {
-			// ponytail: dispatcher 补全 required 后,显式 local(field=value/JSON,用户手写)优先于
-			// dispatcher 的语义推断。修 "https://x, page=2":local 抽 page=2,dispatcher 抽 url,
-			// 不合的话 page 被 default=1 覆盖。
-			const merged = local ? { ...dispatched, ...local } : dispatched;
-			return runtimeInputWithDefaults(contract, merged);
-		}
-		// dispatcher 也没抽全 required,或抽到的 required 字段值无效(残片/空值)。
-		// partial 不覆盖 required 则不返回,否则下游 worker 拿到不完整/无效的 input
-		// 会 hardcode 或猜值,绕开 contract 约束。headless 时直接抛错让调用方补 input;
-		// 交互式时落到后面的 UI prompt。
-		const partial = dispatched ?? local;
-		if (partial && coversRequired(partial)) return runtimeInputWithDefaults(contract, partial);
+		const partial = dispatched ?? {};
+		if (dispatched && coversRequired(dispatched) && allowedFieldsValid(contract, dispatched) && hasAllowedFieldValues(contract, dispatched, localFields)) return runtimeInputWithDefaults(contract, dispatched);
 		if (partial && headless) {
 			// ponytail: 区分"缺字段"和"字段值无效",给用户精准反馈。
 			// 无效值(如 dispatcher 输出残片)和缺失一样视为解析失败 —— dispatcher 是唯一入口。
@@ -282,9 +308,14 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 				Object.prototype.hasOwnProperty.call(partial, field) &&
 				!isValidRuntimeValue((partial as Record<string, unknown>)[field]),
 			);
+			const invalidAllowed = invalidAllowedFields(contract, partial);
+			const missingLocal = localFields.filter((field) => !Object.prototype.hasOwnProperty.call(partial, field));
 			const detail = [
+				!dispatched ? "dispatcher 无有效输出" : "",
 				missing.length ? `缺失字段: ${missing.join(", ")}` : "",
 				invalid.length ? `字段值无效(空值/残片): ${invalid.join(", ")}` : "",
+				invalidAllowed.length ? `字段值不在允许范围: ${invalidAllowed.map((field) => `${field}=${JSON.stringify((partial as Record<string, unknown>)[field])} (allowed: ${fieldAllowedValues(contract, field)?.join("|")})`).join(", ")}` : "",
+				missingLocal.length ? `dispatcher 未输出显式字段: ${missingLocal.join(", ")}` : "",
 			].filter(Boolean).join("; ");
 			throw new Error(`dispatcher 未能从输入解析出有效的必填字段 —— ${detail}。请用更明确、完整的 input 重试,或确认 taskbook 的 runtimeInput 定义。`);
 		}

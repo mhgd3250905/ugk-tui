@@ -133,6 +133,19 @@ test("buildTaskbookPrompt lists task names, descriptions, and input fields", asy
 				artifacts: [],
 			},
 		});
+		await saveTaskbook("project", cwd, "enumed", {
+			description: "enumed description",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: {
+				runtimeInput: ["verbosity"],
+				runtimeInputMeta: {
+					verbosity: { default: "normal", allowedValues: ["normal", "talkative"] },
+				},
+				artifacts: [],
+			},
+		});
 
 		const prompt = await buildTaskbookPrompt(cwd);
 
@@ -141,6 +154,7 @@ test("buildTaskbookPrompt lists task names, descriptions, and input fields", asy
 		assert.match(prompt, /- beta — beta description/);
 		assert.match(prompt, /input: text/);
 		assert.match(prompt, /defaults — defaulted description \(input: topN=10, section=技术\)/);
+		assert.match(prompt, /enumed — enumed description \(input: verbosity=normal\{normal\|talkative\}\)/);
 		assert.doesNotMatch(prompt, /contract\.json/);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });

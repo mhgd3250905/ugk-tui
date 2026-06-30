@@ -1058,7 +1058,19 @@ function formatTaskbookUpdateSummary(loaded: LoadedTaskbook): string {
 }
 
 function setTaskRunWidget(ctx: any, lines: string[] | undefined): void {
-	ctx.ui?.setWidget?.("task-run-view", lines, { placement: "aboveEditor" });
+	try {
+		ctx.ui?.setWidget?.("task-run-view", lines, { placement: "aboveEditor" });
+	} catch (error) {
+		if (!String(error instanceof Error ? error.message : error).includes("extension ctx is stale")) throw error;
+	}
+}
+
+function safeTaskNotify(ctx: any, content: string, level: "info" | "warning" | "error" = "info"): void {
+	try {
+		ctx.ui.notify(content, level);
+	} catch (error) {
+		if (!String(error instanceof Error ? error.message : error).includes("extension ctx is stale")) throw error;
+	}
 }
 
 function sendTaskMessage(pi: ExtensionAPI, ctx: any, content: string, fallbackLevel: "info" | "warning" | "error" = "info"): void {
@@ -1066,7 +1078,7 @@ function sendTaskMessage(pi: ExtensionAPI, ctx: any, content: string, fallbackLe
 		(pi as any).sendMessage({ customType: "task-message", content, display: true }, { triggerTurn: false });
 		return;
 	}
-	ctx.ui.notify(content, fallbackLevel);
+	safeTaskNotify(ctx, content, fallbackLevel);
 }
 
 function sendTaskProgressMessage(pi: ExtensionAPI, details: TaskProgressDetails): void {
@@ -1588,7 +1600,7 @@ async function handleTaskRun(
 			const report = await formatRunResult(loaded, outputDir, workerResult, verifyResult, false, attempts, duration, runState.progress, runState.notes, outcome.phases);
 			lastTaskRunReview = { taskbookName: finalName, content: buildTaskRunReviewContext(finalName, report) };
 			onReviewReady?.(lastTaskRunReview);
-			ctx.ui.notify(`已停止 taskbook "${finalName}" 运行。下一步可用 /task 选择"复盘上次运行"。`, "info");
+			safeTaskNotify(ctx, `已停止 taskbook "${finalName}" 运行。下一步可用 /task 选择"复盘上次运行"。`, "info");
 			return;
 		}
 
@@ -1612,9 +1624,9 @@ async function handleTaskRun(
 
 		// FAIL: worker 失败 / verify 一直没过 / checker 主动 abort
 		if (!workerResult.ok) {
-			ctx.ui.notify(`worker 执行失败: ${workerResult.errorMessage}`, "error");
+			safeTaskNotify(ctx, `worker 执行失败: ${workerResult.errorMessage}`, "error");
 		} else if (outcome.checkerAborted) {
-			ctx.ui.notify("checker 判 abort,提前终止。", "warning");
+			safeTaskNotify(ctx, "checker 判 abort,提前终止。", "warning");
 		}
 		await appendRunToTaskbook(loaded.scope, cwdOf(ctx), finalName, {
 			timestamp: new Date().toISOString(),
@@ -1638,7 +1650,7 @@ async function handleTaskRun(
 		});
 		sendTaskMessage(pi, ctx, `${report}\n\n下一步: 输入修改意见修正 taskbook,或用 /task 选择修正/重新运行/查看/放弃。`, "error");
 	} catch (error) {
-		ctx.ui.notify(`taskbook "${finalName}" 运行异常: ${error instanceof Error ? error.message : String(error)}`, "error");
+		safeTaskNotify(ctx, `taskbook "${finalName}" 运行异常: ${error instanceof Error ? error.message : String(error)}`, "error");
 	} finally {
 		if (activeTaskRun === runState) activeTaskRun = undefined;
 		setTaskRunWidget(ctx, undefined);

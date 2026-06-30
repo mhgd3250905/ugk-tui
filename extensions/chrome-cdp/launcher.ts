@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -95,9 +95,33 @@ export function getChromeLaunchCommand(options: {
 const managedChromeChildren = new Set<ChildProcess>();
 let teardownHookInstalled = false;
 
+// ponytail: 必须杀整棵进程树,不能只杀主进程。Chrome 启动后会派生大量子进程
+// (renderer/gpu/crashpad/utility...),窗口由整棵树支撑。只 child.kill() 主进程:
+//   - Windows:子进程不级联,窗口残留(实测验证:主进程被 kill 但 PID 树下的 renderer
+//     仍存活,Chrome 窗口不消失)。
+//   - Unix:detached:true 让 Chrome 成新进程组长,kill(-pid) 整组才彻底。
+function killChromeTree(child: ChildProcess): void {
+	const pid = child.pid;
+	if (pid === undefined) return;
+	try {
+		if (process.platform === "win32") {
+			// taskkill /T 递归 kill 进程树;/F 强制。同步且无子进程残留。
+			spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+		} else {
+			// 负 PID = 杀整个进程组(detached:true 时 Chrome 是组长)。先组,再单独兜底。
+			try { process.kill(-pid, "SIGTERM"); } catch { /* 组可能不存在,fallthrough */ }
+			try { child.kill("SIGTERM"); } catch { /* 主进程可能已退出 */ }
+		}
+	} catch { /* best-effort:进程可能已退出 */ }
+}
+
+// ponytail: test override —— 让测试注入 fake kill(避免真调系统 taskkill/process.kill),
+// 验证 teardown 是否对每个 managed child 都调了进程树 kill。
+let killChromeTreeImpl: (child: ChildProcess) => void = killChromeTree;
+
 function teardownManagedChrome(): void {
 	for (const child of managedChromeChildren) {
-		try { child.kill(); } catch { /* best-effort:进程可能已退出 */ }
+		killChromeTreeImpl(child);
 	}
 	managedChromeChildren.clear();
 }
@@ -142,10 +166,17 @@ export function launchChromeCdp(port: number): string {
 }
 
 // ponytail: 测试专用导出。不真 spawn Chrome,直接验证 Set 注册 + teardown kill 语义。
+// killChromeTree 单独导出:端到端测试要直接验证"杀整棵进程树"的系统行为(单元 mock 测不到)。
 export const __testOnly = {
 	get managedChildren(): Set<ChildProcess> { return managedChromeChildren; },
 	teardown: teardownManagedChrome,
+	killChromeTree,
 	resetTeardownHook(): void { teardownHookInstalled = false; },
+	setKillImpl(fn: (child: ChildProcess) => void): () => void {
+		const prev = killChromeTreeImpl;
+		killChromeTreeImpl = fn;
+		return () => { killChromeTreeImpl = prev; };
+	},
 };
 
 export interface ChromeCdpReadinessResult {

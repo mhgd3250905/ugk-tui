@@ -175,6 +175,18 @@ export async function currentSession(request, env) {
 	return json({ user: user ? { id: user.id, login: user.login, avatarUrl: user.avatar_url } : null });
 }
 
+export async function marketplaceStats(env) {
+	const row = await env.DB.prepare(
+		"SELECT COUNT(*) AS task_count, COALESCE(SUM(download_count), 0) AS download_count, COALESCE(SUM(like_count), 0) AS like_count, COALESCE(SUM(favorite_count), 0) AS favorite_count FROM tasks",
+	).first();
+	return json({
+		tasks: row?.task_count ?? 0,
+		downloads: row?.download_count ?? 0,
+		likes: row?.like_count ?? 0,
+		favorites: row?.favorite_count ?? 0,
+	});
+}
+
 export async function accountFavorites(request, env) {
 	const auth = await requireUser(request, env);
 	if (auth.response) return auth.response;

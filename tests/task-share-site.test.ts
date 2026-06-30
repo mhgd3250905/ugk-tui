@@ -42,9 +42,9 @@ test("task share manifest describes official taskbooks with matching local files
 		assert.equal(task.install, `ugk task install ${task.name}`);
 		assert.equal(task.zip, `downloads/${task.name}.zip`);
 		assert.equal(task.author, "UGK Official");
-		assert.equal(typeof task.stats.downloads, "number");
-		assert.equal(typeof task.stats.likes, "number");
-		assert.equal(typeof task.stats.favorites, "number");
+		assert.equal(task.stats.downloads, 0);
+		assert.equal(task.stats.likes, 0);
+		assert.equal(task.stats.favorites, 0);
 		assert.equal(typeof task.description, "string");
 		assert.equal(typeof task.exampleInput, "string");
 		assert.equal(typeof task.files, "object");
@@ -81,7 +81,12 @@ test("task share page exposes marketplace actions for every official task", asyn
 	assert.match(html, /api\/session/);
 	assert.match(html, /api\/account\/favorites/);
 	assert.match(html, /encodeURIComponent\(name\)\+'\/stats/);
+	assert.match(html, /api\/stats/);
 	assert.match(html, /account\//);
+	assert.match(html, /<svg class="icon"/);
+	assert.doesNotMatch(html, />Like<\/button>/);
+	assert.doesNotMatch(html, />Favorite<\/button>/);
+	assert.doesNotMatch(html, /Seed downloads|Seed likes/);
 
 	const accountPath = path.join(root, "account", "index.html");
 	assert.equal(existsSync(accountPath), true, `${accountPath} should exist`);
@@ -103,6 +108,8 @@ test("task share page exposes marketplace actions for every official task", asyn
 		assert.match(detail, /Sign in with GitHub/);
 		assert.match(detail, /data-action="like"/);
 		assert.match(detail, /data-action="favorite"/);
+		assert.doesNotMatch(detail, />Like<\/button>/);
+		assert.doesNotMatch(detail, />Favorite<\/button>/);
 
 		const zipPath = path.join(root, "downloads", `${task.name}.zip`);
 		assert.equal(existsSync(zipPath), true, `${zipPath} should exist`);

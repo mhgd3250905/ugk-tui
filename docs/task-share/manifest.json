@@ -1,6 +1,6 @@
 {
 	"version": 1,
-	"generatedAt": "2026-06-30T09:49:05.545Z",
+	"generatedAt": "2026-06-30T15:21:15.243Z",
 	"tasks": [
 		{
 			"name": "bili-up-homepage-spider",
@@ -44,9 +44,9 @@
 			"fileCount": 5,
 			"scriptCount": 0,
 			"stats": {
-				"downloads": 1200,
-				"likes": 80,
-				"favorites": 30
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/bili-up-homepage-spider/contract.json",
@@ -91,9 +91,9 @@
 			"fileCount": 5,
 			"scriptCount": 0,
 			"stats": {
-				"downloads": 1517,
-				"likes": 99,
-				"favorites": 41
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/bilibili-downloader/contract.json",
@@ -151,9 +151,9 @@
 			"fileCount": 9,
 			"scriptCount": 4,
 			"stats": {
-				"downloads": 1834,
-				"likes": 118,
-				"favorites": 52
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/contract.json",
@@ -242,9 +242,9 @@
 			"fileCount": 7,
 			"scriptCount": 2,
 			"stats": {
-				"downloads": 2151,
-				"likes": 137,
-				"favorites": 63
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/subtitle-fluent-translator/contract.json",
@@ -322,9 +322,9 @@
 			"fileCount": 7,
 			"scriptCount": 2,
 			"stats": {
-				"downloads": 2468,
-				"likes": 156,
-				"favorites": 74
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/subtitle-to-speech/contract.json",
@@ -389,9 +389,9 @@
 			"fileCount": 7,
 			"scriptCount": 2,
 			"stats": {
-				"downloads": 2785,
-				"likes": 175,
-				"favorites": 85
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/video-downloader/contract.json",
@@ -454,9 +454,9 @@
 			"fileCount": 7,
 			"scriptCount": 2,
 			"stats": {
-				"downloads": 3102,
-				"likes": 194,
-				"favorites": 96
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/video-zh-composer/contract.json",
@@ -542,9 +542,9 @@
 			"fileCount": 7,
 			"scriptCount": 2,
 			"stats": {
-				"downloads": 3419,
-				"likes": 213,
-				"favorites": 107
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/video-zh-dubber/contract.json",
@@ -615,9 +615,9 @@
 			"fileCount": 7,
 			"scriptCount": 2,
 			"stats": {
-				"downloads": 3736,
-				"likes": 232,
-				"favorites": 118
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/whisper-audio-to-text/contract.json",
@@ -711,9 +711,9 @@
 			"fileCount": 8,
 			"scriptCount": 3,
 			"stats": {
-				"downloads": 4053,
-				"likes": 251,
-				"favorites": 129
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/x-search/contract.json",
@@ -775,9 +775,9 @@
 			"fileCount": 7,
 			"scriptCount": 2,
 			"stats": {
-				"downloads": 4370,
-				"likes": 270,
-				"favorites": 140
+				"downloads": 0,
+				"likes": 0,
+				"favorites": 0
 			},
 			"files": {
 				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/x-video-downloader/contract.json",

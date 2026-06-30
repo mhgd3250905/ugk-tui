@@ -5,6 +5,7 @@ import {
 	currentSession,
 	githubCallback,
 	githubLogin,
+	marketplaceStats,
 	getTaskStats,
 	recordDownload,
 	toggleFavorite,
@@ -27,6 +28,17 @@ function createDb() {
 					return this;
 				},
 				async first() {
+					if (sql.startsWith("SELECT COUNT(*) AS task_count")) {
+						let downloads = 0;
+						let likes = 0;
+						let favorites = 0;
+						for (const task of tasks.values()) {
+							downloads += task.download_count;
+							likes += task.like_count;
+							favorites += task.favorite_count;
+						}
+						return { task_count: tasks.size, download_count: downloads, like_count: likes, favorite_count: favorites };
+					}
 					if (sql.startsWith("SELECT * FROM users WHERE id = ?")) return usersById.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT * FROM users WHERE github_id = ?")) return users.get(String(this.values[0])) ?? null;
 					if (sql.startsWith("SELECT 1 FROM task_likes")) return likes.has(`${this.values[0]}:${this.values[1]}`) ? { ok: 1 } : null;
@@ -196,4 +208,13 @@ test("download events work for anonymous users", async () => {
 	const body = await response.json();
 
 	assert.equal(body.downloads, 1);
+});
+
+test("marketplace stats summarize live D1 counters", async () => {
+	const testEnv = env();
+	await recordDownload(new Request("https://ugk-task-share.pages.dev/api/tasks/video-downloader/download", { method: "POST" }), testEnv, "video-downloader");
+	const response = await marketplaceStats(testEnv);
+	const body = await response.json();
+
+	assert.deepEqual(body, { tasks: 1, downloads: 1, likes: 0, favorites: 0 });
 });

@@ -22,6 +22,7 @@
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
+import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -408,6 +409,96 @@ function summarizeRequiredTools(contract: unknown): string {
 	return Array.isArray(requiredTools) && requiredTools.length > 0
 		? requiredTools.filter((item) => typeof item === "string").join(", ")
 		: "未声明受保护工具";
+}
+
+function missingRequiredEnv(contract: unknown, env: Record<string, string | undefined> = process.env): string[] {
+	const requiredEnv = asRecord(contract).requiredEnv;
+	return Array.isArray(requiredEnv)
+		? requiredEnv.filter((name): name is string => typeof name === "string" && name.trim().length > 0)
+			.filter((name) => !env[name]?.trim())
+		: [];
+}
+
+function requiredEnvValues(contract: unknown): Record<string, string> {
+	const requiredEnv = asRecord(contract).requiredEnv;
+	if (!Array.isArray(requiredEnv)) return {};
+	const values: Record<string, string> = {};
+	for (const name of requiredEnv) {
+		if (typeof name === "string" && process.env[name]?.trim()) values[name] = process.env[name]!;
+	}
+	return values;
+}
+
+async function readWindowsUserEnv(name: string): Promise<string | undefined> {
+	if (process.platform !== "win32") return undefined;
+	return await new Promise((resolve) => {
+		const child = spawn("powershell.exe", [
+			"-NoProfile",
+			"-Command",
+			"[Environment]::GetEnvironmentVariable($env:UGK_ENV_NAME,'User')",
+		], {
+			windowsHide: true,
+			env: { ...process.env, UGK_ENV_NAME: name },
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		let stdout = "";
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+		});
+		child.on("error", () => resolve(undefined));
+		child.on("close", () => {
+			const value = stdout.trim();
+			resolve(value || undefined);
+		});
+	});
+}
+
+async function hydrateRequiredEnv(contract: unknown): Promise<void> {
+	for (const name of missingRequiredEnv(contract)) {
+		const value = await readWindowsUserEnv(name);
+		if (value) process.env[name] = value;
+	}
+}
+
+async function persistWindowsUserEnv(name: string, value: string): Promise<void> {
+	if (process.platform !== "win32" || process.env.UGK_REQUIRED_ENV_PERSIST === "0") return;
+	await new Promise<void>((resolve) => {
+		const child = spawn("powershell.exe", [
+			"-NoProfile",
+			"-Command",
+			"[Environment]::SetEnvironmentVariable($env:UGK_ENV_NAME,$env:UGK_ENV_VALUE,'User')",
+		], {
+			windowsHide: true,
+			env: { ...process.env, UGK_ENV_NAME: name, UGK_ENV_VALUE: value },
+			stdio: "ignore",
+		});
+		child.on("error", () => resolve());
+		child.on("close", () => resolve());
+	});
+}
+
+async function promptMissingRequiredEnv(ctx: any, contract: unknown): Promise<string[]> {
+	await hydrateRequiredEnv(contract);
+	const missing = missingRequiredEnv(contract);
+	for (const name of missing) {
+		const value = await ctx.ui?.input?.(`缺少必要配置 ${name}`, "");
+		if (value?.trim()) {
+			process.env[name] = value.trim();
+			await persistWindowsUserEnv(name, value.trim());
+		}
+	}
+	return missingRequiredEnv(contract);
+}
+
+function formatMissingEnvMessage(names: string[]): string {
+	return [
+		`缺少必需环境变量: ${names.join(", ")}`,
+		"请按提示填写后重试。",
+		...names.map((name) => `PowerShell 持久配置: setx ${name} "你的值"`),
+		...names.map((name) => `仅当前 PowerShell: $env:${name}='你的值'`),
+		"不要把密钥写进 task 输入或聊天内容。",
+	].join("\n");
 }
 
 function buildTaskGuideItems(loaded: LoadedTaskbook): TaskGuideItem[] {
@@ -1117,6 +1208,20 @@ async function executeSubtask(
 	const startedAt = Date.now();
 	const runDir = path.join(cwdOf(ctx), ".tasks", "runs", `task-${request.name}-${startedAt}-${Math.random().toString(36).slice(2, 8)}`);
 	const outputDir = path.join(runDir, "output");
+	await hydrateRequiredEnv(loaded.contract);
+	const missingEnv = missingRequiredEnv(loaded.contract);
+	if (missingEnv.length > 0) {
+		return {
+			name: request.name,
+			status: "fail",
+			outputDir,
+			artifacts: [],
+			verifyFailures: [],
+			workerSummary: formatMissingEnvMessage(missingEnv),
+			duration: (Date.now() - startedAt) / 1000,
+			attempts: 0,
+		};
+	}
 	await mkdir(outputDir, { recursive: true });
 	const maxRetry = 3;
 	const title = `⏳ run_task 已启动: ${request.name}`;
@@ -1131,7 +1236,7 @@ async function executeSubtask(
 	try {
 		runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, request.input, true);
 		outcome = await runTaskWithRetry(loaded, runtimeInput, outputDir, cwdOf(ctx), {
-			env: workerEnv,
+			env: { ...workerEnv, ...requiredEnvValues(loaded.contract) },
 			signal,
 			maxRetry,
 			onWorkerStart: (attempt) => {
@@ -1268,6 +1373,11 @@ async function handleTaskRun(
 		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
 		return;
 	}
+	const missingEnv = await promptMissingRequiredEnv(ctx, loaded.contract);
+	if (missingEnv.length > 0) {
+		ctx.ui.notify(formatMissingEnvMessage(missingEnv), "warning");
+		return;
+	}
 	const finalRawInput = !name && !rawInput.trim()
 		? await ctx.ui?.input?.("一句话输入", "")
 		: rawInput;
@@ -1296,7 +1406,7 @@ async function handleTaskRun(
 	try {
 		let currentAttempt = 1;
 		const outcome = await runTaskWithRetry(loaded, runtimeInput, outputDir, cwdOf(ctx), {
-			env: workerEnv,
+			env: { ...workerEnv, ...requiredEnvValues(loaded.contract) },
 			signal: abortController.signal,
 			maxRetry,
 			onWorkerStart: (attempt) => {

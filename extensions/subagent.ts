@@ -71,6 +71,14 @@ export function getPiInvocation(args: string[]): { command: string; args: string
 
 export type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
+export function progressTextFromToolEvent(event: any): string | undefined {
+	if (event?.type !== "tool_execution_update") return undefined;
+	const content = event.partialResult?.content;
+	if (!Array.isArray(content)) return undefined;
+	const text = content.find((part: any) => part?.type === "text" && typeof part.text === "string")?.text;
+	return text?.trim() ? text : undefined;
+}
+
 export function buildSubagentChildEnv(
 	extraEnv: Record<string, string | undefined> = {},
 	baseEnv: Record<string, string | undefined> = process.env,
@@ -177,6 +185,14 @@ export async function runSingleAgent(
 					event = JSON.parse(line);
 				} catch {
 					return;
+				}
+
+				const progressText = progressTextFromToolEvent(event);
+				if (progressText && onUpdate) {
+					onUpdate({
+						content: [{ type: "text", text: progressText }],
+						details: makeDetails([currentResult]),
+					});
 				}
 
 				// ponytail: 诊断计时。第一个事件 = 子进程冷启动完成(Node+pi 初始化);

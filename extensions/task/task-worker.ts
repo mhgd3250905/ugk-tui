@@ -113,7 +113,7 @@ export async function dispatchWorker(
 				? (partial: Parameters<OnUpdateCallback>[0]) => {
 					const result = partial.details?.results?.[0];
 					// details/messages 缺失(部分模拟场景)→ fallback 到旧文本路径。
-					if (!result?.messages) {
+					if (!result?.messages?.length) {
 						const text = partial.content.find((part) => part.type === "text")?.text;
 						if (typeof text === "string") opts.onUpdate?.(text);
 						return;

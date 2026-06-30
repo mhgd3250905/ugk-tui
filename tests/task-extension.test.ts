@@ -1480,6 +1480,90 @@ test("/task run executes worker, verify, and records a pass run", async () => {
 	}
 });
 
+test("/task run blocks before worker when contract requiredEnv is missing", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	const previous = process.env.UGK_TEST_MISSING_ENV;
+	delete process.env.UGK_TEST_MISSING_ENV;
+	let workerCalled = false;
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async () => {
+		workerCalled = true;
+		throw new Error("worker should not run");
+	});
+	try {
+		await saveTaskbook("project", cwd, "needs-env", {
+			description: "needs env",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { runtimeInput: [], artifacts: [], requiredEnv: ["UGK_TEST_MISSING_ENV"] },
+		});
+
+		await commands.get("task").handler("run needs-env", ctx);
+		await waitForTaskRunForTests();
+
+		assert.equal(workerCalled, false);
+		assert.match(notifications.at(-1)?.message ?? "", /UGK_TEST_MISSING_ENV/);
+		assert.match(notifications.at(-1)?.message ?? "", /setx UGK_TEST_MISSING_ENV/);
+		const loaded = await loadTaskbook(cwd, "needs-env");
+		assert.equal(loaded?.taskbook.runs.length, 0);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		if (previous === undefined) delete process.env.UGK_TEST_MISSING_ENV;
+		else process.env.UGK_TEST_MISSING_ENV = previous;
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/task run prompts for missing requiredEnv and passes it to worker", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx } = makeCtx();
+	const previous = process.env.UGK_TEST_REQUIRED_ENV;
+	const previousPersist = process.env.UGK_REQUIRED_ENV_PERSIST;
+	delete process.env.UGK_TEST_REQUIRED_ENV;
+	process.env.UGK_REQUIRED_ENV_PERSIST = "0";
+	let workerEnv: Record<string, string | undefined> | undefined;
+	ctx.ui.input = () => "secret-from-user";
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		workerEnv = args[9];
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	try {
+		await saveTaskbook("project", cwd, "needs-env-input", {
+			description: "needs env",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { runtimeInput: [], artifacts: [], requiredEnv: ["UGK_TEST_REQUIRED_ENV"] },
+		});
+
+		await commands.get("task").handler("run needs-env-input", ctx);
+		await waitForTaskRunForTests();
+
+		assert.equal(workerEnv?.UGK_TEST_REQUIRED_ENV, "secret-from-user");
+		assert.equal(process.env.UGK_TEST_REQUIRED_ENV, "secret-from-user");
+		const loaded = await loadTaskbook(cwd, "needs-env-input");
+		assert.equal(loaded?.taskbook.runs.at(-1)?.status, "pass");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		if (previous === undefined) delete process.env.UGK_TEST_REQUIRED_ENV;
+		else process.env.UGK_TEST_REQUIRED_ENV = previous;
+		if (previousPersist === undefined) delete process.env.UGK_REQUIRED_ENV_PERSIST;
+		else process.env.UGK_REQUIRED_ENV_PERSIST = previousPersist;
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("/task run uses absolute contract outputDir as the final output directory", async () => {
 	const { pi, commands, sentMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();

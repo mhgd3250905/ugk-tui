@@ -1,13 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { uiText } from "../shared/ui-language.ts";
-import type { DoctorCheck } from "./types.ts";
 
-export interface DoctorDeps {
-	checks?: DoctorCheck[];
-}
-
-export function registerDoctor(pi: ExtensionAPI, deps: DoctorDeps = {}): void {
-	void deps;
+export function registerDoctor(pi: ExtensionAPI): void {
 	pi.registerCommand("doctor", {
 		description: "Open guided UGK environment troubleshooting help",
 		handler: async (_args, ctx) => {

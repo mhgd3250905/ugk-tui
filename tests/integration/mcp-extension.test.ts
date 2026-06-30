@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import registerUgkExtension from "../../extensions/index.ts";
-import { registerMcp, createMcpDoctorCheck } from "../../extensions/mcp/index.ts";
+import { registerMcp } from "../../extensions/mcp/index.ts";
 import { loadMcpConfig } from "../../extensions/mcp/config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -400,40 +400,6 @@ test("before_agent_start appends MCP server instructions", async () => {
 	assert.match(injected.systemPrompt, /Use echo for test messages/);
 
 	await emit(pi, "session_shutdown", { reason: "quit" }, ctx);
-});
-
-test("doctor MCP check validates config and reads registry without spawning", async () => {
-	let connectCalled = 0;
-	const check = createMcpDoctorCheck({
-		registry: {
-			connections: new Map([
-				["alpha", { status: "connected" }],
-				["beta", { status: "failed" }],
-			]),
-			async connect() {
-				connectCalled += 1;
-			},
-		} as any,
-		loadConfig: () => ({
-			servers: new Map([
-				["alpha", { name: "alpha", scope: "project", config: { command: "node" } }],
-				["beta", { name: "beta", scope: "local", config: { command: "node" } }],
-			]),
-			errors: [{ scope: "project", filePath: ".mcp.json", message: "bad", serverName: "broken" }],
-		}),
-		cwd: () => process.cwd(),
-	});
-
-	const result = await check.run();
-
-	assert.equal(connectCalled, 0);
-	assert.equal(result.status, "warn");
-	assert.match(result.summary, /configured: 2/);
-	assert.match(result.summary, /connected: 1/);
-	assert.match(result.summary, /failed: 1/);
-	assert.match(result.details!.join("\n"), /project: alpha/);
-	assert.match(result.details!.join("\n"), /local: beta/);
-	assert.match(result.details!.join("\n"), /bad/);
 });
 
 test("end-to-end registered MCP tool calls the stub server", async () => {

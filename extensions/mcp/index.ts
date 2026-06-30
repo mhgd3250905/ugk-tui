@@ -15,7 +15,6 @@ import {
 	type McpToolPolicyContext,
 	type McpToolRegistrationResult,
 } from "./tools.ts";
-import type { DoctorCheck } from "../doctor/types.ts";
 import { uiText } from "../shared/ui-language.ts";
 
 type McpRuntimeContext = {
@@ -99,37 +98,6 @@ export function registerMcp(pi: ExtensionAPI, deps: McpExtensionDeps = {}): McpE
 
 	registerProcessCleanup(registry);
 	return state;
-}
-
-export function createMcpDoctorCheck(deps: {
-	registry: Pick<McpRegistry, "connections">;
-	packageRoot?: string;
-	loadConfig?: (cwd: string) => McpConfig | Promise<McpConfig>;
-	cwd?: () => string;
-}): DoctorCheck {
-	return {
-		id: "mcp.config",
-		title: "MCP",
-		category: "mcp",
-		async run() {
-			const cwd = deps.cwd?.() ?? process.cwd();
-			const config = deps.loadConfig ? await deps.loadConfig(cwd) : loadMcpConfig(cwd, { packageRoot: deps.packageRoot });
-			const connected = Array.from(deps.registry.connections.values()).filter(
-				(connection) => connection.status === "connected",
-			).length;
-			const failed = Array.from(deps.registry.connections.values()).filter(
-				(connection) => connection.status === "failed",
-			).length;
-			const details = formatMcpDoctorDetails(config);
-			const status = config.errors.length > 0 || failed > 0 ? "warn" : "pass";
-			return {
-				status,
-				summary: `MCP configured: ${config.servers.size}, connected: ${connected}, failed: ${failed}`,
-				details,
-				nextSteps: config.errors.length ? ["/mcp status"] : undefined,
-			};
-		},
-	};
 }
 
 async function connectConfiguredServers(
@@ -278,21 +246,6 @@ function configErrorsToFailedServers(config: McpConfig): Map<string, string> {
 		failed.set(error.serverName ?? `${error.scope}:${error.filePath}`, error.message);
 	}
 	return failed;
-}
-
-function formatMcpDoctorDetails(config: McpConfig): string[] {
-	const byScope = new Map<string, string[]>();
-	for (const entry of config.servers.values()) {
-		const names = byScope.get(entry.scope) ?? [];
-		names.push(entry.name);
-		byScope.set(entry.scope, names);
-	}
-
-	const details = Array.from(byScope, ([scope, names]) => `${scope}: ${names.join(", ")}`);
-	for (const error of config.errors) {
-		details.push(`${error.scope}: ${error.serverName ?? error.filePath}: ${error.message}`);
-	}
-	return details;
 }
 
 async function confirmSpawn(ctx: McpRuntimeContext, entry: McpConfigEntry): Promise<boolean> {

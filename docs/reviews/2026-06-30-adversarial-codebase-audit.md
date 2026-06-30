@@ -44,15 +44,30 @@ chmod/chown 777 同理改 `[^|;&]*`。**29 条变体矩阵全过**(node 实测 +
 
 ### P0-2(资源泄漏/攻击面):Chrome 进程永不回收
 
-**根因**：`extensions/chrome-cdp/launcher.ts:92` `launchChromeCdp` 用 `spawn({detached:true})` + `child.unref()`,child 句柄用完即丢。**全仓 grep kill 零命中**——没有任何代码关闭这个 Chrome。带 `--remote-debugging-port` + 用户登录态的 Chrome 永久驻留桌面,端口持续监听。
+**根因（初版判断，部分正确）**：`extensions/chrome-cdp/launcher.ts:92` `launchChromeCdp` 用 `spawn({detached:true})` + `child.unref()`,child 句柄用完即丢。**全仓 grep kill 零命中**——没有任何代码关闭这个 Chrome。带 `--remote-debugging-port` + 用户登录态的 Chrome 永久驻留桌面,端口持续监听。
 
-**修复**(teardown hook,不动 `detached`——保留用户继续用 Chrome 窗口的能力,但 agent 退出时主动回收它自己起的调试实例):
-- 模块级 `Set<ChildProcess>` 存句柄
-- `ensureTeardownHook()` 注册 `beforeExit`/`exit`/`SIGINT`/`SIGTERM`(Windows Git Bash 下 SIGINT 可捕获,信号注册失败 try/catch 不阻塞 launch)
-- `child.on("exit")` 在 Chrome 自行退出时清掉(避免 kill 已死进程)
-- 导出 `__testOnly` 给测试
+**初版修复（37900c4 + c4d4d81，失败）**：用 child 句柄 + `taskkill /T` 杀进程树。单元测试 + 端到端测试（cmd /c ping）全绿。**但真机验证失败**——Ctrl+C 后 Chrome 仍残留。
 
-**回归测试**：`tests/chrome-cdp-launcher.test.ts` 加用例,手动塞 fake ChildProcess,调 teardown,断言 kill 被调用 3 次 + Set 清空 + 幂等。
+**真根因（第一性原理诊断，0bde2a7 修复）**：用 debug 日志锁定因果链断点：
+
+```
+ADD child pid=18416
+EXIT pid=18416 code=0 sig=null → delete   ← 153ms 后 child 报告退出!
+teardownManagedChrome children=0          ← Set 空,没东西可杀
+```
+
+Windows Chrome 的 `spawn` child 是个 **stub 进程**：它派生真正的工作进程后**立刻 exit(code=0)**。`child.on("exit")` 一触发就把句柄从 Set 删掉,teardown 时 Set 空、没东西可杀 → 真正的 Chrome 成孤儿永久残留。
+
+**为什么初版的测试没抓住**：端到端测试用 `cmd /c ping` 模拟进程树,但 cmd 不像 Chrome 那样 stub-exit——cmd 持续存活,测错了模型。这是"测试通过但真机失败"的典型教训:**模拟用例和真实目标的进程生命周期模型不同时,测试会给假信心**。
+
+**最终修复（port 锚定查杀）**：抛弃不可靠的 child 句柄,改用 port 作为锚点：
+- `launchChromeCdp` 只登记 port（不再管 child 句柄,child 仍 unref）
+- teardown 按 `--remote-debugging-port=<port>` 查所有 `chrome.exe` 进程（Windows: PowerShell `Win32_Process` + `taskkill /T /F`；Unix: `pgrep -f` + `kill`），覆盖 stub-exit 后的所有工作进程整棵树
+- 真正可靠的锚点是 port：**不管 stub 怎么退出,真 Chrome 命令行都带这个 port,都能被查到**
+
+**真机验证**：ugk `/cdp launch` → Ctrl+C 退出 → 调试 Chrome 自动消失 ✓（初版残留,修复后消失）。
+
+**回归测试**：单元测试验证 port 登记 + teardown 对每个 port 调 `killChromeByPort` + 清空 + 幂等。port 查杀的系统行为（PowerShell + taskkill）靠真机验证兜底——单元层无法可靠 mock（生产按 `Name='chrome.exe'` 过滤,测试用 node 进程冒充会被过滤；node 又拒绝 `--remote-debugging-port` 参数,假绿）。
 
 ---
 
@@ -113,14 +128,28 @@ npm test   # 478/478/0(+3 回归),8.9s
 
 ## 改动清单
 
+## 提交历史（按时间倒序）
+
 ```
- extensions/chrome-cdp/client.ts   | 13 +++-   (P2-5 try/catch)
- extensions/chrome-cdp/launcher.ts | 41 +++++-  (P0-2 teardown)
- extensions/index.ts               |  8 +--    (P0-1 正则)
- tests/chrome-cdp-client.test.ts   | 40 ++++   (P2-5 回归)
- tests/chrome-cdp-launcher.test.ts | 30 ++++   (P0-2 回归)
- tests/ugk-command.test.ts         | 48 ++++   (P0-1 回归)
- 6 files changed, 176 insertions(+), 4 deletions(-)
+0bde2a7 fix(chrome-cdp): Chrome teardown 改用 port 查杀(child 句柄不可靠,根因修复)  ← P0-2 最终
+c4d4d81 fix(chrome-cdp): Windows 进程树级联 kill(真实验证发现的缺陷)               ← P0-2 中间(后被 0bde2a7 重写)
+7201007 docs: 对抗性代码审查报告(3 真问题修复 + 5 误报排除)
+b49c9c0 fix(chrome-cdp): CDP onmessage 畸形 JSON 帧不再挂死                         ← P2-5
+37900c4 fix(chrome-cdp): 调试 Chrome 进程 teardown 回收(资源泄漏/攻击面)            ← P0-2 初版(失败)
+77001a2 fix(security): 权限门 rm flag 顺序绕过(根因修复)                            ← P0-1
 ```
 
-净增 176 行,其中 118 行是测试。代码改动 58 行(含 ponytail 注释)。三块互不耦合,可独立 cherry-pick。
+P0-2 经历三轮:初版(child 句柄,37900c4)→ 进程树 kill(c4d4d81)→ port 查杀(0bde2a7)。前两轮单元/集成测试全绿但真机失败,第三轮用第一性原理诊断(debug 日志锁定 `children=0`)+ 真机验证通过。这条曲线本身是审查方法论的记录:**自动化测试不是充分条件,真机验证 + 第一性诊断不可省**。
+
+## 最终改动清单（相对审查基线 26bd68f）
+
+```
+ extensions/chrome-cdp/client.ts   | 13 +-    (P2-5 try/catch)
+ extensions/chrome-cdp/launcher.ts | 60 +-    (P0-2 port 查杀,经 3 轮迭代)
+ extensions/index.ts               |  8 +-    (P0-1 正则)
+ tests/chrome-cdp-client.test.ts   | 40 +     (P2-5 回归)
+ tests/chrome-cdp-launcher.test.ts | 30 +     (P0-2 port 登记/teardown 单元)
+ tests/ugk-command.test.ts         | 48 +     (P0-1 回归)
+```
+
+三块互不耦合,可独立 cherry-pick。

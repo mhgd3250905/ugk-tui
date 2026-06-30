@@ -166,6 +166,49 @@ test("dispatchWorker forwards progress partials when result messages are still e
 	}
 });
 
+// ponytail: 钉死多轮 progress 回归 —— worker 完成 ≥1 轮(message_end 已 push)后,subagent 注入的
+// progress partial 里 messages 非空。旧实现用 messages.length 判定走文本分支,此时会丢 progressText。
+// 修复后 content 文本无条件优先推送,messages 遍历仅作补充(此例 messages 含旧 assistant,会被 formatMessageProgress
+// 推成 summary,但 progressText 必须在其中,不被丢弃)。
+test("dispatchWorker forwards progress partials even when result messages are non-empty (multi-round)", async () => {
+	const updates: string[] = [];
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		const onUpdate = args[7];
+		// 模拟多轮:worker 已完成 1 轮,messages 里已有 assistant summary;第 2 轮工具流式进度来了
+		onUpdate?.({
+			content: [{ type: "text", text: "[download] 45.2% at 5.2MiB/s ETA 00:30" }],
+			details: {
+				mode: "single",
+				results: [{ messages: [{ role: "assistant", content: [{ type: "text", text: "第一轮分析完成" }] }] }],
+			},
+		});
+		return {
+			agent: "worker",
+			agentSource: "user",
+			task: "task",
+			exitCode: 0,
+			messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }],
+			stderr: "",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+		} as any;
+	});
+	try {
+		await dispatchWorker({
+			skill: "# Skill",
+			contract: {},
+			runtimeInput: {},
+			outputDir: "E:/out",
+		}, { cwd: process.cwd(), onUpdate: (text) => updates.push(text) });
+
+		// progressText 必须被推出(不被 messages 遍历吞掉);旧 assistant summary 也会被推(formatMessageProgress),
+		// 但关键是 progress 在里面。
+		assert.ok(updates.includes("[download] 45.2% at 5.2MiB/s ETA 00:30"),
+			`多轮 progress 必须转发,实际 updates: ${JSON.stringify(updates)}`);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+	}
+});
+
 test("dispatchWorker injects a CDP tab lifecycle only when UGK_TASK_ALLOW_CHROME_CDP is set", async () => {
 	let receivedLifecycle: unknown = undefined;
 	setTaskWorkerRunnerForTests(async (...args: any[]) => {

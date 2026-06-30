@@ -111,16 +111,20 @@ export async function dispatchWorker(
 			opts.signal,
 			opts.onUpdate
 				? (partial: Parameters<OnUpdateCallback>[0]) => {
+					// ponytail: content 里的流式文本(子进程 tool_execution_update 的 yt-dlp 百分比等)
+					// 必须无条件优先推送 —— subagent.ts 注入的 progress partial 把它放在 content,
+					// 但 details.results[0].messages 可能非空(worker 已完成 ≥1 轮,message_end 已 push)。
+					// 若用 messages.length 判定是否走文本分支,多轮后的 progress 会被丢给 formatMessageProgress
+					// 遍历(它只认 assistant/toolResult,不读 content)。先推 content,重复由下游
+					// appendUniqueProgressLines 的 Set 去重;messages 遍历作为 assistant summary/失败 toolResult 的补充。
+					const text = partial.content.find((part) => part.type === "text")?.text;
+					if (typeof text === "string") opts.onUpdate?.(text);
 					const result = partial.details?.results?.[0];
-					// details/messages 缺失(部分模拟场景)→ fallback 到旧文本路径。
-					if (!result?.messages?.length) {
-						const text = partial.content.find((part) => part.type === "text")?.text;
-						if (typeof text === "string") opts.onUpdate?.(text);
-						return;
-					}
 					// 全量遍历,重复由下游 appendUniqueProgressLines 去重(worker 轮次有限,遍历成本可忽略)。
-					for (const message of result.messages) {
-						for (const line of formatMessageProgress(message)) opts.onUpdate?.(line);
+					if (result?.messages?.length) {
+						for (const message of result.messages) {
+							for (const line of formatMessageProgress(message)) opts.onUpdate?.(line);
+						}
 					}
 				}
 				: undefined,

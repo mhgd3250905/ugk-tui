@@ -1,6 +1,6 @@
 {
 	"version": 1,
-	"generatedAt": "2026-06-30T15:21:15.243Z",
+	"generatedAt": "2026-06-30T16:29:49.902Z",
 	"tasks": [
 		{
 			"name": "bili-up-homepage-spider",
@@ -17,6 +17,14 @@
 			"exampleInput": "url=https://example.com/video page=<value>",
 			"install": "ugk task install bili-up-homepage-spider",
 			"zip": "downloads/bili-up-homepage-spider.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/bili-up-homepage-spider.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "bilibili",
 			"tags": [
@@ -70,6 +78,14 @@
 			"exampleInput": "bilibili_url=https://example.com/video",
 			"install": "ugk task install bilibili-downloader",
 			"zip": "downloads/bilibili-downloader.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/bilibili-downloader.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "bilibili",
 			"tags": [
@@ -121,6 +137,14 @@
 			"exampleInput": "keyword=<value> timePhrase=<value> dateRange=<value>",
 			"install": "ugk task install linkedin-search",
 			"zip": "downloads/linkedin-search.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/linkedin-search.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "linkedin",
 			"tags": [
@@ -182,6 +206,14 @@
 			"exampleInput": "subtitlePath=<value> targetLanguage=<value> verbosity=<value>",
 			"install": "ugk task install subtitle-fluent-translator",
 			"zip": "downloads/subtitle-fluent-translator.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/subtitle-fluent-translator.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "subtitle",
 			"tags": [
@@ -270,6 +302,14 @@
 			"exampleInput": "subtitlePath=<value> voice=<value> stylePrompt=<value>",
 			"install": "ugk task install subtitle-to-speech",
 			"zip": "downloads/subtitle-to-speech.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/subtitle-to-speech.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "subtitle",
 			"tags": [
@@ -350,6 +390,14 @@
 			"exampleInput": "url=https://example.com/video maxHeight=<value> subLangs=<value>",
 			"install": "ugk task install video-downloader",
 			"zip": "downloads/video-downloader.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/video-downloader.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "video",
 			"tags": [
@@ -417,6 +465,14 @@
 			"exampleInput": "videoPath=<value> audioPath=<value> subtitlePath=<value>",
 			"install": "ugk task install video-zh-composer",
 			"zip": "downloads/video-zh-composer.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/video-zh-composer.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "video",
 			"tags": [
@@ -483,6 +539,14 @@
 			"exampleInput": "videoPath=<value> subtitlePath=<value> zhSubtitlePath=<value>",
 			"install": "ugk task install video-zh-dubber",
 			"zip": "downloads/video-zh-dubber.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/video-zh-dubber.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "video",
 			"tags": [
@@ -571,6 +635,14 @@
 			"exampleInput": "file_path=<value> filePath=<value> language=<value>",
 			"install": "ugk task install whisper-audio-to-text",
 			"zip": "downloads/whisper-audio-to-text.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/whisper-audio-to-text.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "audio",
 			"tags": [
@@ -649,6 +721,14 @@
 			"exampleInput": "keyword=<value> timePhrase=<value> timeMode=<value>",
 			"install": "ugk task install x-search",
 			"zip": "downloads/x-search.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/x-search.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "x",
 			"tags": [
@@ -740,6 +820,14 @@
 			"exampleInput": "url=https://example.com/video maxHeight=<value> subLangs=<value>",
 			"install": "ugk task install x-video-downloader",
 			"zip": "downloads/x-video-downloader.zip",
+			"version": "1.0.0",
+			"versions": [
+				{
+					"version": "1.0.0",
+					"zip": "downloads/x-video-downloader.zip",
+					"createdAt": "2026-06-30T00:00:00.000Z"
+				}
+			],
 			"author": "UGK Official",
 			"category": "x",
 			"tags": [

@@ -1,25 +1,24 @@
-# Task Marketplace Missing Functions
+# Task Marketplace Function Status
 
-Date: 2026-06-30
+Date: 2026-07-01
 
-## Implemented In This Pass
+## Implemented
 
-- Icon-only download, like, favorite, and copy controls with accessible labels.
-- Real counters only: static seed values are zero; live values come from D1.
-- Marketplace aggregate stats endpoint: `/api/stats`.
-- Reset migration for earlier fake counters.
+| Priority | Function | Status |
+| --- | --- | --- |
+| P0 | User task upload | Upload page posts zip or source URL to `/api/tasks/submit`; submissions stay pending. |
+| P0 | Upload storage | Uploaded artifacts use the `TASK_UPLOADS` R2 binding; metadata is stored in D1. |
+| P0 | Moderation/publish | Admin-only review queue publishes or rejects submissions; published tasks enter the community catalog. |
+| P1 | My account dashboard | Account page shows favorites, submissions, downloads, and profile identity. |
+| P1 | Real sorting/filtering | Marketplace supports text search, category filter, and sorting by name/downloads/likes/newest. |
+| P1 | Per-task user state | Task stats include liked, favorited, and downloaded state for signed-in users. |
+| P1 | Reporting | Signed-in users can report a task once; admins see the report queue. |
+| P2 | Versioning | Published submissions create immutable `task_versions`; official manifest entries include `1.0.0`. |
+| P2 | Stats detail | Per-task stats detail rolls download events up by day. |
+| P2 | Admin tools | Admin page is gated by configured GitHub logins and lists submissions plus reports. |
 
-## Remaining Full-Function Backlog
+## Operational Follow-Ups
 
-| Priority | Function | Current Gap | Implementation Path | Acceptance |
-| --- | --- | --- | --- | --- |
-| P0 | User task upload | Users cannot submit taskbooks from the site | Add upload page, accept zip or GitHub URL, store submission metadata, validate required files, keep status pending | Logged-in user can submit a task and see pending status |
-| P0 | Upload storage | Pages static files cannot be mutated at runtime | Use R2 for uploaded zip/artifacts, D1 for metadata, admin publish step to official catalog | Uploaded artifact is stored outside repo and linked to submission |
-| P0 | Moderation/publish | No review workflow for executable taskbooks | Add admin-only review state: pending/approved/rejected/published | Only approved taskbooks appear in public catalog |
-| P1 | My account dashboard | Account page only shows favorites | Show favorites, submissions, download history, and basic profile | Signed-in user sees their own activity |
-| P1 | Real sorting/filtering | Search is client-only text filter | Add sort by downloads/likes/newest and category/tag filter | User can sort and filter without page reload |
-| P1 | Per-task user state | Detail page does not show download history or install history | Add API state for liked/favorited/downloaded by current user | Signed-in detail page reflects user state |
-| P1 | Reporting | No way to flag bad taskbooks | Add report endpoint and admin queue | Signed-in user can report a task once |
-| P2 | Versioning | Task updates are not versioned | Add task_versions table and versioned manifest entries | Published task has immutable versions |
-| P2 | Stats detail | Only aggregate counters exist | Add daily events rollups when traffic justifies charts | Detail page can show trend data |
-| P2 | Admin tools | No admin UI | Add admin routes gated by configured GitHub logins | Admin can review submissions and reports |
+- Rotate any secrets that were pasted into chat after deployment is verified.
+- Decide whether community-published tasks should become installer-visible through the static manifest or a dynamic manifest endpoint.
+- Add richer moderation actions later if needed, such as closing reports without code changes.

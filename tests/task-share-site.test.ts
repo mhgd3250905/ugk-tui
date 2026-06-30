@@ -40,6 +40,8 @@ test("task share manifest describes official taskbooks with matching local files
 	for (const task of manifest.tasks) {
 		assert.match(task.name, /^[A-Za-z0-9_-]+$/);
 		assert.equal(task.install, `ugk task install ${task.name}`);
+		assert.equal(task.version, "1.0.0");
+		assert.equal(task.versions[0].version, "1.0.0");
 		assert.equal(task.zip, `downloads/${task.name}.zip`);
 		assert.equal(task.author, "UGK Official");
 		assert.equal(task.stats.downloads, 0);
@@ -80,6 +82,11 @@ test("task share page exposes marketplace actions for every official task", asyn
 	assert.match(html, /api\/tasks\/.*\/download/);
 	assert.match(html, /api\/session/);
 	assert.match(html, /api\/account\/favorites/);
+	assert.match(html, /api\/community\/tasks/);
+	assert.match(html, /upload\//);
+	assert.match(html, /data-sort/);
+	assert.match(html, /data-category-filter/);
+	assert.match(html, /data-action="report"/);
 	assert.match(html, /encodeURIComponent\(name\)\+'\/stats/);
 	assert.match(html, /api\/stats/);
 	assert.match(html, /account\//);
@@ -93,6 +100,21 @@ test("task share page exposes marketplace actions for every official task", asyn
 	const account = await readFile(accountPath, "utf8");
 	assert.match(account, /data-account-page/);
 	assert.match(account, /api\/account\/favorites/);
+	assert.match(account, /api\/account\/submissions/);
+	assert.match(account, /api\/account\/downloads/);
+
+	const uploadPath = path.join(root, "upload", "index.html");
+	assert.equal(existsSync(uploadPath), true, `${uploadPath} should exist`);
+	const upload = await readFile(uploadPath, "utf8");
+	assert.match(upload, /data-upload-form/);
+	assert.match(upload, /api\/tasks\/submit/);
+
+	const adminPath = path.join(root, "admin", "index.html");
+	assert.equal(existsSync(adminPath), true, `${adminPath} should exist`);
+	const admin = await readFile(adminPath, "utf8");
+	assert.match(admin, /data-admin-page/);
+	assert.match(admin, /api\/admin\/submissions/);
+	assert.match(admin, /api\/admin\/reports/);
 
 	for (const task of manifest.tasks) {
 		assert.match(html, new RegExp(`ugk task install ${task.name}`));
@@ -108,6 +130,9 @@ test("task share page exposes marketplace actions for every official task", asyn
 		assert.match(detail, /Sign in with GitHub/);
 		assert.match(detail, /data-action="like"/);
 		assert.match(detail, /data-action="favorite"/);
+		assert.match(detail, /data-action="report"/);
+		assert.match(detail, /stats-detail/);
+		assert.match(detail, /versions/);
 		assert.doesNotMatch(detail, />Like<\/button>/);
 		assert.doesNotMatch(detail, />Favorite<\/button>/);
 

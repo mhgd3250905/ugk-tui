@@ -26,8 +26,9 @@ function formatTaskbookLine(item: Awaited<ReturnType<typeof listTaskbooks>>[numb
 function binariesLine(contract: unknown): string {
 	if (!contract || typeof contract !== "object" || Array.isArray(contract)) return "";
 	const requiredBinaries = (contract as Record<string, unknown>).requiredBinaries;
-	if (!Array.isArray(requiredBinaries) || requiredBinaries.length === 0) return "";
-	const names = requiredBinaries.filter((item) => typeof item === "string");
+	if (!Array.isArray(requiredBinaries)) return "";
+	// ponytail: 过滤规则与 task.ts 的 summarize/missing 对齐(滤空白),避免空串显示成尾随逗号。
+	const names = requiredBinaries.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 	return names.length > 0 ? ` [needs: ${names.join(", ")}]` : "";
 }
 

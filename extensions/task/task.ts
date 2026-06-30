@@ -418,11 +418,13 @@ function summarizeRequiredTools(contract: unknown): string {
 }
 
 // ponytail: 外部 CLI 依赖( yt-dlp/ffmpeg/python 等)的展示。task 可移植的关键:依赖自描述。
+// 过滤规则与 missingRequiredBinaries 对齐(滤空白),避免 ["yt-dlp",""] 显示成尾随逗号。
 function summarizeRequiredBinaries(contract: unknown): string {
 	const requiredBinaries = asRecord(contract).requiredBinaries;
-	return Array.isArray(requiredBinaries) && requiredBinaries.length > 0
-		? requiredBinaries.filter((item) => typeof item === "string").join(", ")
-		: "无外部 CLI 依赖";
+	const names = Array.isArray(requiredBinaries)
+		? requiredBinaries.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+		: [];
+	return names.length > 0 ? names.join(", ") : "无外部 CLI 依赖";
 }
 
 function missingRequiredEnv(contract: unknown, env: Record<string, string | undefined> = process.env): string[] {

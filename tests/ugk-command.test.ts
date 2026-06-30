@@ -279,6 +279,54 @@ test("dangerous bash gate localizes the prompt but preserves the block reason co
 	}
 });
 
+// ponytail: 钉死 rm 绕过回归。旧正则 /\brm\s+(-rf?|--recursive)/ 锁定 r 在 f 前,
+// rm -fr / rm -f -r / rm --force --recursive 可静默绕过权限门。-r/-f 是顺序无关的独立 flag,
+// 正则必须覆盖所有顺序组合 + 分写 + 长短选项。非交互(hasUI:false)走 fail-closed 直接拦截。
+test("dangerous bash gate blocks rm recursive regardless of flag order or form (regression)", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = tempAgentDir();
+	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ uiLanguage: "en-US" }));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	// hasUI:false → 命中危险模式直接 block,不依赖 select 交互,适合参数化批量断言。
+	const nonInteractiveCtx = { hasUI: false } as any;
+
+	const blocked = [
+		"rm -rf /", "rm -fr /", "rm -f -r /", "rm -r -f /",
+		"rm --recursive --force /", "rm --force --recursive /",
+		"rm -rf", "rm -fr .", "rm -Rf /", "rm -rvf /", "rm -R /",
+		"rm  -rf  /", "sudo rm -rf /",
+		"chmod 777 x", "chmod -R 777 .", "chmod 0777 x", "chown 777 x",
+		"ls; rm -rf /",
+	];
+	const allowed = [
+		"rm file.txt", "rm a b c", "ls -la", "git status",
+		"echo hello", "npm test", "cat README.md", "rm /",
+		"rmdir foo", "chmod 755 x", "git rm file.txt",
+	];
+	try {
+		const { handlers } = registerWithHandlers();
+		const toolCallHandlers = handlers.get("tool_call") ?? [];
+		assert.ok(toolCallHandlers.length > 0);
+
+		const runGate = async (command: string): Promise<boolean> => {
+			for (const handler of toolCallHandlers) {
+				const r = await handler({ toolName: "bash", input: { command } }, nonInteractiveCtx);
+				if (r && (r as any).block) return true;
+			}
+			return false;
+		};
+		for (const cmd of blocked) {
+			assert.equal(await runGate(cmd), true, `应拦截: ${cmd}`);
+		}
+		for (const cmd of allowed) {
+			assert.equal(await runGate(cmd), false, `应放行: ${cmd}`);
+		}
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
 test("/ui-language with no args uses nested selectable menus", async () => {
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	const agentDir = tempAgentDir();

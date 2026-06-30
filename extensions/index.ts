@@ -345,10 +345,14 @@ export default function (pi: ExtensionAPI) {
 
 	// 3) 权限门(照搬 permission-gate.ts 模式)
 	//    拦截危险 bash 命令,交互模式弹确认,非交互模式直接拦截(fail-safe)
+	//    ponytail: rm 的 -r/-f 是顺序无关的独立 flag,旧正则 /\brm\s+(-rf?|--recursive)/ 锁定
+	//    了 r 在 f 前,可被 rm -fr / rm -f -r / rm --force --recursive 绕过。改为"\brm\b 后
+	//    (同一命令段内,不跨 |;& 分隔符)出现含 r 的短选项或 --recursive",顺序无关、分写/长选项
+	//    均命中。chmod/chown 777 同理用 [^|;&]* 容忍 -R/空格。
 	const dangerousPatterns = [
-		/\brm\s+(-rf?|--recursive)/i,
+		/\brm\b[^|;&]*(-\w*r\w*|--recursive)/i,
 		/\bsudo\b/i,
-		/\b(chmod|chown)\b.*777/i,
+		/\b(chmod|chown)\b[^|;&]*777/i,
 	];
 
 	pi.on("tool_call", async (event, ctx) => {

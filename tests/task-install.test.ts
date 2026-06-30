@@ -171,6 +171,61 @@ test("runTaskInstall rejects malformed specs before writing files", async () => 
 	}
 });
 
+test("runTaskInstall installs every safe file listed by the manifest", async () => {
+	const agentDir = tempDir();
+	try {
+		const fetch = fakeFetch({
+			"https://example.test/manifest.json": JSON.stringify({
+				tasks: [{
+					name: "grapheme-count",
+					files: {
+						...Object.fromEntries(Object.keys(files).map((file) => [file, `https://example.test/${file}`])),
+						"scripts/helper.mjs": "https://example.test/scripts/helper.mjs",
+					},
+				}],
+			}),
+			...Object.fromEntries(Object.entries(files).map(([file, text]) => [`https://example.test/${file}`, text])),
+			"https://example.test/scripts/helper.mjs": "export const ok = true;\n",
+		});
+
+		await runTaskInstall("grapheme-count", {
+			agentDir,
+			fetch,
+			manifestUrl: "https://example.test/manifest.json",
+		});
+
+		assert.equal(await readFile(path.join(agentDir, "tasks", "grapheme-count", "scripts", "helper.mjs"), "utf8"), "export const ok = true;\n");
+	} finally {
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("runTaskInstall rejects unsafe manifest file paths", async () => {
+	const agentDir = tempDir();
+	try {
+		const fetch = fakeFetch({
+			"https://example.test/manifest.json": JSON.stringify({
+				tasks: [{
+					name: "grapheme-count",
+					files: {
+						...Object.fromEntries(Object.keys(files).map((file) => [file, `https://example.test/${file}`])),
+						"../escape.mjs": "https://example.test/escape.mjs",
+					},
+				}],
+			}),
+			...Object.fromEntries(Object.entries(files).map(([file, text]) => [`https://example.test/${file}`, text])),
+		});
+
+		await assert.rejects(() => runTaskInstall("grapheme-count", {
+			agentDir,
+			fetch,
+			manifestUrl: "https://example.test/manifest.json",
+		}), /unsafe file path/i);
+	} finally {
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
 test("bin/ugk.js handles task install before starting the interactive CLI", async () => {
 	const agentDir = tempDir();
 	try {

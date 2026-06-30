@@ -8,6 +8,7 @@ package-lock.json
 
 # pi runtime artifacts
 .pi/
+.wrangler/
 *.log
 
 # Flow local artifacts (task runs, evidence, status — per-workspace, not shared)

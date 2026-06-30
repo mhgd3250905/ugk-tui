@@ -93,6 +93,18 @@ function assertValidName(name) {
 	if (!NAME_RE.test(name)) throw new Error(`Invalid taskbook name: ${name}`);
 }
 
+function assertSafeManifestPath(file) {
+	if (
+		typeof file !== "string" ||
+		file.length === 0 ||
+		path.isAbsolute(file) ||
+		file.includes("\\") ||
+		file.split("/").some((part) => part === "" || part === "." || part === "..")
+	) {
+		throw new Error(`Unsafe file path in manifest: ${String(file)}`);
+	}
+}
+
 async function fetchText(fetchFn, url) {
 	const response = await fetchFn(url);
 	if (!response?.ok) throw new Error(`Failed to download ${url}: HTTP ${response?.status ?? "unknown"}`);
@@ -107,6 +119,10 @@ function findManifestTask(manifest, name) {
 	if (!files || typeof files !== "object" || Array.isArray(files)) throw new Error(`Invalid manifest entry for ${name}`);
 	for (const file of REQUIRED_FILES) {
 		if (typeof files[file] !== "string") throw new Error(`Invalid manifest entry for ${name}: missing ${file}`);
+	}
+	for (const file of Object.keys(files)) {
+		assertSafeManifestPath(file);
+		if (typeof files[file] !== "string") throw new Error(`Invalid manifest entry for ${name}: invalid ${file}`);
 	}
 	return task;
 }
@@ -138,7 +154,7 @@ export async function runTaskInstall(name, deps = {}) {
 	if (existsSync(targetDir)) throw new Error(`taskbook "${name}" already exists: ${targetDir}`);
 
 	const texts = {};
-	for (const file of REQUIRED_FILES) {
+	for (const file of Object.keys(task.files)) {
 		texts[file] = await fetchText(fetchFn, task.files[file]);
 	}
 	validateTaskbook(name, texts);
@@ -147,7 +163,8 @@ export async function runTaskInstall(name, deps = {}) {
 	const tempDir = path.join(tasksRoot, `.install-${name}-${Date.now()}`);
 	await mkdir(tempDir, { recursive: true });
 	try {
-		for (const file of REQUIRED_FILES) {
+		for (const file of Object.keys(task.files)) {
+			await mkdir(path.dirname(path.join(tempDir, file)), { recursive: true });
 			await writeFile(path.join(tempDir, file), texts[file], "utf8");
 		}
 		await rename(tempDir, targetDir);

@@ -1,0 +1,22 @@
+{
+	"goal": "给定 X/Twitter 帖子链接,下载其中的视频为 MP4,并在存在字幕时下载字幕文件。",
+	"hardConstraints": [
+		"必须使用 taskbook 自带脚本 $TASK_DIR/scripts/download-x-video.mjs 执行下载。",
+		"必须用 yt-dlp 解析 X/Twitter status URL 并下载视频。",
+		"必须用 ffmpeg/ffprobe 支持合并与验收。",
+		"所有产物必须写入本次 task 的 outputDir。",
+		"字幕有则下载;没有字幕不能视为失败。"
+	],
+	"acceptance": [
+		"metadata.json 存在且为有效 JSON。",
+		"download-summary.json 存在且记录 videoFiles。",
+		"至少一个 .mp4 文件存在、大小大于 1MiB、ffprobe 可解析且 duration > 0。",
+		"如果 metadata.json 声明 subtitles 非空,outputDir 下必须存在 .vtt/.srt/.ass 字幕文件。"
+	],
+	"forbidden": [
+		"不得硬编码本机输出路径。",
+		"不得把视频或字幕内容贴进最终回复。",
+		"不得绕过 taskbook 自带脚本临时手写下载流程。"
+	],
+	"context": "样例 https://x.com/huoshan007/status/2071161404997132519?s=20 经 yt-dlp 探测,含 1080p 视频和 zh/vtt 字幕,但视频长 1:44:25,默认 maxHeight=480 避免下载过慢。用户本机 X 已登录并有 CDP,但本 task 主路径不依赖 CDP;yt-dlp guest 路径失败时再考虑后续扩展 cookies/CDP 兜底。"
+}

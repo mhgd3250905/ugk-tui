@@ -1,0 +1,9 @@
+name = "ugk-task-share"
+compatibility_date = "2026-06-30"
+pages_build_output_dir = "docs/task-share"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ugk-task-share-db"
+database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+migrations_dir = "migrations"

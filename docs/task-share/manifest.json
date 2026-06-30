@@ -1,20 +1,792 @@
 {
 	"version": 1,
+	"generatedAt": "2026-06-30T09:49:05.545Z",
 	"tasks": [
 		{
-			"name": "grapheme-count",
-			"title": "Grapheme Count",
-			"description": "统计文本中的 Unicode 字素数量",
-			"exampleInput": "text=UGK 👨‍💻 好用",
-			"install": "ugk task install grapheme-count",
-			"zip": "downloads/grapheme-count.zip",
-			"requirements": ["Node.js 18+"],
+			"name": "bili-up-homepage-spider",
+			"title": "Bili Up Homepage Spider",
+			"description": "给定B站UP主主页视频标签链接和页码，获取该页码下所有视频的标题、链接和发布时间，并保存为JSON文件",
+			"goal": "给定B站UP主主页视频标签链接和页码，获取该页码下所有视频的标题、链接和发布时间，并保存为JSON文件",
+			"acceptance": [
+				"程序能够从链接中提取uid",
+				"能够获取指定页码的视频列表（至少包含一个视频项，如果页面有视频）",
+				"每个视频项包含标题、链接、发布时间字段",
+				"时间格式符合正则表达式 \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}",
+				"输出文件为有效的JSON格式，包含视频列表数组"
+			],
+			"exampleInput": "url=https://example.com/video page=<value>",
+			"install": "ugk task install bili-up-homepage-spider",
+			"zip": "downloads/bili-up-homepage-spider.zip",
+			"author": "UGK Official",
+			"category": "bilibili",
+			"tags": [
+				"bilibili",
+				"scraper",
+				"cdp",
+				"chrome"
+			],
+			"runtimeInput": [
+				"url",
+				"page"
+			],
+			"runtimeInputMeta": {
+				"url": {
+					"description": "B站UP主主页视频标签链接，格式 https://space.bilibili.com/{uid}/upload/video",
+					"required": true
+				},
+				"page": {
+					"description": "页码，从1开始",
+					"required": false,
+					"default": 1
+				}
+			},
+			"requiredEnv": [],
+			"fileCount": 5,
+			"scriptCount": 0,
+			"stats": {
+				"downloads": 1200,
+				"likes": 80,
+				"favorites": 30
+			},
 			"files": {
-				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/taskbook.json",
-				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/spec.json",
-				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/skill.md",
-				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/verify.mjs",
-				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/contract.json"
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/bili-up-homepage-spider/contract.json",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/bili-up-homepage-spider/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/bili-up-homepage-spider/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/bili-up-homepage-spider/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/bili-up-homepage-spider/verify.mjs"
+			}
+		},
+		{
+			"name": "bilibili-downloader",
+			"title": "Bilibili Downloader",
+			"description": "下载B站视频 https://www.bilibili.com/video/BV18ejU6wEKn/ 到本地指定文件夹，使用yt-dlp并从Chrome获取cookies获取最高画质",
+			"goal": "下载B站视频 https://www.bilibili.com/video/BV18ejU6wEKn/ 到本地指定文件夹，使用yt-dlp并从Chrome获取cookies获取最高画质",
+			"acceptance": [
+				"E:/AII/TUI/TUI-0622/B站视频下载/{视频标题}/目录存在",
+				"目录下存在一个 .mp4 文件，文件名包含 BV18ejU6wEKn",
+				"文件大小 > 0 字节",
+				"文件前几个字节为有效视频格式头（mp4/mkv等）"
+			],
+			"exampleInput": "bilibili_url=https://example.com/video",
+			"install": "ugk task install bilibili-downloader",
+			"zip": "downloads/bilibili-downloader.zip",
+			"author": "UGK Official",
+			"category": "bilibili",
+			"tags": [
+				"bilibili",
+				"video",
+				"download",
+				"cdp"
+			],
+			"runtimeInput": [
+				"bilibili_url"
+			],
+			"runtimeInputMeta": {
+				"bilibili_url": {
+					"description": "B站视频链接,格式 https://www.bilibili.com/video/BVxxxxxx 或纯 BV号。dispatcher 从用户输入里抽取这个 URL。",
+					"required": true
+				}
+			},
+			"requiredEnv": [],
+			"fileCount": 5,
+			"scriptCount": 0,
+			"stats": {
+				"downloads": 1517,
+				"likes": 99,
+				"favorites": 41
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/bilibili-downloader/contract.json",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/bilibili-downloader/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/bilibili-downloader/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/bilibili-downloader/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/bilibili-downloader/verify.mjs"
+			}
+		},
+		{
+			"name": "linkedin-search",
+			"title": "Linkedin Search",
+			"description": "给定 keyword 和时间意图,dispatcher 把时间归并到 LinkedIn 原生三档(past-24h/past-week/past-month),worker 用 UGK 管理的 chrome_cdp 搜索 LinkedIn 内容(按最新排序 + 时间档位过滤),把完整结构化结果写入 $TASK_OUTPUT_DIR/linkedin_search_results.json。headless 友好,并行安全。",
+			"goal": "给定 keyword 和时间意图,dispatcher 把时间归并到 LinkedIn 原生三档(past-24h/past-week/past-month),worker 用 UGK 管理的 chrome_cdp 搜索 LinkedIn 内容(按最新排序 + 时间档位过滤),把完整结构化结果写入 $TASK_OUTPUT_DIR/linkedin_search_results.json。headless 友好,并行安全。",
+			"acceptance": [
+				"$TASK_OUTPUT_DIR/linkedin_search_results.json 存在且可被 JSON.parse。",
+				"输出 JSON 至少含 platform, keyword, retrievedAt, queryUrl, timeWindow, benchmark, results 字段;results 为数组。",
+				"timeWindow 是对象,含 dateRange, timePhrase 字段;dateRange 是 past-24h/past-week/past-month 之一。",
+				"results 非空时,每条至少含 postedAtLabel, content, url, authorHandle 字段之一,且含 authorName 或 authorHandle 之一。",
+				"content 字段保留原文(不截断,或保留 collectVisiblePosts 的 cleanCardText 完整结果)。",
+				"benchmark 是对象,含 stopReason, scrollRounds, totalDiscovered, buttonClicks, inWindow 字段。",
+				"results 条数与 benchmark.inWindow 一致(全量落地,不丢),除非遇到 login_required(此时 results 为空且 benchmark.stopReason=login_required)。",
+				"queryUrl 是 LinkedIn 内容搜索 URL,含 sortBy 和 datePosted 两个参数(由 build-url.mjs 生成)。"
+			],
+			"exampleInput": "keyword=<value> timePhrase=<value> dateRange=<value>",
+			"install": "ugk task install linkedin-search",
+			"zip": "downloads/linkedin-search.zip",
+			"author": "UGK Official",
+			"category": "linkedin",
+			"tags": [
+				"linkedin",
+				"search",
+				"cdp"
+			],
+			"runtimeInput": [
+				"keyword",
+				"timePhrase",
+				"dateRange"
+			],
+			"runtimeInputMeta": {
+				"keyword": {
+					"description": "LinkedIn search keyword. Used verbatim in the LinkedIn content search query URL. Do not add operators unless explicitly included by the user.",
+					"required": true
+				},
+				"timePhrase": {
+					"description": "The user's original time phrase, preserved verbatim. Any language. e.g. 最近一天, 最近一周, 过去一个月, past 24 hours, last week. Just echo what the user said about time.",
+					"required": true
+				},
+				"dateRange": {
+					"description": "LinkedIn native date filter tier. One of exactly three values: 'past-24h' (last 24 hours), 'past-week' (last 7 days), 'past-month' (last 30 days). You are an LLM, so MAP the user's time phrase to the nearest tier that COVERS it (never pick a tier shorter than the user's intent, or results get missed). Rules: any phrase <=24h ('today','recent','今天','最近几小时','past 24h') → 'past-24h'; >24h and <=7d ('最近三天','上周','past few days','last week') → 'past-week'; >7d ('一个月','最近两周','past month','90 days' → round UP to the tier that covers it, so 90 days → 'past-month'). LinkedIn only supports these 3 tiers natively — do not invent others. Default 'past-week' if user is vague about duration.",
+					"required": true
+				}
+			},
+			"requiredEnv": [],
+			"fileCount": 9,
+			"scriptCount": 4,
+			"stats": {
+				"downloads": 1834,
+				"likes": 118,
+				"favorites": 52
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/contract.json",
+				"scripts/build-url.mjs": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/scripts/build-url.mjs",
+				"scripts/dom-collector.js": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/scripts/dom-collector.js",
+				"scripts/dump-result.js": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/scripts/dump-result.js",
+				"scripts/scroll-and-collect.js": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/scripts/scroll-and-collect.js",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/linkedin-search/verify.mjs"
+			}
+		},
+		{
+			"name": "subtitle-fluent-translator",
+			"title": "Subtitle Fluent Translator",
+			"description": "给定一个本地源字幕文件,产出经过阅读理解、翻译和断句优化后的流畅中文字幕 SRT。",
+			"goal": "给定一个本地源字幕文件,产出经过阅读理解、翻译和断句优化后的流畅中文字幕 SRT。",
+			"acceptance": [
+				"source.cues.json 存在且 cue 数量大于 0。",
+				"fluent.units.json 存在且每个单元有 ids 和非空 text。",
+				"fluent.zh.srt 存在、可解析、包含目标语言文本。",
+				"fluent.zh.srt 的每条 cue 时间来自源 cue ids 的首尾时间,整体时间单调不重叠。",
+				"fluent-report.json 存在且记录 sourceCueCount、unitCount、targetLanguage、verbosity、outputSubtitlePath;如果输入 glossary,也必须原样记录。"
+			],
+			"exampleInput": "subtitlePath=<value> targetLanguage=<value> verbosity=<value>",
+			"install": "ugk task install subtitle-fluent-translator",
+			"zip": "downloads/subtitle-fluent-translator.zip",
+			"author": "UGK Official",
+			"category": "subtitle",
+			"tags": [
+				"subtitle",
+				"translation",
+				"reflow",
+				"tts-prep"
+			],
+			"runtimeInput": [
+				"subtitlePath",
+				"targetLanguage",
+				"verbosity",
+				"stylePrompt",
+				"glossary",
+				"maxUnitDurationMs",
+				"maxUnitChars"
+			],
+			"runtimeInputMeta": {
+				"subtitlePath": {
+					"description": "必填,源字幕本地路径,支持 .srt 或 .vtt。必须原样提取为路径字符串。",
+					"required": true
+				},
+				"targetLanguage": {
+					"description": "可选,目标字幕语言,默认 zh-CN。",
+					"required": false,
+					"default": "zh-CN"
+				},
+				"verbosity": {
+					"description": "可选,翻译详略模式。只允许 normal 或 talkative。normal 为正常流畅字幕;talkative 为话痨模式。用户说“话痨模式”“更啰嗦”时填 talkative。",
+					"required": false,
+					"default": "normal",
+					"allowedValues": [
+						"normal",
+						"talkative"
+					]
+				},
+				"stylePrompt": {
+					"description": "可选,翻译和改写风格。默认自然、口语化、适合视频字幕和中文配音。",
+					"required": false,
+					"default": "自然、口语化、适合视频字幕和中文配音。"
+				},
+				"glossary": {
+					"description": "可选,用户在自然语言里明确提到的人名、队名、主题词、术语或动作名参考,dispatcher 抽取后用分号分隔,例如: bboy lunatic; breaking; toprock; freeze。翻译时作为权威参考,不要误译或改写。",
+					"required": false,
+					"default": ""
+				},
+				"maxUnitDurationMs": {
+					"description": "可选,合并后的多 cue 字幕单元最大覆盖时长,默认 8000。单条源 cue 本身超长时允许保留。",
+					"required": false,
+					"default": 8000
+				},
+				"maxUnitChars": {
+					"description": "可选,每个字幕单元最大目标文字数。不填时 normal 默认 90,talkative 默认 160。",
+					"required": false
+				}
+			},
+			"requiredEnv": [],
+			"fileCount": 7,
+			"scriptCount": 2,
+			"stats": {
+				"downloads": 2151,
+				"likes": 137,
+				"favorites": 63
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/subtitle-fluent-translator/contract.json",
+				"scripts/make-fluent-subtitle.mjs": "https://ugk-task-share.pages.dev/taskbooks/subtitle-fluent-translator/scripts/make-fluent-subtitle.mjs",
+				"scripts/make-fluent-subtitle.test.mjs": "https://ugk-task-share.pages.dev/taskbooks/subtitle-fluent-translator/scripts/make-fluent-subtitle.test.mjs",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/subtitle-fluent-translator/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/subtitle-fluent-translator/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/subtitle-fluent-translator/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/subtitle-fluent-translator/verify.mjs"
+			}
+		},
+		{
+			"name": "subtitle-to-speech",
+			"title": "Subtitle To Speech",
+			"description": "给定一个中文字幕文件,用 MiMo TTS 生成按字幕时间轴铺好的中文配音音频。",
+			"goal": "给定一个中文字幕文件,用 MiMo TTS 生成按字幕时间轴铺好的中文配音音频。",
+			"acceptance": [
+				"source.cues.json 存在且 cue 数量大于 0。",
+				"dub.zh.wav 存在,ffprobe 可解析,且 duration > 0。",
+				"tts-summary.json 存在且记录 subtitlePath、voice、cueCount、speechGroupCount、dubAudioPath,且 voice 等于本次输入 voice。",
+				"tts-segments/ 存在。"
+			],
+			"exampleInput": "subtitlePath=<value> voice=<value> stylePrompt=<value>",
+			"install": "ugk task install subtitle-to-speech",
+			"zip": "downloads/subtitle-to-speech.zip",
+			"author": "UGK Official",
+			"category": "subtitle",
+			"tags": [
+				"subtitle",
+				"tts",
+				"mimo",
+				"audio"
+			],
+			"runtimeInput": [
+				"subtitlePath",
+				"voice",
+				"stylePrompt",
+				"maxChars"
+			],
+			"runtimeInputMeta": {
+				"subtitlePath": {
+					"description": "必填,中文字幕文件路径,支持 .srt 或 .vtt。必须原样提取为路径字符串。",
+					"required": true
+				},
+				"voice": {
+					"description": "可选 MiMo 预置音色 ID,必须精确填 ID,不能填自然语言描述。完整列表: mimo_default、冰糖、茉莉、苏打、白桦、Mia、Chloe、Milo、Dean。中文女声: 冰糖/茉莉; 中文男声: 苏打/白桦。dispatcher 应根据用户想要的语言、性别和气质选择最接近的 ID,把语气、节奏、感染力等表达方式写入 stylePrompt。",
+					"required": false,
+					"default": "冰糖",
+					"allowedValues": [
+						"mimo_default",
+						"冰糖",
+						"茉莉",
+						"苏打",
+						"白桦",
+						"Mia",
+						"Chloe",
+						"Milo",
+						"Dean"
+					]
+				},
+				"stylePrompt": {
+					"description": "可选 MiMo 风格控制提示。默认使用自然清晰、适合视频解说的中文语气。",
+					"required": false,
+					"default": "用自然、清晰、适合视频解说的中文语气，语速稳定，不要读出字幕序号或时间码。"
+				},
+				"maxChars": {
+					"description": "可选,每个 TTS 分组的最大中文字符数,默认 120。数值越小越贴近字幕时间轴,但 API 调用次数更多。",
+					"required": false,
+					"default": 120
+				}
+			},
+			"requiredEnv": [
+				"MIMO_API_KEY"
+			],
+			"fileCount": 7,
+			"scriptCount": 2,
+			"stats": {
+				"downloads": 2468,
+				"likes": 156,
+				"favorites": 74
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/subtitle-to-speech/contract.json",
+				"scripts/subtitle-to-speech.mjs": "https://ugk-task-share.pages.dev/taskbooks/subtitle-to-speech/scripts/subtitle-to-speech.mjs",
+				"scripts/subtitle-to-speech.test.mjs": "https://ugk-task-share.pages.dev/taskbooks/subtitle-to-speech/scripts/subtitle-to-speech.test.mjs",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/subtitle-to-speech/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/subtitle-to-speech/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/subtitle-to-speech/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/subtitle-to-speech/verify.mjs"
+			}
+		},
+		{
+			"name": "video-downloader",
+			"title": "Video Downloader",
+			"description": "给定一个公开视频 URL,用 yt-dlp 下载其中的单个视频为 MP4,并在存在字幕时下载字幕文件。",
+			"goal": "给定一个公开视频 URL,用 yt-dlp 下载其中的单个视频为 MP4,并在存在字幕时下载字幕文件。",
+			"acceptance": [
+				"metadata.json 存在且为有效 JSON。",
+				"download-summary.json 存在且记录 extractor 和 videoFiles。",
+				"至少一个 .mp4 文件存在、大小大于 1MiB、ffprobe 可解析且 duration > 0。",
+				"如果 metadata.json 声明 subtitles 非空,outputDir 下必须存在 .vtt/.srt/.ass 字幕文件。"
+			],
+			"exampleInput": "url=https://example.com/video maxHeight=<value> subLangs=<value>",
+			"install": "ugk task install video-downloader",
+			"zip": "downloads/video-downloader.zip",
+			"author": "UGK Official",
+			"category": "video",
+			"tags": [
+				"video",
+				"download",
+				"yt-dlp",
+				"subtitle"
+			],
+			"runtimeInput": [
+				"url",
+				"maxHeight",
+				"subLangs",
+				"cookiesFromBrowser"
+			],
+			"runtimeInputMeta": {
+				"url": {
+					"description": "必填,公开视频页面链接,支持 yt-dlp 能解析的 http/https URL。",
+					"required": true
+				},
+				"maxHeight": {
+					"description": "可选最大视频高度。默认 480;传 720/1080 可要更高清,传 270 更省流量。",
+					"required": false,
+					"default": 480
+				},
+				"subLangs": {
+					"description": "字幕语言选择,传给 yt-dlp --sub-langs。默认 all。",
+					"required": false,
+					"default": "all"
+				},
+				"cookiesFromBrowser": {
+					"description": "可选浏览器登录态来源。只允许 none 或 chrome。用户明确说使用 Chrome 登录态/cookies 时填 chrome;否则默认 none。不要让 worker 手写 yt-dlp cookies 命令。",
+					"required": false,
+					"default": "none"
+				}
+			},
+			"requiredEnv": [],
+			"fileCount": 7,
+			"scriptCount": 2,
+			"stats": {
+				"downloads": 2785,
+				"likes": 175,
+				"favorites": 85
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/video-downloader/contract.json",
+				"scripts/download-video.mjs": "https://ugk-task-share.pages.dev/taskbooks/video-downloader/scripts/download-video.mjs",
+				"scripts/download-video.test.mjs": "https://ugk-task-share.pages.dev/taskbooks/video-downloader/scripts/download-video.test.mjs",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/video-downloader/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/video-downloader/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/video-downloader/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/video-downloader/verify.mjs"
+			}
+		},
+		{
+			"name": "video-zh-composer",
+			"title": "Video Zh Composer",
+			"description": "给定视频、中文配音音频和中文字幕,产出中文配音软字幕版 MP4 与硬字幕版 MP4。",
+			"goal": "给定视频、中文配音音频和中文字幕,产出中文配音软字幕版 MP4 与硬字幕版 MP4。",
+			"acceptance": [
+				"final.zh.mp4 存在,ffprobe 可解析,且包含视频流、音频流和字幕流。",
+				"final.zh.hardsub.mp4 存在,ffprobe 可解析,且包含视频流和音频流。",
+				"final.zh.mp4 与 final.zh.hardsub.mp4 时长不得明显短于 compose-summary.videoDurationSeconds。",
+				"compose-summary.json 存在且记录 videoPath、audioPath、subtitlePath、subtitleColor、hardsubSubtitlePath、finalVideoPath、hardsubVideoPath。"
+			],
+			"exampleInput": "videoPath=<value> audioPath=<value> subtitlePath=<value>",
+			"install": "ugk task install video-zh-composer",
+			"zip": "downloads/video-zh-composer.zip",
+			"author": "UGK Official",
+			"category": "video",
+			"tags": [
+				"video",
+				"audio",
+				"subtitle",
+				"ffmpeg"
+			],
+			"runtimeInput": [
+				"videoPath",
+				"audioPath",
+				"subtitlePath",
+				"subtitleColor"
+			],
+			"runtimeInputMeta": {
+				"videoPath": {
+					"description": "必填,本地视频文件路径。必须原样提取为路径字符串。",
+					"required": true
+				},
+				"audioPath": {
+					"description": "必填,中文配音音频路径,通常来自 subtitle-to-speech 的 dub.zh.wav。",
+					"required": true
+				},
+				"subtitlePath": {
+					"description": "必填,中文字幕路径,支持 .srt 或 .vtt。会复制到 outputDir 后用于软字幕和硬字幕。",
+					"required": true
+				},
+				"subtitleColor": {
+					"description": "可选,硬字幕文字颜色。只允许 white、yellow、pink。用户说白色填 white,黄色填 yellow,粉色填 pink。默认 white。",
+					"required": false,
+					"default": "white"
+				}
+			},
+			"requiredEnv": [],
+			"fileCount": 7,
+			"scriptCount": 2,
+			"stats": {
+				"downloads": 3102,
+				"likes": 194,
+				"favorites": 96
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/video-zh-composer/contract.json",
+				"scripts/compose-video-zh.mjs": "https://ugk-task-share.pages.dev/taskbooks/video-zh-composer/scripts/compose-video-zh.mjs",
+				"scripts/compose-video-zh.test.mjs": "https://ugk-task-share.pages.dev/taskbooks/video-zh-composer/scripts/compose-video-zh.test.mjs",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/video-zh-composer/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/video-zh-composer/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/video-zh-composer/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/video-zh-composer/verify.mjs"
+			}
+		},
+		{
+			"name": "video-zh-dubber",
+			"title": "Video Zh Dubber",
+			"description": "给定本地视频文件和英文字幕文件,一体化产出中文字幕、中文配音音轨,以及带中文字幕软字幕和硬字幕的最终 MP4。",
+			"goal": "给定本地视频文件和英文字幕文件,一体化产出中文字幕、中文配音音轨,以及带中文字幕软字幕和硬字幕的最终 MP4。",
+			"acceptance": [
+				"translated.zh.srt 存在,可解析,包含中文,且 cue 数量等于源字幕。",
+				"dub.zh.wav 存在,ffprobe 可解析,且 duration > 0。",
+				"final.zh.mp4 存在,ffprobe 可解析,且包含视频流、音频流和字幕流。",
+				"final.zh.hardsub.mp4 存在,ffprobe 可解析,且包含视频流和音频流。",
+				"dub-summary.json 存在且记录 voice、subtitleColor、cue 数、speechGroupCount、dubAudioPath、finalVideoPath,且 voice 等于本次输入 voice。"
+			],
+			"exampleInput": "videoPath=<value> subtitlePath=<value> zhSubtitlePath=<value>",
+			"install": "ugk task install video-zh-dubber",
+			"zip": "downloads/video-zh-dubber.zip",
+			"author": "UGK Official",
+			"category": "video",
+			"tags": [
+				"video",
+				"subtitle",
+				"dubbing",
+				"tts",
+				"mimo",
+				"ffmpeg"
+			],
+			"runtimeInput": [
+				"videoPath",
+				"subtitlePath",
+				"zhSubtitlePath",
+				"voice",
+				"stylePrompt",
+				"maxChars",
+				"subtitleColor"
+			],
+			"runtimeInputMeta": {
+				"videoPath": {
+					"description": "必填,本地视频文件路径,例如 C:\\\\Users\\\\...\\\\video.mp4。必须原样提取为路径字符串。",
+					"required": true
+				},
+				"subtitlePath": {
+					"description": "必填,源英文字幕路径,支持 .srt 或 .vtt。必须原样提取为路径字符串。",
+					"required": true
+				},
+				"zhSubtitlePath": {
+					"description": "可选,如果用户已经有中文字幕文件,填它的本地路径;没有就留空,worker 需要把 subtitlePath 翻译为 outputDir/translated.zh.srt。",
+					"required": false
+				},
+				"voice": {
+					"description": "可选 MiMo 预置音色 ID,必须精确填 ID,不能填自然语言描述。完整列表: mimo_default、冰糖、茉莉、苏打、白桦、Mia、Chloe、Milo、Dean。中文女声: 冰糖/茉莉; 中文男声: 苏打/白桦。dispatcher 应根据用户想要的语言、性别和气质选择最接近的 ID,把语气、节奏、感染力等表达方式写入 stylePrompt。",
+					"required": false,
+					"default": "冰糖"
+				},
+				"stylePrompt": {
+					"description": "可选 MiMo 风格控制提示。默认使用自然清晰、适合视频解说的中文语气。",
+					"required": false,
+					"default": "用自然、清晰、适合视频解说的中文语气，语速稳定，不要读出字幕序号或时间码。"
+				},
+				"maxChars": {
+					"description": "可选,每个 TTS 分组的最大中文字符数,默认 120。数值越小越贴近字幕时间轴,但 API 调用次数更多。",
+					"required": false,
+					"default": 120
+				},
+				"subtitleColor": {
+					"description": "可选,硬字幕文字颜色。只允许 white、yellow、pink。用户说白色填 white,黄色填 yellow,粉色填 pink。默认 white。",
+					"required": false,
+					"default": "white"
+				}
+			},
+			"requiredEnv": [
+				"MIMO_API_KEY"
+			],
+			"fileCount": 7,
+			"scriptCount": 2,
+			"stats": {
+				"downloads": 3419,
+				"likes": 213,
+				"favorites": 107
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/video-zh-dubber/contract.json",
+				"scripts/make-video-zh-dub.mjs": "https://ugk-task-share.pages.dev/taskbooks/video-zh-dubber/scripts/make-video-zh-dub.mjs",
+				"scripts/make-video-zh-dub.test.mjs": "https://ugk-task-share.pages.dev/taskbooks/video-zh-dubber/scripts/make-video-zh-dub.test.mjs",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/video-zh-dubber/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/video-zh-dubber/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/video-zh-dubber/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/video-zh-dubber/verify.mjs"
+			}
+		},
+		{
+			"name": "whisper-audio-to-text",
+			"title": "Whisper Audio To Text",
+			"description": "给定本地音视频文件,使用本机 Whisper large-v3-turbo 转写,产出可继续用于字幕优化和配音流程的 SRT/VTT/TXT/JSON。",
+			"goal": "给定本地音视频文件,使用本机 Whisper large-v3-turbo 转写,产出可继续用于字幕优化和配音流程的 SRT/VTT/TXT/JSON。",
+			"acceptance": [
+				"transcript.txt 存在且非空。",
+				"transcript.srt 存在且包含至少一个时间码。",
+				"transcript.vtt 存在且包含 WEBVTT。",
+				"transcription.json 存在且为有效 JSON。",
+				"whisper-summary.json 存在且记录 inputFilePath、model、modelDir、language、task。"
+			],
+			"exampleInput": "file_path=<value> filePath=<value> language=<value>",
+			"install": "ugk task install whisper-audio-to-text",
+			"zip": "downloads/whisper-audio-to-text.zip",
+			"author": "UGK Official",
+			"category": "audio",
+			"tags": [
+				"audio",
+				"video",
+				"transcription",
+				"whisper",
+				"subtitle"
+			],
+			"runtimeInput": [
+				"file_path",
+				"filePath",
+				"language",
+				"task",
+				"model"
+			],
+			"runtimeInputMeta": {
+				"file_path": {
+					"description": "必填,本地音视频文件绝对路径。必须原样提取为路径字符串。",
+					"required": true
+				},
+				"filePath": {
+					"description": "兼容字段,等同 file_path。",
+					"required": false
+				},
+				"language": {
+					"description": "可选,Whisper 语言代码,如 ru/en/ja/zh。不填则自动识别。",
+					"required": false
+				},
+				"task": {
+					"description": "可选,transcribe 或 translate。默认 transcribe。",
+					"required": false,
+					"default": "transcribe"
+				},
+				"model": {
+					"description": "可选,Whisper 模型名。默认 large-v3-turbo,模型目录固定 E:\\\\AII\\\\.cache\\\\whisper。",
+					"required": false,
+					"default": "large-v3-turbo"
+				}
+			},
+			"requiredEnv": [],
+			"fileCount": 7,
+			"scriptCount": 2,
+			"stats": {
+				"downloads": 3736,
+				"likes": 232,
+				"favorites": 118
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/whisper-audio-to-text/contract.json",
+				"scripts/whisper-audio-to-text.mjs": "https://ugk-task-share.pages.dev/taskbooks/whisper-audio-to-text/scripts/whisper-audio-to-text.mjs",
+				"scripts/whisper-audio-to-text.test.mjs": "https://ugk-task-share.pages.dev/taskbooks/whisper-audio-to-text/scripts/whisper-audio-to-text.test.mjs",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/whisper-audio-to-text/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/whisper-audio-to-text/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/whisper-audio-to-text/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/whisper-audio-to-text/verify.mjs"
+			}
+		},
+		{
+			"name": "x-search",
+			"title": "X Search",
+			"description": "给定 keyword 和自然语言时间意图,dispatcher 把时间算成扁平标量字段(startIso/endIso 等),worker 用 UGK 管理的 chrome_cdp 搜索 X/Twitter Latest,按 [startIso,endIso) 过滤,把完整结构化结果写入 $TASK_OUTPUT_DIR/x_search_results.json。headless 友好,并行安全。",
+			"goal": "给定 keyword 和自然语言时间意图,dispatcher 把时间算成扁平标量字段(startIso/endIso 等),worker 用 UGK 管理的 chrome_cdp 搜索 X/Twitter Latest,按 [startIso,endIso) 过滤,把完整结构化结果写入 $TASK_OUTPUT_DIR/x_search_results.json。headless 友好,并行安全。",
+			"acceptance": [
+				"$TASK_OUTPUT_DIR/x_search_results.json 存在且可被 JSON.parse。",
+				"输出 JSON 至少含 normalizedKeyword, rawQuery, timeWindow, cutoffIso, searchUrl, method, benchmark, results 字段;results 为数组。",
+				"timeWindow 是对象,含 raw, mode, amount, unit, startIso, endIso, canonical 字段;startIso/endIso 可解析且 startIso < endIso。",
+				"timeWindow.raw 等于 TASK_INPUT.timePhrase;cutoffIso 等于 timeWindow.startIso。",
+				"每条 results[].postedAt 必须落在 [timeWindow.startIso, timeWindow.endIso) 内(允许极小运行时钟偏差)。",
+				"results 非空时,每条至少含 postedAt, text, url,且含 author 或 handle 之一。",
+				"text 字段保留原文(不截断)。",
+				"benchmark 是对象,含 stopReason, score, grade, cutoffReached, anchorScrolls, rowsInspected, validRate, filteredRows。",
+				"searchUrl 等于 https://x.com/search?q=<encodeURIComponent(normalizedKeyword)>&src=typed_query&f=live。",
+				"results 条数与 benchmark.filteredRows 一致(全量落地,不丢)。"
+			],
+			"exampleInput": "keyword=<value> timePhrase=<value> timeMode=<value>",
+			"install": "ugk task install x-search",
+			"zip": "downloads/x-search.zip",
+			"author": "UGK Official",
+			"category": "x",
+			"tags": [
+				"x",
+				"twitter",
+				"search",
+				"cdp"
+			],
+			"runtimeInput": [
+				"keyword",
+				"timePhrase",
+				"timeMode",
+				"timeAmount",
+				"timeUnit",
+				"startIso",
+				"endIso",
+				"canonical",
+				"maxSteps"
+			],
+			"runtimeInputMeta": {
+				"keyword": {
+					"description": "X/Twitter search keyword. Used verbatim in the X Latest query (do not add since:/until: or language filters unless explicitly included in the keyword).",
+					"required": true
+				},
+				"timePhrase": {
+					"description": "The user's original time phrase, preserved verbatim. Any language. e.g. 3h, 上周, 俩月, last week, past 2 months. Just echo what the user said about time.",
+					"required": true
+				},
+				"timeMode": {
+					"description": "How the time window is computed. One of: 'rolling' (X ago from now, e.g. 最近/过去/past/1month/俩月), 'calendar' (previous full natural period, e.g. 上周/last week/上个月/last month), 'calendar_to_now' (from start of current period to now, e.g. 今天/this week/本月).",
+					"required": true
+				},
+				"timeAmount": {
+					"description": "Positive number. The amount of the time unit. e.g. for '3h' → 3, for '俩月' → 2, for '上周' → 1. Use 2 for '俩/couple', 3 for 'few'.",
+					"required": true
+				},
+				"timeUnit": {
+					"description": "One of: 'hour', 'day', 'week', 'month'. The unit of the time window.",
+					"required": true
+				},
+				"startIso": {
+					"description": "ISO 8601 start datetime of the window, INCLUSIVE. You are an LLM, so COMPUTE this from the time phrase using the current date. e.g. for '3h' and now=2026-06-28T06:00:00Z → '2026-06-28T03:00:00.000Z'. For '上周' (calendar week starting Monday) → the Monday 00:00 of last week.",
+					"required": true
+				},
+				"endIso": {
+					"description": "ISO 8601 end datetime of the window, EXCLUSIVE (= now). You are an LLM, so COMPUTE this. For rolling/calendar_to_now this is the current time. For calendar (上周/上个月) this is the start of the current period (e.g. this Monday 00:00 for 上周).",
+					"required": true
+				},
+				"canonical": {
+					"description": "A short canonical label like '3hours' or '60days'. Use the smallest unit (e.g. '3hours' not '0.125days'). For rolling month use 30 days (e.g. '俩月' → '60days'). For calendar, use the actual span in days (e.g. '上周' → '7days').",
+					"required": true
+				},
+				"maxSteps": {
+					"description": "Optional. Maximum anchor-scroll iterations. Default 20. Raise to 40-80 for active day/month-range topics. Hard maximum 100.",
+					"required": false,
+					"default": 20
+				}
+			},
+			"requiredEnv": [],
+			"fileCount": 8,
+			"scriptCount": 3,
+			"stats": {
+				"downloads": 4053,
+				"likes": 251,
+				"favorites": 129
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/x-search/contract.json",
+				"scripts/anchor-scroll.js": "https://ugk-task-share.pages.dev/taskbooks/x-search/scripts/anchor-scroll.js",
+				"scripts/dom-collector.js": "https://ugk-task-share.pages.dev/taskbooks/x-search/scripts/dom-collector.js",
+				"scripts/dump-result.js": "https://ugk-task-share.pages.dev/taskbooks/x-search/scripts/dump-result.js",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/x-search/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/x-search/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/x-search/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/x-search/verify.mjs"
+			}
+		},
+		{
+			"name": "x-video-downloader",
+			"title": "X Video Downloader",
+			"description": "给定 X/Twitter 帖子链接,下载其中的视频为 MP4,并在存在字幕时下载字幕文件。",
+			"goal": "给定 X/Twitter 帖子链接,下载其中的视频为 MP4,并在存在字幕时下载字幕文件。",
+			"acceptance": [
+				"metadata.json 存在且为有效 JSON。",
+				"download-summary.json 存在且记录 videoFiles。",
+				"至少一个 .mp4 文件存在、大小大于 1MiB、ffprobe 可解析且 duration > 0。",
+				"如果 metadata.json 声明 subtitles 非空,outputDir 下必须存在 .vtt/.srt/.ass 字幕文件。"
+			],
+			"exampleInput": "url=https://example.com/video maxHeight=<value> subLangs=<value>",
+			"install": "ugk task install x-video-downloader",
+			"zip": "downloads/x-video-downloader.zip",
+			"author": "UGK Official",
+			"category": "x",
+			"tags": [
+				"x",
+				"twitter",
+				"video",
+				"download",
+				"subtitles",
+				"yt-dlp"
+			],
+			"runtimeInput": [
+				"url",
+				"maxHeight",
+				"subLangs"
+			],
+			"runtimeInputMeta": {
+				"url": {
+					"description": "X/Twitter 帖子链接,格式 https://x.com/{user}/status/{id}",
+					"required": true
+				},
+				"maxHeight": {
+					"description": "可选最大视频高度。默认 480(通常会选 360p 档,更快);传 720/1080 可要更高清,传 270 更省流量。",
+					"required": false,
+					"default": 480
+				},
+				"subLangs": {
+					"description": "字幕语言选择,传给 yt-dlp --sub-langs。默认 all。",
+					"required": false,
+					"default": "all"
+				}
+			},
+			"requiredEnv": [],
+			"fileCount": 7,
+			"scriptCount": 2,
+			"stats": {
+				"downloads": 4370,
+				"likes": 270,
+				"favorites": 140
+			},
+			"files": {
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/x-video-downloader/contract.json",
+				"scripts/download-x-video.mjs": "https://ugk-task-share.pages.dev/taskbooks/x-video-downloader/scripts/download-x-video.mjs",
+				"scripts/download-x-video.test.mjs": "https://ugk-task-share.pages.dev/taskbooks/x-video-downloader/scripts/download-x-video.test.mjs",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/x-video-downloader/skill.md",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/x-video-downloader/spec.json",
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/x-video-downloader/taskbook.json",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/x-video-downloader/verify.mjs"
 			}
 		}
 	]

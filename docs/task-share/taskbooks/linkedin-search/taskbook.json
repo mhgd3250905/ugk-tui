@@ -1,0 +1,112 @@
+{
+	"name": "linkedin-search",
+	"description": "Search LinkedIn content posts by keyword, sorted by latest, using the local logged-in Chrome (CDP). Writes a complete structured JSON result. Stable, headless, parallel-safe — each run gets its own isolated CDP tab and output dir. REQUIREMENTS before calling run_task: you MUST collect BOTH (1) a concrete keyword (the exact search term, not a vague description) AND (2) a time range from the user (e.g. 最近一天/最近一周/最近一个月, or past 24h/week/month). LinkedIn only supports 3 native time tiers; the dispatcher maps the user's phrase to the nearest covering tier. Users rarely volunteer a time range in casual requests like '搜一下 LinkedIn 上关于 X 的讨论' — if either keyword or time is missing or vague, you MUST ask the user to clarify BEFORE calling run_task; do not guess or invent values. Pass the natural-language request to run_task.",
+	"scope": "user",
+	"createdAt": "2026-06-28T22:36:00.000Z",
+	"updatedAt": "2026-06-28T16:24:27.335Z",
+	"tags": [
+		"linkedin",
+		"search",
+		"cdp"
+	],
+	"runs": [
+		{
+			"timestamp": "2026-06-28T14:46:07.978Z",
+			"status": "fail",
+			"input": {
+				"maxScrolls": 50,
+				"keyword": "medtrum",
+				"timePhrase": "最近30天",
+				"days": 30,
+				"startIso": "2026-05-29T14:44:34.591Z",
+				"endIso": "2026-06-28T14:44:34.591Z"
+			},
+			"exitCode": 1,
+			"verifyFailures": [],
+			"duration": 93.39,
+			"phases": {
+				"workerMs": 62911,
+				"verifyMs": 0,
+				"workerFirstOutputMs": 7056
+			}
+		},
+		{
+			"timestamp": "2026-06-28T15:02:17.679Z",
+			"status": "fail",
+			"input": {
+				"maxScrolls": 50,
+				"keyword": "medtrum",
+				"timePhrase": "最近一个月",
+				"dateRange": "past-month",
+				"startIso": "2026-05-29T15:00:09.271Z",
+				"endIso": "2026-06-28T15:00:09.271Z"
+			},
+			"exitCode": 1,
+			"verifyFailures": [],
+			"duration": 128.762,
+			"phases": {
+				"workerMs": 118826,
+				"verifyMs": 0,
+				"workerFirstOutputMs": 8791
+			}
+		},
+		{
+			"timestamp": "2026-06-28T15:30:10.106Z",
+			"status": "fail",
+			"input": {
+				"maxScrolls": 50,
+				"keyword": "medtrum",
+				"timePhrase": "最近一个月",
+				"dateRange": "past-month"
+			},
+			"exitCode": 1,
+			"verifyFailures": [],
+			"duration": 1086.887,
+			"phases": {
+				"workerMs": 1072377,
+				"verifyMs": 0,
+				"workerFirstOutputMs": 8629
+			}
+		},
+		{
+			"timestamp": "2026-06-28T16:19:25.615Z",
+			"status": "pass",
+			"input": {
+				"keyword": "medtrum",
+				"timePhrase": "最近一周",
+				"dateRange": "past-week"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 281.684,
+			"phases": {
+				"workerMs": 277078,
+				"verifyMs": 69,
+				"workerFirstOutputMs": 8814,
+				"worker.coldStartMs": 1141,
+				"worker.llmDecisionMs": 11629,
+				"worker.toolMs": 92470
+			}
+		},
+		{
+			"timestamp": "2026-06-28T16:24:27.333Z",
+			"status": "pass",
+			"input": {
+				"keyword": "touchcare",
+				"timePhrase": "最近一周",
+				"dateRange": "past-week"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 213.074,
+			"phases": {
+				"workerMs": 210559,
+				"verifyMs": 131,
+				"workerFirstOutputMs": 8806,
+				"worker.coldStartMs": 1394,
+				"worker.llmDecisionMs": 12443,
+				"worker.toolMs": 76739
+			}
+		}
+	]
+}

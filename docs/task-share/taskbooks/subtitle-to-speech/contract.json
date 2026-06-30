@@ -1,0 +1,54 @@
+{
+	"outputDir": "<runtime>",
+	"artifacts": [
+		"source.cues.json",
+		"audio-concat.txt",
+		"dub.zh.wav",
+		"tts-summary.json",
+		"tts-segments/"
+	],
+	"runtimeInput": [
+		"subtitlePath",
+		"voice",
+		"stylePrompt",
+		"maxChars"
+	],
+	"runtimeInputMeta": {
+		"subtitlePath": {
+			"description": "必填,中文字幕文件路径,支持 .srt 或 .vtt。必须原样提取为路径字符串。",
+			"required": true
+		},
+		"voice": {
+			"description": "可选 MiMo 预置音色 ID,必须精确填 ID,不能填自然语言描述。完整列表: mimo_default、冰糖、茉莉、苏打、白桦、Mia、Chloe、Milo、Dean。中文女声: 冰糖/茉莉; 中文男声: 苏打/白桦。dispatcher 应根据用户想要的语言、性别和气质选择最接近的 ID,把语气、节奏、感染力等表达方式写入 stylePrompt。",
+			"required": false,
+			"default": "冰糖",
+			"allowedValues": [
+				"mimo_default",
+				"冰糖",
+				"茉莉",
+				"苏打",
+				"白桦",
+				"Mia",
+				"Chloe",
+				"Milo",
+				"Dean"
+			]
+		},
+		"stylePrompt": {
+			"description": "可选 MiMo 风格控制提示。默认使用自然清晰、适合视频解说的中文语气。",
+			"required": false,
+			"default": "用自然、清晰、适合视频解说的中文语气，语速稳定，不要读出字幕序号或时间码。"
+		},
+		"maxChars": {
+			"description": "可选,每个 TTS 分组的最大中文字符数,默认 120。数值越小越贴近字幕时间轴,但 API 调用次数更多。",
+			"required": false,
+			"default": 120
+		}
+	},
+	"requiredTools": [
+		"bash"
+	],
+	"requiredEnv": [
+		"MIMO_API_KEY"
+	]
+}

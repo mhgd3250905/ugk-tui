@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -9,6 +9,24 @@ const requiredFiles = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "
 
 async function readJson(filePath: string) {
 	return JSON.parse(await readFile(filePath, "utf8"));
+}
+
+function zipEntryNames(filePath: string) {
+	const data = readFileSync(filePath);
+	const eocd = data.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+	assert.notEqual(eocd, -1, `${filePath} should have a ZIP directory`);
+	const count = data.readUInt16LE(eocd + 10);
+	let offset = data.readUInt32LE(eocd + 16);
+	const names = [];
+	for (let index = 0; index < count; index++) {
+		assert.equal(data.readUInt32LE(offset), 0x02014b50);
+		const nameLength = data.readUInt16LE(offset + 28);
+		const extraLength = data.readUInt16LE(offset + 30);
+		const commentLength = data.readUInt16LE(offset + 32);
+		names.push(data.subarray(offset + 46, offset + 46 + nameLength).toString("utf8"));
+		offset += 46 + nameLength + extraLength + commentLength;
+	}
+	return names.sort();
 }
 
 test("task share manifest describes official taskbooks with matching local files", async () => {
@@ -30,7 +48,7 @@ test("task share manifest describes official taskbooks with matching local files
 		for (const file of requiredFiles) {
 			const localPath = path.join(taskDir, file);
 			assert.equal(existsSync(localPath), true, `${localPath} should exist`);
-			assert.equal(task.files[file], `https://raw.githubusercontent.com/mhgd3250905/ugk-tui/main/docs/task-share/taskbooks/${task.name}/${file}`);
+			assert.equal(task.files[file], `https://ugk-task-share.pages.dev/taskbooks/${task.name}/${file}`);
 		}
 
 		const taskbook = await readJson(path.join(taskDir, "taskbook.json"));
@@ -56,6 +74,6 @@ test("task share page exposes download and copy-command paths for every official
 
 		const zipPath = path.join(root, "downloads", `${task.name}.zip`);
 		assert.equal(existsSync(zipPath), true, `${zipPath} should exist`);
-		assert.ok(statSync(zipPath).size > 0, `${zipPath} should not be empty`);
+		assert.deepEqual(zipEntryNames(zipPath), [...requiredFiles].sort());
 	}
 });

@@ -1,10 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { isTaskInstallCommand, runTaskInstall } from "../bin/task-install.js";
+import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
+import { OFFICIAL_MANIFEST_URL, isTaskInstallCommand, runTaskInstall } from "../bin/task-install.js";
+
+const execFileAsync = promisify(execFile);
 
 const spec = {
 	goal: "统计文本字素数量",
@@ -122,6 +127,86 @@ test("runTaskInstall rejects taskbook files whose name differs from the manifest
 	} finally {
 		rmSync(agentDir, { recursive: true, force: true });
 	}
+});
+
+test("runTaskInstall rejects malformed taskbook metadata before writing files", async () => {
+	const agentDir = tempDir();
+	try {
+		const badTaskbook = JSON.stringify({ ...JSON.parse(files["taskbook.json"]), description: undefined });
+		const fetch = fakeFetch({
+			"https://example.test/manifest.json": manifestFor("grapheme-count"),
+			...Object.fromEntries(Object.entries({ ...files, "taskbook.json": badTaskbook }).map(([file, text]) => [`https://example.test/${file}`, text])),
+		});
+
+		await assert.rejects(() => runTaskInstall("grapheme-count", {
+			agentDir,
+			fetch,
+			manifestUrl: "https://example.test/manifest.json",
+		}), /Invalid taskbook\.json/);
+
+		assert.equal(existsSync(path.join(agentDir, "tasks", "grapheme-count")), false);
+	} finally {
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("runTaskInstall rejects malformed specs before writing files", async () => {
+	const agentDir = tempDir();
+	try {
+		const badSpec = JSON.stringify({ ...spec, hardConstraints: [] });
+		const fetch = fakeFetch({
+			"https://example.test/manifest.json": manifestFor("grapheme-count"),
+			...Object.fromEntries(Object.entries({ ...files, "spec.json": badSpec }).map(([file, text]) => [`https://example.test/${file}`, text])),
+		});
+
+		await assert.rejects(() => runTaskInstall("grapheme-count", {
+			agentDir,
+			fetch,
+			manifestUrl: "https://example.test/manifest.json",
+		}), /Invalid spec\.json/);
+
+		assert.equal(existsSync(path.join(agentDir, "tasks", "grapheme-count")), false);
+	} finally {
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("bin/ugk.js handles task install before starting the interactive CLI", async () => {
+	const agentDir = tempDir();
+	try {
+		const preloadPath = path.join(agentDir, "mock-fetch.mjs");
+		await writeFile(preloadPath, `
+const fixture = JSON.parse(process.env.UGK_TEST_TASK_FIXTURE);
+globalThis.fetch = async (url) => {
+	const key = String(url).endsWith('/manifest.json') ? 'manifest.json' : String(url).split('/').pop();
+	const text = fixture[key];
+	return text === undefined
+		? { ok: false, status: 404, text: async () => 'missing' }
+		: { ok: true, status: 200, text: async () => text };
+};
+`, "utf8");
+		const { stdout } = await execFileAsync(process.execPath, ["--import", pathToFileURL(preloadPath).href, "bin/ugk.js", "task", "install", "grapheme-count"], {
+			cwd: path.resolve("."),
+			env: {
+				...process.env,
+				PI_CODING_AGENT_DIR: agentDir,
+				UGK_TEST_TASK_FIXTURE: JSON.stringify({
+					"manifest.json": manifestFor(),
+					...files,
+				}),
+			},
+			timeout: 10000,
+		});
+
+		assert.match(stdout, /taskbook "grapheme-count"/);
+		assert.equal(existsSync(path.join(agentDir, "tasks", "grapheme-count", "taskbook.json")), true);
+	} finally {
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("official task install manifest is served from Cloudflare Pages", () => {
+	assert.equal(OFFICIAL_MANIFEST_URL, "https://ugk-task-share.pages.dev/manifest.json");
 });
 
 test("isTaskInstallCommand recognizes only the shell install form", () => {

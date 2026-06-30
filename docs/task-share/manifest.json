@@ -10,11 +10,11 @@
 			"zip": "downloads/grapheme-count.zip",
 			"requirements": ["Node.js 18+"],
 			"files": {
-				"taskbook.json": "https://raw.githubusercontent.com/mhgd3250905/ugk-tui/main/docs/task-share/taskbooks/grapheme-count/taskbook.json",
-				"spec.json": "https://raw.githubusercontent.com/mhgd3250905/ugk-tui/main/docs/task-share/taskbooks/grapheme-count/spec.json",
-				"skill.md": "https://raw.githubusercontent.com/mhgd3250905/ugk-tui/main/docs/task-share/taskbooks/grapheme-count/skill.md",
-				"verify.mjs": "https://raw.githubusercontent.com/mhgd3250905/ugk-tui/main/docs/task-share/taskbooks/grapheme-count/verify.mjs",
-				"contract.json": "https://raw.githubusercontent.com/mhgd3250905/ugk-tui/main/docs/task-share/taskbooks/grapheme-count/contract.json"
+				"taskbook.json": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/taskbook.json",
+				"spec.json": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/spec.json",
+				"skill.md": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/skill.md",
+				"verify.mjs": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/verify.mjs",
+				"contract.json": "https://ugk-task-share.pages.dev/taskbooks/grapheme-count/contract.json"
 			}
 		}
 	]

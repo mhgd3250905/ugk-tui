@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -89,41 +89,54 @@ export function getChromeLaunchCommand(options: {
 	};
 }
 
-// ponytail: ugk 自己起的调试 Chrome 句柄。agent 进程退出时主动回收,
+// ponytail: ugk 自己起的调试 Chrome 的端口登记。agent 退出时按 port 查杀残留进程,
 // 避免 --remote-debugging-port + 用户登录态 Chrome 永久驻留(持久攻击面)。
-// detached 保留:Chrome 用户可能想继续用窗口;但 agent 退出该清掉它启动的调试实例。
-const managedChromeChildren = new Set<ChildProcess>();
+//
+// 为什么用 port 而不是 child 句柄:Windows 上 Chrome 的 spawn child 是个 stub 进程,
+// 它派生真正的工作进程后会立刻 exit(code=0,实测 ~150ms)。child.on("exit") 一触发
+// 就把句柄删了,teardown 时 Set 空、没东西可杀 —— 真正的 Chrome 成孤儿永久残留。
+// 真正可靠的锚点是 port:命令行含 --remote-debugging-port=<port> 的 Chrome 都是 ugk 起的,
+// 按这个特征查杀能覆盖 stub-exit 后的所有工作进程(主进程 + renderer/gpu/crashpad 整棵树)。
+const managedChromePorts = new Set<number>();
 let teardownHookInstalled = false;
 
-// ponytail: 必须杀整棵进程树,不能只杀主进程。Chrome 启动后会派生大量子进程
-// (renderer/gpu/crashpad/utility...),窗口由整棵树支撑。只 child.kill() 主进程:
-//   - Windows:子进程不级联,窗口残留(实测验证:主进程被 kill 但 PID 树下的 renderer
-//     仍存活,Chrome 窗口不消失)。
-//   - Unix:detached:true 让 Chrome 成新进程组长,kill(-pid) 整组才彻底。
-function killChromeTree(child: ChildProcess): void {
-	const pid = child.pid;
-	if (pid === undefined) return;
+// ponytail: 按 port 杀所有命令行含 --remote-debugging-port=<port> 的 Chrome 进程整棵树。
+// Windows:PowerShell 查进程 + taskkill /T 杀树;Unix:pgrep -f 查 + kill。
+// 这些命令都同步、best-effort,失败(进程已退/查不到)不抛。
+function killChromeByPort(port: number): void {
 	try {
 		if (process.platform === "win32") {
-			// taskkill /T 递归 kill 进程树;/F 强制。同步且无子进程残留。
-			spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+			// 查所有 chrome.exe 命令行含 --remote-debugging-port=<port> 的 PID,逐个 taskkill /T。
+			const r = spawnSync("powershell", [
+				"-NoProfile", "-Command",
+				`Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | ` +
+					`Where-Object { $_.CommandLine -match '--remote-debugging-port=${port}' } | ` +
+					`ForEach-Object { $_.ProcessId }`,
+			], { windowsHide: true, encoding: "utf8" });
+			const pids = (r.stdout || "").split(/\s+/).map((s) => Number(s)).filter((n) => n > 0);
+			for (const pid of pids) {
+				try { spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }); } catch {}
+			}
 		} else {
-			// 负 PID = 杀整个进程组(detached:true 时 Chrome 是组长)。先组,再单独兜底。
-			try { process.kill(-pid, "SIGTERM"); } catch { /* 组可能不存在,fallthrough */ }
-			try { child.kill("SIGTERM"); } catch { /* 主进程可能已退出 */ }
+			// pgrep -f 全命令行匹配;kill 整组。best-effort。
+			const r = spawnSync("pgrep", ["-f", `--remote-debugging-port=${port}`], { encoding: "utf8" });
+			const pids = (r.stdout || "").split(/\s+/).map((s) => Number(s)).filter((n) => n > 0);
+			for (const pid of pids) {
+				try { process.kill(pid, "SIGTERM"); } catch {}
+			}
 		}
-	} catch { /* best-effort:进程可能已退出 */ }
+	} catch { /* best-effort:查/杀失败忽略 */ }
 }
 
-// ponytail: test override —— 让测试注入 fake kill(避免真调系统 taskkill/process.kill),
-// 验证 teardown 是否对每个 managed child 都调了进程树 kill。
-let killChromeTreeImpl: (child: ChildProcess) => void = killChromeTree;
+// ponytail: test override —— 让测试注入 fake(避免真查/杀系统进程),
+// 验证 teardown 是否对每个登记的 port 都调了 killChromeByPort。
+let killChromeByPortImpl: (port: number) => void = killChromeByPort;
 
 function teardownManagedChrome(): void {
-	for (const child of managedChromeChildren) {
-		killChromeTreeImpl(child);
+	for (const port of managedChromePorts) {
+		killChromeByPortImpl(port);
 	}
-	managedChromeChildren.clear();
+	managedChromePorts.clear();
 }
 
 function ensureTeardownHook(): void {
@@ -151,11 +164,11 @@ export function launchChromeCdp(port: number): string {
 			stdio: "ignore",
 			shell: useShell,
 		});
-		managedChromeChildren.add(child);
-		// ponytail: Chrome 自行退出时(用户叉掉/崩溃)从 Set 清掉,teardown 不再 kill 已死进程。
-		child.on("exit", () => { managedChromeChildren.delete(child); });
-		ensureTeardownHook();
 		child.unref();
+		// ponytail: child 句柄不可靠(Chrome stub 会立刻 exit),真正回收靠 port 查杀。
+		// 这里只登记 port + 装 hook;child 不进 Set。
+		managedChromePorts.add(port);
+		ensureTeardownHook();
 		return `Started Chrome CDP on 127.0.0.1:${port}\nProfile: ${profilePath}\nBinary: ${command}`;
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
@@ -165,17 +178,17 @@ export function launchChromeCdp(port: number): string {
 	}
 }
 
-// ponytail: 测试专用导出。不真 spawn Chrome,直接验证 Set 注册 + teardown kill 语义。
-// killChromeTree 单独导出:端到端测试要直接验证"杀整棵进程树"的系统行为(单元 mock 测不到)。
+// ponytail: 测试专用导出。不真 spawn Chrome,验证 port 登记 + teardown 查杀语义。
+// killChromeByPort 导出:端到端测试直接验证"按 port 杀 Chrome 进程"的系统行为。
 export const __testOnly = {
-	get managedChildren(): Set<ChildProcess> { return managedChromeChildren; },
+	get managedPorts(): Set<number> { return managedChromePorts; },
 	teardown: teardownManagedChrome,
-	killChromeTree,
+	killChromeByPort,
 	resetTeardownHook(): void { teardownHookInstalled = false; },
-	setKillImpl(fn: (child: ChildProcess) => void): () => void {
-		const prev = killChromeTreeImpl;
-		killChromeTreeImpl = fn;
-		return () => { killChromeTreeImpl = prev; };
+	setKillImpl(fn: (port: number) => void): () => void {
+		const prev = killChromeByPortImpl;
+		killChromeByPortImpl = fn;
+		return () => { killChromeByPortImpl = prev; };
 	},
 };
 

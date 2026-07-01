@@ -334,11 +334,16 @@ export async function submitTask(request, env) {
 	let files;
 	try {
 		const extracted = unzipSync(bytes);
+		// Strip a single common wrapper directory if every file sits under it.
+		// Creators naturally run `zip -r foo.zip foo/`, producing foo/taskbook.json;
+		// REQUIRED_FILES expects taskbook.json at the root.
+		const entries = Object.keys(extracted).filter((p) => !p.endsWith("/"));
+		const firstSegs = entries.map((p) => p.split("/").filter(Boolean)[0]);
+		const wrapper = firstSegs.length && firstSegs.every((s) => s === firstSegs[0]) ? `${firstSegs[0]}/` : "";
 		files = {};
 		for (const [path, data] of Object.entries(extracted)) {
 			if (path.endsWith("/")) continue;
-			// Strip leading directory prefix (creators may zip a wrapper folder)
-			const rel = path.split("/").filter(Boolean).join("/");
+			const rel = (wrapper && path.startsWith(wrapper) ? path.slice(wrapper.length) : path).split("/").filter(Boolean).join("/");
 			files[rel] = new TextDecoder().decode(data);
 		}
 	} catch {
@@ -351,16 +356,24 @@ export async function submitTask(request, env) {
 	}
 
 	const prefix = `tasks/${name}/${version}`;
-	for (const [file, content] of Object.entries(files)) {
-		await env.TASK_UPLOADS.put(`${prefix}/${file}`, content);
+	try {
+		for (const [file, content] of Object.entries(files)) {
+			await env.TASK_UPLOADS.put(`${prefix}/${file}`, content);
+		}
+	} catch (e) {
+		return json({ error: "r2_write_failed", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
 	}
 
 	const now = new Date().toISOString();
-	const result = await env.DB.prepare(
-		`INSERT INTO task_submissions (user_id, name, version, title, description, source_type, source_url, artifact_key, artifact_name, file_list, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-	).bind(auth.user.id, name, version, title, description, "upload", null, prefix, `${name}-${version}.zip`, JSON.stringify(Object.keys(files)), now, now).run();
-	return json({ id: result.meta?.last_row_id ?? null, name, version, title, description, status: "pending" });
+	try {
+		const result = await env.DB.prepare(
+			`INSERT INTO task_submissions (user_id, name, version, title, description, source_type, source_url, artifact_key, artifact_name, file_list, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		).bind(auth.user.id, name, version, title, description, "upload", null, prefix, `${name}-${version}.zip`, JSON.stringify(Object.keys(files)), now, now).run();
+		return json({ id: result.meta?.last_row_id ?? null, name, version, title, description, status: "pending" });
+	} catch (e) {
+		return json({ error: "db_write_failed", detail: JSON.stringify(e, Object.getOwnPropertyNames(e)) }, { status: 500 });
+	}
 }
 
 export async function accountSubmissions(request, env) {

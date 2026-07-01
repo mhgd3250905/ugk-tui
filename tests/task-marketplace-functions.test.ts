@@ -40,6 +40,13 @@ function taskZip(name: string): Uint8Array {
 	return zipSync(encoded);
 }
 
+// zip with a wrapper directory (creators naturally run `zip -r foo.zip foo/`)
+function taskZipWithWrapper(name: string): Uint8Array {
+	const encoded: Record<string, Uint8Array> = {};
+	for (const [file, text] of Object.entries(SAMPLE_FILES)) encoded[`${name}/${file}`] = new TextEncoder().encode(file === "taskbook.json" ? JSON.stringify({ ...JSON.parse(text), name }) : text);
+	return zipSync(encoded);
+}
+
 function createDb() {
 	const users = new Map();
 	const usersById = new Map();

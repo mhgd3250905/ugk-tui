@@ -49,7 +49,7 @@ import {
 	type TaskState,
 } from "./task-state.ts";
 import { appendRunToTaskbook, assertValidContract, deleteTaskbook, listTaskbooks, loadTaskbook, renameTaskbook, saveTaskbook, type LoadedTaskbook } from "./task-book.ts";
-import { ensureCliAuth, readTaskShareConfig } from "./task-share-auth.ts";
+import { ensureCliAuth, readTaskShareConfig, writeTaskShareConfig } from "./task-share-auth.ts";
 import { publishTask } from "./task-share-publish.ts";
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
@@ -1749,7 +1749,16 @@ async function handleTaskPublish(ctx: any, name: string | undefined): Promise<vo
 		const result = await publishTask(loaded, version.trim(), config.token!, config.marketplaceUrl, title.trim() || undefined, description.trim() || undefined);
 		ctx.ui.notify(`✅ 已提交 "${result.name}" v${result.version},等待管理员审核。`, "info");
 	} catch (error) {
-		ctx.ui.notify(`上传失败: ${error instanceof Error ? error.message : String(error)}`, "error");
+		const msg = error instanceof Error ? error.message : String(error);
+		// review: a 401/invalid_token means the stored cli_token expired (90d) or
+		// was revoked. Clear it so the next /task publish re-runs OAuth instead of
+		// reusing a dead token and failing the same opaque way.
+		if (msg.includes("invalid_token")) {
+			writeTaskShareConfig({ ...config, token: null, challenge: null });
+			ctx.ui.notify(`授权已过期或失效,已清除本地凭证。请重新执行 /task publish 完成授权。`, "warning");
+			return;
+		}
+		ctx.ui.notify(`上传失败: ${msg}`, "error");
 	}
 }
 

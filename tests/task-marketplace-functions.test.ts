@@ -25,6 +25,7 @@ import {
 	toggleLike,
 	startCliAuth,
 	pollCliAuth,
+	confirmCliAuth,
 } from "../functions/_lib/marketplace.js";
 
 // Build a minimal valid task package zip in-memory for submit tests.
@@ -94,6 +95,12 @@ function createDb() {
 					if (sql.startsWith("SELECT latest_version FROM tasks")) return tasks.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT file_list FROM task_submissions")) return submissions.find((item) => item.name === this.values[0] && item.version === this.values[1] && item.status === "published") ?? null;
 					if (sql.startsWith("SELECT 1 FROM cli_auth_pending")) return cliPending.has(this.values[0]) ? { "1": 1 } : null;
+					if (sql.startsWith("DELETE FROM cli_auth_pending WHERE challenge = ? RETURNING")) {
+						// Atomic claim via RETURNING (createCliToken): delete + return the row.
+						const ch = this.values[0];
+						if (cliPending.has(ch)) { cliPending.delete(ch); return { challenge: ch }; }
+						return null;
+					}
 					if (sql.startsWith("SELECT challenge FROM cli_auth_pending WHERE state = ?")) {
 						const found = [...cliPending.entries()].find(([, v]) => v.state === this.values[0]);
 						return found ? { challenge: found[0] } : null;
@@ -765,7 +772,15 @@ test("pollCliAuth returns the token after the callback signs one", async () => {
 			},
 		},
 	);
-	assert.equal(callback.headers.get("location"), "/cli-auth?cli=done");
+	// SECURITY (H-REZ-1): callback redirects to a confirmation page, NOT done.
+	assert.equal(callback.headers.get("location"), `/cli-auth?cli=confirm&state=${loginState}`);
+
+	// The user explicitly confirms (authenticated by session cookie).
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	await confirmCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/confirm", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ state: loginState }) }),
+		testEnv,
+	);
 
 	const poll = await pollCliAuth(
 		new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge }) }),
@@ -815,6 +830,11 @@ test("requireUser accepts a valid Bearer cli_token", async () => {
 				return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
 			},
 		},
+	);
+	// Explicit user confirmation (session-cookie auth) signs the token.
+	await confirmCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/confirm", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ state: loginState }) }),
+		testEnv,
 	);
 	const poll = await (await pollCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv)).json();
 	assert.equal(poll.status, "ok");
@@ -901,57 +921,47 @@ test("githubCallback without a state-bound challenge redirects home as before (n
 
 test("githubCallback whose pending challenge was already claimed falls back to a normal home redirect", async () => {
 	// review M1: an already-consumed challenge (pending row gone) must not
-	// hijack a later login into the CLI flow. createCliToken returns null when
-	// the challenge isn't pending, so callback redirects to "/" not "/cli-auth".
+	// hijack a later login into the CLI flow. callback reverse-looks-up the
+	// challenge from state; if pending is gone (claimed), it's a normal login.
 	const testEnv = env();
-	await seedUser(testEnv);
+	const cookie = await seedUser(testEnv);
 	const challenge = "f".repeat(64);
 	await startCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv);
 	const loginState = "22222222-3333-4444-5555-666666666666";
 	await githubLogin(new Request(`https://ugk-task-share.pages.dev/api/auth/github?cli_challenge=${challenge}`), testEnv, { randomUUID: () => loginState });
-	// Claim it once (createCliToken deletes the pending row).
-	await githubCallback(
-		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${loginState}`, { headers: { cookie: `ugk_oauth_state=${loginState}` } }),
-		testEnv,
-		{ fetch: async (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } }) },
-	);
-	// A second callback with the SAME state: pending row is gone (state no longer
-	// bound), so this must behave like a normal login → "/".
-	const response = await githubCallback(
-		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${loginState}`, { headers: { cookie: `ugk_oauth_state=${loginState}` } }),
-		testEnv,
-		{ fetch: async (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } }) },
-	);
-
+	// Walk through OAuth + explicit confirm to claim the challenge once.
+	const oauthFetch = (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
+	await githubCallback(new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${loginState}`, { headers: { cookie: `ugk_oauth_state=${loginState}` } }), testEnv, { fetch: oauthFetch });
+	await confirmCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/confirm", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ state: loginState }) }), testEnv);
+	// A second callback with the SAME state: pending row is gone (claim deleted
+	// it), so reverse-lookup finds nothing → normal web login → "/".
+	const response = await githubCallback(new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${loginState}`, { headers: { cookie: `ugk_oauth_state=${loginState}` } }), testEnv, { fetch: oauthFetch });
 	assert.equal(response.headers.get("location"), "/");
 });
 
-test("createCliToken refuses a second signing for an already-claimed challenge (caps token growth)", async () => {
-	// review H2/M1: the first callback deletes the pending row inside
-	// createCliToken, so a second OAuth completion finds no pending entry and
-	// signs nothing. This is what prevents duplicate long-lived tokens piling up.
+test("createCliToken atomic claim refuses a second signing for an already-claimed challenge", async () => {
+	// review H1 (TOCTOU): createCliToken now claims via DELETE...RETURNING, so
+	// the first confirm signs a token and deletes the pending row; a second
+	// confirm for the same state finds the row gone → 409, no second token.
 	const testEnv = env();
-	await seedUser(testEnv);
+	const cookie = await seedUser(testEnv);
 	const challenge = "e".repeat(64);
 	await startCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv);
-
-	// first completion: githubLogin binds state1, callback signs a token
 	const state1 = "11111111-2222-3333-4444-555555555555";
 	await githubLogin(new Request(`https://ugk-task-share.pages.dev/api/auth/github?cli_challenge=${challenge}`), testEnv, { randomUUID: () => state1 });
-	const cb1 = await githubCallback(new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${state1}`, { headers: { cookie: `ugk_oauth_state=${state1}` } }), testEnv, {
-		fetch: async (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } }),
-	});
-	assert.equal(cb1.headers.get("location"), "/cli-auth?cli=done");
+	const oauthFetch = (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
+	await githubCallback(new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${state1}`, { headers: { cookie: `ugk_oauth_state=${state1}` } }), testEnv, { fetch: oauthFetch });
 
-	// second completion: state2 was never bound to the challenge (pending row is
-	// already gone), so this behaves like a normal login → "/".
-	const state2 = "22222222-3333-4444-5555-666666666666";
-	const cb2 = await githubCallback(new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${state2}`, { headers: { cookie: `ugk_oauth_state=${state2}` } }), testEnv, {
-		fetch: async (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } }),
-	});
-	assert.equal(cb2.headers.get("location"), "/");
+	// first confirm: signs a token (atomic claim deletes pending)
+	const c1 = await confirmCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/confirm", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ state: state1 }) }), testEnv);
+	assert.equal((await c1.json()).status, "ok");
 
-	// poll returns the one signed token (value is random; just assert it exists)
+	// second confirm with the SAME state: pending already claimed → 410 (the
+	// reverse-lookup finds no row; createCliToken's own RETURNING never runs)
+	const c2 = await confirmCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/confirm", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ state: state1 }) }), testEnv);
+	assert.equal(c2.status, 410);
+
+	// poll returns the one signed token
 	const poll = await (await pollCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv)).json();
 	assert.equal(poll.status, "ok");
 	assert.match(poll.token, /^[0-9a-f]{32}$/);

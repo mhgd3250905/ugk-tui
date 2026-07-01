@@ -281,7 +281,9 @@ export async function githubCallback(request, env, deps = {}) {
 		}),
 	});
 	const token = await tokenResponse.json();
-	await debugLog(env, "callback", "token_exchange", { status: tokenResponse.status, hasAccessToken: Boolean(token && token.access_token), token });
+	// SECURITY: never log the access_token or full token response (review C-REZ-1).
+	// Only record status + GitHub's error code on failure (no secret material).
+	await debugLog(env, "callback", "token_exchange", { status: tokenResponse.status, hasAccessToken: Boolean(token && token.access_token), error: token?.error ?? null });
 	if (!token.access_token) return htmlError("GitHub token exchange failed", 502);
 
 	const userResponse = await fetchFn("https://api.github.com/user", {
@@ -292,7 +294,9 @@ export async function githubCallback(request, env, deps = {}) {
 		},
 	});
 	const githubUser = await userResponse.json();
-	await debugLog(env, "callback", "user_fetch", { status: userResponse.status, hasId: Boolean(githubUser && githubUser.id), githubUser });
+	// SECURITY: never log the full GitHub user object (review H-REZ-2: contains
+	// email/private fields). Only status + id + login (non-secret identifiers).
+	await debugLog(env, "callback", "user_fetch", { status: userResponse.status, hasId: Boolean(githubUser && githubUser.id), login: githubUser?.login ?? null });
 	if (!githubUser.id || !githubUser.login) return htmlError("GitHub user fetch failed", 502);
 
 	const now = new Date().toISOString();
@@ -301,14 +305,15 @@ export async function githubCallback(request, env, deps = {}) {
 	).bind(String(githubUser.id), githubUser.login, githubUser.avatar_url ?? "", now).run();
 	const user = await env.DB.prepare("SELECT * FROM users WHERE github_id = ?").bind(String(githubUser.id)).first();
 	const headers = new Headers();
-	// cliChallenge came from the state<->challenge binding (reverse-looked-up
-	// above from the trusted oauth_state). createCliToken signs a cli_token bound
-	// to it (TUI polls for it); if the challenge isn't pending anymore (stale/
-	// expired/claimed) it returns null → normal home redirect, no session hijack.
+	// SECURITY (review H-REZ-1): do NOT auto-sign a cli_token here. A challenge
+	// can be injected into a victim's OAuth via a phishing link, silently issuing
+	// a long-lived impersonating token. Instead, send the user to an explicit
+	// confirmation page keyed by `state`; the token is only signed when the user
+	// confirms via POST /api/cli/auth/confirm (authenticated by their session
+	// cookie, not the OAuth state). cliChallenge null = normal web login.
 	if (cliChallenge) {
-		const cliToken = await createCliToken(user, cliChallenge, env, deps);
-		await debugLog(env, "callback", "cli_token", { challenge: cliChallenge, signed: Boolean(cliToken) });
-		headers.set("location", cliToken ? `/cli-auth?cli=done` : "/");
+		await debugLog(env, "callback", "cli_confirm_redirect", { login: githubUser.login });
+		headers.set("location", `/cli-auth?cli=confirm&state=${encodeURIComponent(state)}`);
 	} else {
 		headers.set("location", "/");
 	}
@@ -449,8 +454,13 @@ export async function pollCliAuth(request, env) {
 // previous CLI auth was interrupted/expired (review M1): without it, a stale
 // cookie would hijack every subsequent web login into the CLI flow.
 export async function createCliToken(user, challenge, env, deps = {}) {
-	const pending = await env.DB.prepare("SELECT 1 FROM cli_auth_pending WHERE challenge = ?").bind(challenge).first();
-	if (!pending) return null;
+	// Atomic claim: DELETE...RETURNING consumes the pending row in one statement.
+	// If two OAuth callbacks race (two tabs), only the first DELETE removes a
+	// row → RETURNING yields it; the second deletes 0 rows → null. This closes
+	// the TOCTOU that separate SELECT/INSERT/DELETE had (review H1 correctness).
+	// ponytail: SQLite/D1 RETURNING is supported; mock DB mirrors it (.first()).
+	const claimed = await env.DB.prepare("DELETE FROM cli_auth_pending WHERE challenge = ? RETURNING challenge").bind(challenge).first();
+	if (!claimed) return null;
 	// ponytail: call crypto.randomUUID directly (not as a detached reference).
 	// `(deps.randomUUID ?? crypto.randomUUID)()` would strip `this` → Workers
 	// throws "Illegal invocation: function called with incorrect this reference".
@@ -460,8 +470,27 @@ export async function createCliToken(user, challenge, env, deps = {}) {
 	await env.DB.prepare(
 		"INSERT INTO cli_tokens (token, user_id, challenge, created_at) VALUES (?, ?, ?, ?)",
 	).bind(token, user.id, challenge, new Date().toISOString()).run();
-	await env.DB.prepare("DELETE FROM cli_auth_pending WHERE challenge = ?").bind(challenge).run();
 	return token;
+}
+
+// SECURITY (review H-REZ-1): the second half of the CSRF defense. The callback
+// no longer signs a token directly — it redirects to a confirmation page. The
+// user must explicitly POST here to authorize. Auth is by the SESSION cookie
+// (requireUser), NOT the OAuth state: an attacker who only injected a challenge
+// into a victim's OAuth has no session, so they cannot reach this. The state
+// merely reverse-looks-up the challenge; createCliToken then claims it atomically.
+export async function confirmCliAuth(request, env) {
+	const auth = await requireUser(request, env);
+	if (auth.response) return auth.response;
+	const body = await request.json().catch(() => ({}));
+	const state = cleanText(body.state);
+	if (!state) return json({ error: "invalid_state" }, { status: 400 });
+	const pending = await env.DB.prepare("SELECT challenge FROM cli_auth_pending WHERE state = ?").bind(state).first();
+	if (!pending?.challenge) return json({ error: "challenge_not_pending" }, { status: 410 });
+	const token = await createCliToken(auth.user, pending.challenge, env);
+	await debugLog(env, "confirmCliAuth", "signed", { login: auth.user.login, ok: Boolean(token) });
+	if (!token) return json({ error: "already_claimed" }, { status: 409 });
+	return json({ status: "ok", token, login: auth.user.login, avatarUrl: auth.user.avatar_url ?? null });
 }
 
 export async function submitTask(request, env) {

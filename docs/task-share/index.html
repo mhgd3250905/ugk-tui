@@ -6,11 +6,11 @@
 <title>UGK Task Marketplace</title>
 <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="marketplace-page">
 <svg class="icon-sprite" aria-hidden="true"><symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></symbol><symbol id="icon-heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 1 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/></symbol><symbol id="icon-bookmark" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4V3Z"/></symbol><symbol id="icon-copy" viewBox="0 0 24 24"><path d="M8 8h11v13H8zM5 16H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v1"/></symbol><symbol id="icon-flag" viewBox="0 0 24 24"><path d="M5 21V4m0 0h12l-1.5 4L17 12H5"/></symbol></svg>
 
 <nav class="nav"><div class="shell"><div class="nav-inner">
-  <a class="brand" href="">UGK TASKS</a>
+  <span class="nav-stat-tag">已收录 <strong data-marketplace-stat="tasks">0</strong> 个 Task</span>
   <div class="nav-links">
     <a href="#catalog">Marketplace</a>
     <a href="upload/">Upload</a>
@@ -26,30 +26,23 @@
 <div class="shell">
   <section class="hero">
     <div class="hero-copy">
-      <div class="kicker">UGK Task Marketplace</div>
-      <h1>Reusable taskbooks for terminal agents.</h1>
-      <p class="lede">Find reviewed UGK taskbooks, copy the install command, and keep moving without leaving your terminal workflow.</p>
+      <span class="hero-logo" aria-hidden="true">
+        <span class="hero-logo-line"><span class="logo-u">█   █</span> <span class="logo-g"> ███ </span> <span class="logo-k">█  █</span></span>
+        <span class="hero-logo-line"><span class="logo-u">█   █</span> <span class="logo-g">█    </span> <span class="logo-k">█ █ </span></span>
+        <span class="hero-logo-line"><span class="logo-u">█   █</span> <span class="logo-g">█  ██</span> <span class="logo-k">██  </span></span>
+        <span class="hero-logo-line"><span class="logo-u">█   █</span> <span class="logo-g">█   █</span> <span class="logo-k">█ █ </span></span>
+        <span class="hero-logo-line"><span class="logo-u"> ███ </span> <span class="logo-g"> ███ </span> <span class="logo-k">█  █</span></span>
+      </span>
+      <h1 class="hero-title">Task Marketplace</h1>
+      <p class="hero-subtitle">Automated agents, shared tasks.</p>
       <div class="hero-actions">
         <a class="btn btn-primary" href="#catalog">Browse tasks</a>
         <a class="btn btn-secondary" href="upload/">Submit a task</a>
       </div>
     </div>
-    <div class="command-box">
-      <span class="kicker">Lazy install</span>
-      <code>$ ugk task install &lt;name&gt;</code>
-      <p class="lede">Official and community taskbooks with live stats.</p>
-    </div>
-  </section>
-
-  <section class="stats" id="stats">
-    <div class="stat"><strong data-marketplace-stat="tasks">0</strong><span>Tasks</span></div>
-    <div class="stat"><strong data-marketplace-stat="downloads">0</strong><span>Downloads</span></div>
-    <div class="stat"><strong data-marketplace-stat="likes">0</strong><span>Likes</span></div>
-    <div class="stat"><strong data-marketplace-stat="favorites">0</strong><span>Saves</span></div>
   </section>
 
   <section id="catalog">
-    <div class="section-head"><div><h2>Task catalog</h2><p>Install-ready tasks first. Filter only when the list gets noisy.</p></div></div>
     <div class="toolbar">
       <input class="search" data-search aria-label="Search tasks" placeholder="Search tasks...">
       <select class="search" data-category-filter aria-label="Filter category"><option value="">All</option></select>
@@ -62,8 +55,9 @@
 </div>
 
 <footer class="footer"><div class="shell"><div class="footer-inner">
-  <div><strong>UGK Task Marketplace</strong><p>Official and reviewed community taskbooks for the UGK terminal agent.</p></div>
-  <div><p>Powered by Cloudflare Pages + D1 + R2</p></div>
+  <span>产品 UGK</span>
+  <span>作者 bboyUglyk</span>
+  <a href="mailto:ug1yk@foxmail.com">联系方式 ug1yk@foxmail.com</a>
 </div></div></footer>
 
 <script>
@@ -72,6 +66,13 @@ function applyMarketplaceStats(data){for(const [key,value]of Object.entries(data
 function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function safeHref(value){const url=String(value??'');if(/^https?:\/\//i.test(url))return esc(url);if(/^\/api\/submissions\/[0-9]+\/artifact$/i.test(url))return esc(url);return '#'}
 function titleize(name){return name.split("-").map(p=>p?p[0].toUpperCase()+p.slice(1):p).join(" ")}
+function catalogEmptyHTML(type){
+  const state=type==='fail'
+    ? {title:'Task 加载失败',text:'检查任务源后刷新。',action:''}
+    : {title:'还没有 Task',text:'上传第一个 taskbook。',action:'<a class="btn btn-secondary" href="upload/">Submit a task</a>'};
+  return '<div class="catalog-empty" data-empty-state="'+type+'"><img src="assets/empty-taskbook.png" alt="" loading="lazy"><h2>'+state.title+'</h2><p>'+state.text+'</p>'+state.action+'</div>'
+}
+function fitSelectWidths(){const canvas=fitSelectWidths.canvas||(fitSelectWidths.canvas=document.createElement('canvas'));const ctx=canvas.getContext('2d');document.querySelectorAll('select.search').forEach(select=>{const style=getComputedStyle(select);ctx.font=style.font;const widest=[...select.options].reduce((max,opt)=>Math.max(max,ctx.measureText(opt.textContent.trim()).width),0);select.style.width=Math.min(220,Math.max(74,Math.ceil(widest+50)))+'px'})}
 function showToast(message,type='info'){let box=document.querySelector('[data-toast]');if(!box){box=document.createElement('div');box.className='toast';box.dataset.toast='';box.setAttribute('role','status');box.setAttribute('aria-live','polite');document.body.appendChild(box)}box.textContent=message;box.dataset.type=type;box.dataset.show='true';clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>{box.dataset.show='false'},3200)}
 function authErrorMessage(data){return data?.error==='GitHub OAuth is not configured'?'GitHub sign-in is not configured for this preview. Ask the owner to set GitHub OAuth credentials.':(data?.error||'GitHub sign-in could not start. Try again later.')}
 async function startGithubAuth(){try{const r=await fetch('/api/auth/github',{redirect:'manual',headers:{accept:'application/json'}});if(r.type==='opaqueredirect'||(r.status>=300&&r.status<400)){location.href='/api/auth/github';return}const text=await r.text();let data;try{data=JSON.parse(text)}catch{data=null}if(!r.ok){showToast(authErrorMessage(data),'error');return}location.href='/api/auth/github'}catch{showToast('GitHub sign-in could not start. Try again later.','error')}}
@@ -106,17 +107,17 @@ async function refreshCatalog(){
   const root=document.querySelector('[data-catalog]');if(!root)return;
   const catFilter=document.querySelector('[data-category-filter]');
   try{
-    const r=await fetch('/api/manifest');if(!r.ok){root.innerHTML='<p class="empty">Failed to load tasks.</p>';return}
+    const r=await fetch('/api/manifest');if(!r.ok){root.innerHTML=catalogEmptyHTML('fail');return}
     const manifest=await r.json();const tasks=manifest.tasks||[];
-    if(!tasks.length){root.innerHTML='<p class="empty">No tasks published yet. <a href="upload/">Submit the first one</a>.</p>';return}
+    if(!tasks.length){root.innerHTML=catalogEmptyHTML('empty');return}
     // populate category filter
     const cats=[...new Set(tasks.map(t=>t.category||t.tags?.[0]||'task'))].sort();
-    const cur=catFilter?.value||'';if(catFilter){catFilter.innerHTML='<option value="">All</option>'+cats.map(c=>'<option value="'+esc(c)+'"'+(c===cur?' selected':'')+'>'+esc(c)+'</option>').join('')}
+    const cur=catFilter?.value||'';if(catFilter){catFilter.innerHTML='<option value="">All</option>'+cats.map(c=>'<option value="'+esc(c)+'"'+(c===cur?' selected':'')+'>'+esc(c)+'</option>').join('');fitSelectWidths()}
     root.innerHTML=tasks.map((t,i)=>taskCardHTML({...t,newest:1000-i})).join('');
     // bind interactions on freshly rendered cards
     bindCards();
     await refreshStats();
-  }catch{root.innerHTML='<p class="empty">Failed to load tasks.</p>'}
+  }catch{root.innerHTML=catalogEmptyHTML('fail')}
 }
 
 function bindCards(){
@@ -135,7 +136,7 @@ async function refreshAdmin(){const root=document.querySelector('[data-admin-pag
 async function postAction(button){const url=button.dataset.api;if(!url)return;const action=button.dataset.action;const init={method:'POST'};if(action==='report'){if(document.body.dataset.signedIn!=='true'){startGithubAuth();return}const reason=await askReportReason(button.dataset.task||'task');if(!reason)return;init.headers={'content-type':'application/json'};init.body=JSON.stringify({reason})}button.dataset.busy='true';try{const r=await fetch(url,init);if(r.status===401){startGithubAuth();return}const data=await r.json().catch(()=>({}));if(!r.ok){showToast(data.error||'Action failed. Try again later.','error');return}if(action==='report'){button.dataset.active='true';button.setAttribute('aria-pressed','true');showToast('Report sent for review.');return}applyTaskData(button.dataset.task,data);showToast(action==='like'?'Like updated.':'Saved tasks updated.')}catch{showToast('Action failed. Try again later.','error')}finally{button.dataset.busy='false'}}
 document.querySelectorAll('[data-upload-form]').forEach(form=>form.addEventListener('submit',event=>{event.preventDefault();submitUpload(form)}));
 document.addEventListener('click',async event=>{const button=event.target.closest('[data-review-id]');if(!button)return;button.disabled=true;await fetch('/api/admin/submissions/'+button.dataset.reviewId,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:button.dataset.reviewStatus})});refreshAdmin()});
-document.querySelectorAll('[data-search],[data-sort],[data-category-filter]').forEach(control=>control.addEventListener('input',filterTasks));
+fitSelectWidths();document.querySelectorAll('[data-search],[data-sort],[data-category-filter]').forEach(control=>control.addEventListener('input',filterTasks));
 bindAuthLinks();refreshSession().then(refreshAccount);refreshMarketplaceStats();refreshCatalog();refreshDetailMeta();refreshAdmin();
 </script>
 </body>

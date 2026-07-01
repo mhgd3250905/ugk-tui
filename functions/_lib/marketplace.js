@@ -55,11 +55,17 @@ function json(data, init = {}) {
 // callback/createCliToken) so real-device failures — which mock tests can't
 // reproduce — leave a trail. Keep while the publish flow stabilizes; drop the
 // table + call sites once it's proven in production.
+const DEBUG_LOG_MAX_ROWS = 500;
 async function debugLog(env, fn, step, detail) {
 	try {
 		const text = typeof detail === "string" ? detail : JSON.stringify(detail);
 		await env.DB.prepare("INSERT INTO debug_log (ts, fn, step, detail) VALUES (?, ?, ?, ?)")
 			.bind(new Date().toISOString(), fn, step, text.slice(0, 4000)).run();
+		// ponytail: cap growth cheaply. Counting every write wastes a D1 read;
+		// rowid is monotonic, so "id <= max - N" trims to the newest N rows.
+		// The DELETE is a no-op until the table exceeds the cap.
+		await env.DB.prepare("DELETE FROM debug_log WHERE id <= (SELECT MAX(id) FROM debug_log) - ?")
+			.bind(DEBUG_LOG_MAX_ROWS).run();
 	} catch {
 		// logging must never break the request
 	}
@@ -455,6 +461,12 @@ export async function submitTask(request, env) {
 	const hasArtifact = artifact && typeof artifact === "object" && "arrayBuffer" in artifact && artifact.size > 0;
 	if (!TASK_NAME_RE.test(name)) return json({ error: "invalid_name" }, { status: 400 });
 	if (!VERSION_RE.test(version)) return json({ error: "invalid_version" }, { status: 400 });
+	// review M6: reject a version that's already published for this task. Without
+	// this, a re-submit of an existing version silently no-ops at publish time
+	// (task_versions UNIQUE DO NOTHING) and the user believes they shipped a new
+	// version while latest_version still points at the old one. Fail fast instead.
+	const existingVersion = await env.DB.prepare("SELECT 1 FROM task_versions WHERE task_name = ? AND version = ?").bind(name, version).first();
+	if (existingVersion) return json({ error: "version_already_published" }, { status: 409 });
 	if (!title || !description) return json({ error: "missing_required_fields" }, { status: 400 });
 	if (!hasArtifact) return json({ error: "artifact_required" }, { status: 400 });
 	if (artifact.size > MAX_ARTIFACT_BYTES) return json({ error: "artifact_too_large" }, { status: 413 });
@@ -577,27 +589,33 @@ export async function reviewSubmission(request, env, id) {
 	if (!submission) return json({ error: "submission_not_found" }, { status: 404 });
 
 	const now = new Date().toISOString();
-	if (status === "published") {
-		const version = submission.version;
+	try {
+		if (status === "published") {
+			const version = submission.version;
+			await env.DB.prepare(
+				`INSERT INTO tasks (name, title, description, author_user_id, author_name, latest_version, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(name) DO UPDATE SET
+					title = excluded.title,
+					description = excluded.description,
+					author_user_id = excluded.author_user_id,
+					author_name = excluded.author_name,
+					latest_version = excluded.latest_version`,
+			).bind(submission.name, submission.title, submission.description, submission.user_id, submission.author_login ?? "Community", version, now).run();
+			await env.DB.prepare(
+				`INSERT INTO task_versions (task_name, version, submission_id, artifact_key, source_url, published_by_user_id, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(task_name, version) DO NOTHING`,
+			).bind(submission.name, version, submission.id, submission.artifact_key, submission.source_url, auth.user.id, now).run();
+		}
 		await env.DB.prepare(
-			`INSERT INTO tasks (name, title, description, author_user_id, author_name, latest_version, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(name) DO UPDATE SET
-				title = excluded.title,
-				description = excluded.description,
-				author_user_id = excluded.author_user_id,
-				author_name = excluded.author_name,
-				latest_version = excluded.latest_version`,
-		).bind(submission.name, submission.title, submission.description, submission.user_id, submission.author_login ?? "Community", version, now).run();
-		await env.DB.prepare(
-			`INSERT INTO task_versions (task_name, version, submission_id, artifact_key, source_url, published_by_user_id, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(task_name, version) DO NOTHING`,
-		).bind(submission.name, version, submission.id, submission.artifact_key, submission.source_url, auth.user.id, now).run();
+			"UPDATE task_submissions SET status = ?, reviewer_user_id = ?, review_note = ?, updated_at = ? WHERE id = ?",
+		).bind(status, auth.user.id, cleanText(body.note), now, Number(id)).run();
+	} catch (e) {
+		// review known-debt: the two INSERTs + UPDATE were unguarded; a D1 failure
+		// crashed the Worker into an HTML 500. submitTask already had this guard.
+		return json({ error: "review_db_write_failed", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
 	}
-	await env.DB.prepare(
-		"UPDATE task_submissions SET status = ?, reviewer_user_id = ?, review_note = ?, updated_at = ? WHERE id = ?",
-	).bind(status, auth.user.id, cleanText(body.note), now, Number(id)).run();
 	return json({ id: Number(id), name: submission.name, status });
 }
 

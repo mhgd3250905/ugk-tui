@@ -94,6 +94,7 @@ function createDb() {
 					if (sql.startsWith("SELECT latest_version FROM tasks")) return tasks.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT file_list FROM task_submissions")) return submissions.find((item) => item.name === this.values[0] && item.version === this.values[1] && item.status === "published") ?? null;
 					if (sql.startsWith("SELECT 1 FROM cli_auth_pending")) return cliPending.has(this.values[0]) ? { "1": 1 } : null;
+					if (sql.startsWith("SELECT 1 FROM task_versions WHERE task_name = ? AND version = ?")) return versions.some((v) => v.task_name === this.values[0] && v.version === this.values[1]) ? { ok: 1 } : null;
 					if (sql.startsWith("SELECT token, user_id, created_at FROM cli_tokens")) {
 						const tok = cliTokens.filter((t) => t.challenge === this.values[0]).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
 						return tok ? { token: tok.token, user_id: tok.user_id, created_at: tok.created_at } : null;
@@ -491,6 +492,38 @@ test("task submissions reject a package whose taskbook name mismatches", async (
 
 	assert.equal(response.status, 400);
 	assert.equal(body.error, "invalid_package");
+});
+
+test("task submissions reject a version that is already published (review M6)", async () => {
+	// Re-submitting an existing version would silently no-op at publish time
+	// (task_versions UNIQUE DO NOTHING) and mislead the user. Fail fast at submit.
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	// Simulate a prior publish of dupe-task v1.0.0: insert the version row directly.
+	await testEnv.DB.prepare("INSERT INTO task_versions (task_name, version, submission_id, artifact_key, source_url, published_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind("dupe-task", "1.0.0", 1, "tasks/dupe-task/1.0.0", null, 1, new Date().toISOString()).run();
+
+	const form = new FormData();
+	form.set("name", "dupe-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Dupe");
+	form.set("description", "Same version as an existing publish");
+	form.set("artifact", new File([taskZip("dupe-task") as BlobPart], "dupe.zip", { type: "application/zip" }));
+
+	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 409);
+	assert.equal(body.error, "version_already_published");
+	// A different version of the same task is still allowed.
+	const form2 = new FormData();
+	form2.set("name", "dupe-task");
+	form2.set("version", "1.0.1");
+	form2.set("title", "Dupe 2");
+	form2.set("description", "New version");
+	form2.set("artifact", new File([taskZip("dupe-task") as BlobPart], "dupe2.zip", { type: "application/zip" }));
+	const response2 = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form2 }), testEnv);
+	assert.equal(response2.status, 200);
 });
 
 test("task submissions reject oversized artifacts before R2 upload", async () => {

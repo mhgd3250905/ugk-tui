@@ -65,13 +65,21 @@ export function readTaskShareConfig(deps: TaskShareAuthDeps = {}): TaskShareConf
 	}
 }
 
-/** 写 task-share.json(整体覆盖,配置极简无需读-改-写)。 */
+/**
+ * 写 task-share.json(整体覆盖,配置极简无需读-改-写)。
+ * cli_token 是长期 Bearer 凭证,等同密码,生产路径用 0600 权限收紧
+ * (review L1:默认 0644 同机其他用户可读)。Windows 的 chmod 会忽略,
+ * 无害;Unix 生效。DI 的 writeFile 只验内容,不走真实 fs 故不受影响。
+ */
 export function writeTaskShareConfig(config: TaskShareConfig, deps: TaskShareAuthDeps = {}): void {
 	const filePath = taskShareConfigPath(deps);
-	const writeFile = deps.writeFile ?? ((p: string, c: string) => fs.writeFileSync(p, c));
+	const isProd = !deps.writeFile;
+	const writeFile = deps.writeFile ?? ((p: string, c: string) => fs.writeFileSync(p, c, { mode: 0o600 }));
 	const mkdir = deps.mkdir ?? ((p: string, o: { recursive: true }) => fs.mkdirSync(p, o));
 	mkdir(path.dirname(filePath), { recursive: true });
 	writeFile(filePath, `${JSON.stringify(config, null, 2)}\n`);
+	// 只在生产真实 fs 路径补权限(DI 单测注入的 writeFile 无此选项)。
+	if (isProd) { try { fs.chmodSync(filePath, 0o600); } catch { /* Windows/no-op */ } }
 }
 
 /** 生成 32 字节随机 challenge(hex 编码 → 64 字符)。 */
@@ -139,9 +147,15 @@ export async function ensureCliAuth(
 			body: JSON.stringify({ challenge }),
 		});
 		const data = await res.json().catch(() => ({}));
-		if (data.status === "ok" && typeof data.token === "string") {
+		if (data.status === "ok") {
+			// review M4: validate token shape (createCliToken emits uuid-minus-
+			// dashes = 32 hex). A malformed/empty token must NOT be stored — every
+			// later submit would 401 with an opaque "invalid_token". status:ok with
+			// a bad token means the server misbehaved; fail fast, don't keep polling.
+			const tok = typeof data.token === "string" && /^[0-9a-f]{32}$/.test(data.token) ? data.token : null;
+			if (!tok) throw new Error("授权异常:服务端返回的 token 格式无效,请重新执行 /task publish");
 			const finalConfig: TaskShareConfig = {
-				token: data.token,
+				token: tok,
 				login: typeof data.login === "string" ? data.login : null,
 				marketplaceUrl: config.marketplaceUrl,
 				challenge: null,

@@ -77,18 +77,18 @@ test("ensureCliAuth stores the token after polling returns ok", async () => {
 		if (String(url).endsWith("/start")) return new Response(JSON.stringify({ url: "https://m.test/cli-auth?c=x" }), { headers: { "content-type": "application/json" } });
 		pollCount++;
 		if (pollCount === 1) return new Response(JSON.stringify({ status: "pending" }), { headers: { "content-type": "application/json" } });
-		return new Response(JSON.stringify({ status: "ok", token: "TOKEN-123", login: "octo" }), { headers: { "content-type": "application/json" } });
+		return new Response(JSON.stringify({ status: "ok", token: "abcdef0123456789abcdef0123456789", login: "octo" }), { headers: { "content-type": "application/json" } });
 	};
 	const notifications: Array<[string, string]> = [];
 
 	const result = await ensureCliAuth((m, l) => notifications.push([m, l]), { ...deps, fetchFn, spawnFn: () => ({ unref() {} } as any) }, 10000, 0);
 
 	assert.equal(result.ok, true);
-	assert.equal(result.config.token, "TOKEN-123");
+	assert.equal(result.config.token, "abcdef0123456789abcdef0123456789");
 	assert.equal(result.config.login, "octo");
 	assert.equal(result.config.challenge, null);
 	// persisted to disk
-	assert.equal(readTaskShareConfig(deps).token, "TOKEN-123");
+	assert.equal(readTaskShareConfig(deps).token, "abcdef0123456789abcdef0123456789");
 	// at least one notification carried the authorize URL
 	assert.ok(notifications.some(([m]) => m.includes("cli-auth")));
 });
@@ -103,6 +103,23 @@ test("ensureCliAuth throws when the server reports an error", async () => {
 		() => ensureCliAuth(() => {}, { ...deps, fetchFn, spawnFn: () => ({ unref() {} } as any) }, 10000, 0),
 		/challenge_expired_or_unknown/,
 	);
+});
+
+test("ensureCliAuth rejects a malformed token (review M4: format validation)", async () => {
+	// A token that isn't 32-hex must not be stored — otherwise every later submit
+	// would 401 with an opaque "invalid_token". status:ok with a bad token fails
+	// fast instead of polling until timeout.
+	const deps = memDeps();
+	const fetchFn = async (url: string) => {
+		if (String(url).endsWith("/start")) return new Response(JSON.stringify({ url: "https://m.test/cli-auth?c=x" }), { headers: { "content-type": "application/json" } });
+		return new Response(JSON.stringify({ status: "ok", token: "not-valid-hex", login: "octo" }), { headers: { "content-type": "application/json" } });
+	};
+	await assert.rejects(
+		() => ensureCliAuth(() => {}, { ...deps, fetchFn, spawnFn: () => ({ unref() {} } as any) }, 10000, 0),
+		/格式无效/,
+	);
+	// nothing persisted
+	assert.equal(readTaskShareConfig(deps).token, null);
 });
 
 test("ensureCliAuth rejects when start endpoint fails", async () => {

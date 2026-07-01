@@ -1,0 +1,21 @@
+{
+	"goal": "下载B站视频 https://www.bilibili.com/video/BV18ejU6wEKn/ 到本地指定文件夹，使用yt-dlp并从Chrome获取cookies获取最高画质",
+	"hardConstraints": [
+		"视频保存路径: E:/AII/TUI/TUI-0622/B站视频下载/{视频标题}/标题_BV号.mp4",
+		"必须使用 --cookies-from-browser chrome 从Chrome获取cookies",
+		"下载最高画质，不下载字幕",
+		"文件名格式: {视频标题}_BV18ejU6wEKn.mp4"
+	],
+	"acceptance": [
+		"E:/AII/TUI/TUI-0622/B站视频下载/{视频标题}/目录存在",
+		"目录下存在一个 .mp4 文件，文件名包含 BV18ejU6wEKn",
+		"文件大小 > 0 字节",
+		"文件前几个字节为有效视频格式头（mp4/mkv等）"
+	],
+	"forbidden": [
+		"不得下载字幕",
+		"不得使用低画质",
+		"不得绕过Chrome cookies机制"
+	],
+	"context": "用户确认Chrome已登录B站账号。用户有CDP技能可用，但本次选择yt-dlp+cookies方案。B站高画质视频通常需要登录状态的cookies才能获取。目录结构为 B站视频下载/视频标题/文件，不存在的目录需创建。"
+}

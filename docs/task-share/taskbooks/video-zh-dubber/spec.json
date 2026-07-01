@@ -1,0 +1,28 @@
+{
+	"goal": "给定本地视频文件和英文字幕文件,一体化产出中文字幕、中文配音音轨,以及带中文字幕软字幕和硬字幕的最终 MP4。",
+	"hardConstraints": [
+		"必须把所有最终产物写入本次 task 的 outputDir。",
+		"必须产出 translated.zh.srt,且保留源字幕的时间码、顺序和 cue 数量。",
+		"必须使用 MiMo TTS API 生成中文配音,API key 只能从环境变量 MIMO_API_KEY 读取,不得要求用户粘贴或回显 key。",
+		"voice 必须是 MiMo 预置音色 ID: mimo_default、冰糖、茉莉、苏打、白桦、Mia、Chloe、Milo、Dean;不允许用自然语言描述冒充 voice。",
+		"必须在翻译字幕之前运行 $TASK_DIR/scripts/make-video-zh-dub.mjs --preflight; preflight 失败必须立即停止。",
+		"必须调用 taskbook 自带脚本 $TASK_DIR/scripts/make-video-zh-dub.mjs 完成 TTS 与 ffmpeg 合成。",
+		"必须使用 ffmpeg/ffprobe 生成和验收媒体文件。",
+		"第一版不做口型同步;只按字幕时间轴铺中文配音并生成软字幕。"
+	],
+	"acceptance": [
+		"translated.zh.srt 存在,可解析,包含中文,且 cue 数量等于源字幕。",
+		"dub.zh.wav 存在,ffprobe 可解析,且 duration > 0。",
+		"final.zh.mp4 存在,ffprobe 可解析,且包含视频流、音频流和字幕流。",
+		"final.zh.hardsub.mp4 存在,ffprobe 可解析,且包含视频流和音频流。",
+		"dub-summary.json 存在且记录 voice、subtitleColor、cue 数、speechGroupCount、dubAudioPath、finalVideoPath,且 voice 等于本次输入 voice。"
+	],
+	"forbidden": [
+		"不得把字幕全文或视频内容贴进最终回复。",
+		"不得把任何 API key 的值、长度、前缀写入文件、命令输出或回复。",
+		"不得硬编码本机输出路径。",
+		"不得在 task 内再调用其他 task;taskbook 是最小单位。",
+		"不得为了第一版实现口型同步、逐字对齐或复杂混音。"
+	],
+	"context": "这是兼容的一体化入口。新项目优先使用拆分链路: subtitle-fluent-translator 产出流畅中文字幕,subtitle-to-speech 产出中文配音音频,video-zh-composer 合成最终视频;只有用户明确要一步完成或沿用旧入口时才使用本 taskbook。推荐默认 voice 为 冰糖。dispatcher 根据用户想要的语言、性别和气质选择最接近的 MiMo 预置音色 ID;语气、节奏、感染力等表达方式写入 stylePrompt。脚本会按中文字幕分组生成 TTS,并打印 [tts] i/n 百分比进度。长字幕翻译时 worker 应分批处理,但最终 translated.zh.srt 必须保留源字幕 cue 数量与时间轴。最终 MP4 默认只使用中文配音作为主音轨,不混入原英文人声。硬字幕版不加背景条,会先生成按视频宽度拆分的字幕副本再烧录中文字幕,每屏最多 2 行。硬字幕文字颜色 subtitleColor 只允许 white/yellow/pink,默认 white。"
+}

@@ -1,0 +1,147 @@
+{
+	"name": "subtitle-to-speech",
+	"description": "Given a Chinese subtitle file, create a MiMo TTS dub audio track aligned to subtitle timings.",
+	"scope": "user",
+	"createdAt": "2026-06-29T14:35:00.000Z",
+	"updatedAt": "2026-06-30T09:16:48.752Z",
+	"tags": [
+		"subtitle",
+		"tts",
+		"mimo",
+		"audio"
+	],
+	"runs": [
+		{
+			"timestamp": "2026-06-29T15:20:33.104Z",
+			"status": "pass",
+			"input": {
+				"voice": "苏打",
+				"stylePrompt": "用年轻、活力、有朝气的中文男声语气",
+				"maxChars": 120,
+				"subtitlePath": "E:\\AII\\ugk-tui-next\\.tasks\\runs\\task-subtitle-fluent-translator-1782741391377-ure5cr\\output\\fluent.zh.srt"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 141.793,
+			"phases": {
+				"workerMs": 140199,
+				"verifyMs": 629,
+				"workerFirstOutputMs": 6734,
+				"worker.coldStartMs": 974,
+				"worker.llmDecisionMs": 11730,
+				"worker.toolMs": 80767
+			}
+		},
+		{
+			"timestamp": "2026-06-29T15:47:00.406Z",
+			"status": "pass",
+			"input": {
+				"voice": "苏打",
+				"stylePrompt": "语气要有感染力、自然、清晰、适合视频解说，语速稳定不要读出字幕序号或时间码",
+				"maxChars": 120,
+				"subtitlePath": "E:\\AII\\ugk-tui-next\\.tasks\\runs\\task-subtitle-fluent-translator-1782747644335-ysiw5d\\output\\fluent.zh.srt"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 179.537,
+			"phases": {
+				"workerMs": 158557,
+				"verifyMs": 394,
+				"workerFirstOutputMs": 13484,
+				"worker.coldStartMs": 2390,
+				"worker.llmDecisionMs": 14549,
+				"worker.toolMs": 63290
+			}
+		},
+		{
+			"timestamp": "2026-06-30T02:45:02.646Z",
+			"status": "pass",
+			"input": {
+				"voice": "冰糖",
+				"stylePrompt": "口语化自然语气",
+				"maxChars": 120,
+				"subtitlePath": "E:\\AII\\TUI\\TUI-0629\\.tasks\\runs\\task-subtitle-fluent-translator-1782786872686-se028i\\output\\fluent.zh.srt"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 93.65,
+			"phases": {
+				"workerMs": 86954,
+				"verifyMs": 128,
+				"workerFirstOutputMs": 26036,
+				"worker.coldStartMs": 1306,
+				"worker.llmDecisionMs": 16242,
+				"worker.toolMs": 45315
+			}
+		},
+		{
+			"timestamp": "2026-06-30T03:06:32.473Z",
+			"status": "pass",
+			"input": {
+				"voice": "冰糖",
+				"stylePrompt": "用自然、活泼、适合口播的中文语气，语速适中，带点话痨的感觉",
+				"maxChars": 120,
+				"subtitlePath": "E:\\AII\\TUI\\TUI-0629\\.tasks\\runs\\task-subtitle-fluent-translator-1782788256062-pfj5yu\\output\\fluent.zh.srt"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 141.26,
+			"phases": {
+				"workerMs": 126154,
+				"verifyMs": 138,
+				"workerFirstOutputMs": 20017,
+				"worker.coldStartMs": 2184,
+				"worker.llmDecisionMs": 17692,
+				"worker.toolMs": 79375
+			}
+		},
+		{
+			"timestamp": "2026-06-30T07:09:24.321Z",
+			"status": "fail",
+			"input": {
+				"voice": "年轻男声",
+				"stylePrompt": "适合口播的话痨模式",
+				"maxChars": 120,
+				"subtitlePath": "E:\\AII\\TUI\\TUI-0629\\.tasks\\runs\\task-subtitle-fluent-translator-1782802285403-dg3v1p\\output\\fluent.zh.srt"
+			},
+			"exitCode": 1,
+			"verifyFailures": [
+				{
+					"assertion": "tts-summary.voice matches input",
+					"expected": "年轻男声",
+					"actual": "\"苏打\""
+				}
+			],
+			"duration": 451.175,
+			"phases": {
+				"workerMs": 218845,
+				"verifyMs": 396,
+				"workerFirstOutputMs": 12916,
+				"worker.coldStartMs": 930,
+				"worker.llmDecisionMs": 15540,
+				"worker.toolMs": 4639
+			}
+		},
+		{
+			"timestamp": "2026-06-30T09:16:48.752Z",
+			"status": "pass",
+			"input": {
+				"voice": "冰糖",
+				"stylePrompt": "用自然、清晰、适合视频解说的中文语气，语速稳定，不要读出字幕序号或时间码。这是 breaking 街舞教学，语气要有活力和节奏感。",
+				"maxChars": 120,
+				"subtitlePath": "E:\\AII\\ugk-tui-worktrees\\dev-20260630-next\\.tasks\\runs\\task-subtitle-fluent-translator-1782810042309-nq0ztp\\output\\fluent.zh.srt"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 221.545,
+			"phases": {
+				"workerMs": 202604,
+				"verifyMs": 93,
+				"workerFirstOutputMs": 5476,
+				"worker.coldStartMs": 990,
+				"worker.llmDecisionMs": 14054,
+				"worker.toolMs": 160321
+			}
+		}
+	]
+}

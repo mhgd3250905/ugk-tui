@@ -1,0 +1,33 @@
+{
+	"outputDir": "<runtime>",
+	"artifacts": [
+		"metadata.json",
+		"download-summary.json",
+		"*.mp4",
+		"*.vtt"
+	],
+	"runtimeInput": [
+		"url",
+		"maxHeight",
+		"subLangs"
+	],
+	"runtimeInputMeta": {
+		"url": {
+			"description": "X/Twitter 帖子链接,格式 https://x.com/{user}/status/{id}",
+			"required": true
+		},
+		"maxHeight": {
+			"description": "可选最大视频高度。默认 480(通常会选 360p 档,更快);传 720/1080 可要更高清,传 270 更省流量。",
+			"required": false,
+			"default": 480
+		},
+		"subLangs": {
+			"description": "字幕语言选择,传给 yt-dlp --sub-langs。默认 all。",
+			"required": false,
+			"default": "all"
+		}
+	},
+	"requiredTools": [
+		"bash"
+	]
+}

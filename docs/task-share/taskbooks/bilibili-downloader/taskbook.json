@@ -1,0 +1,195 @@
+{
+	"name": "bilibili-downloader",
+	"description": "B站视频下载：通过CDP获取页面信息，下载DASH流并合并为mp4，保存到视频标题子目录",
+	"scope": "user",
+	"createdAt": "2026-06-23T14:40:05.046Z",
+	"updatedAt": "2026-06-26T17:27:13.503Z",
+	"tags": [
+		"bilibili",
+		"video",
+		"download",
+		"cdp"
+	],
+	"runs": [
+		{
+			"timestamp": "2026-06-26T17:23:49.721Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV1oUdUBuE75/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 77.599,
+			"phases": {
+				"workerMs": 56269,
+				"verifyMs": 226,
+				"workerFirstOutputMs": 8972,
+				"worker.coldStartMs": 1281,
+				"worker.llmDecisionMs": 11521,
+				"worker.toolMs": 7501
+			}
+		},
+		{
+			"timestamp": "2026-06-26T17:24:04.586Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV1RLowBuEQW/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 85.321,
+			"phases": {
+				"workerMs": 74449,
+				"verifyMs": 146,
+				"workerFirstOutputMs": 8928,
+				"worker.coldStartMs": 1194,
+				"worker.llmDecisionMs": 12541,
+				"worker.toolMs": 3671
+			}
+		},
+		{
+			"timestamp": "2026-06-26T17:25:16.365Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV1AQQuBcE9P/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 64.509,
+			"phases": {
+				"workerMs": 56143,
+				"verifyMs": 263,
+				"workerFirstOutputMs": 9140,
+				"worker.coldStartMs": 1090,
+				"worker.llmDecisionMs": 11665,
+				"worker.toolMs": 3365
+			}
+		},
+		{
+			"timestamp": "2026-06-26T17:25:17.034Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV1ebQnByEVx/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 65.178,
+			"phases": {
+				"workerMs": 51807,
+				"verifyMs": 201,
+				"workerFirstOutputMs": 9791,
+				"worker.coldStartMs": 1366,
+				"worker.llmDecisionMs": 12511,
+				"worker.toolMs": 3365
+			}
+		},
+		{
+			"timestamp": "2026-06-26T17:25:24.388Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV19QdWBcEca/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 72.532,
+			"phases": {
+				"workerMs": 60523,
+				"verifyMs": 170,
+				"workerFirstOutputMs": 9417,
+				"worker.coldStartMs": 1084,
+				"worker.llmDecisionMs": 11993,
+				"worker.toolMs": 1916
+			}
+		},
+		{
+			"timestamp": "2026-06-26T17:26:01.763Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV1UidaBVENH/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 109.907,
+			"phases": {
+				"workerMs": 90069,
+				"verifyMs": 213,
+				"workerFirstOutputMs": 10682,
+				"worker.coldStartMs": 1274,
+				"worker.llmDecisionMs": 13899,
+				"worker.toolMs": 33851
+			}
+		},
+		{
+			"timestamp": "2026-06-26T17:26:28.816Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV1p8QhBREfw/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 72.449,
+			"phases": {
+				"workerMs": 56961,
+				"verifyMs": 211,
+				"workerFirstOutputMs": 8224,
+				"worker.coldStartMs": 1086,
+				"worker.llmDecisionMs": 11194,
+				"worker.toolMs": 8726
+			}
+		},
+		{
+			"timestamp": "2026-06-26T17:26:29.652Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV1KHD1BYEpq/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 72.616,
+			"phases": {
+				"workerMs": 56823,
+				"verifyMs": 203,
+				"workerFirstOutputMs": 8184,
+				"worker.coldStartMs": 1013,
+				"worker.llmDecisionMs": 11908,
+				"worker.toolMs": 6264
+			}
+		},
+		{
+			"timestamp": "2026-06-26T17:26:30.985Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV1AdDtBjEU6/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 66.595,
+			"phases": {
+				"workerMs": 54678,
+				"verifyMs": 310,
+				"workerFirstOutputMs": 7537,
+				"worker.coldStartMs": 1096,
+				"worker.llmDecisionMs": 10182,
+				"worker.toolMs": 2454
+			}
+		},
+		{
+			"timestamp": "2026-06-26T17:27:13.502Z",
+			"status": "pass",
+			"input": {
+				"bilibili_url": "https://www.bilibili.com/video/BV1t2DjBXE5F/"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 71.737,
+			"phases": {
+				"workerMs": 53803,
+				"verifyMs": 170,
+				"workerFirstOutputMs": 7153,
+				"worker.coldStartMs": 1170,
+				"worker.llmDecisionMs": 10231,
+				"worker.toolMs": 1708
+			}
+		}
+	]
+}

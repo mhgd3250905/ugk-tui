@@ -1,0 +1,19 @@
+{
+	"outputDir": "<runtime>",
+	"artifacts": [
+		"*.mp4"
+	],
+	"runtimeInput": [
+		"bilibili_url"
+	],
+	"runtimeInputMeta": {
+		"bilibili_url": {
+			"description": "B站视频链接,格式 https://www.bilibili.com/video/BVxxxxxx 或纯 BV号。dispatcher 从用户输入里抽取这个 URL。",
+			"required": true
+		}
+	},
+	"requiredTools": [
+		"chrome_cdp",
+		"bash"
+	]
+}

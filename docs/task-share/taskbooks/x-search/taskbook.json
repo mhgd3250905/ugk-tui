@@ -1,0 +1,273 @@
+{
+	"name": "x-search",
+	"description": "Search X/Twitter Latest with the local logged-in Chrome (CDP) and write a complete structured JSON result. Stable, headless, parallel-safe — each run gets its own isolated CDP tab and output dir. REQUIREMENTS before calling run_task: you MUST collect BOTH (1) a concrete keyword (the exact term to search, not a vague description) AND (2) a time range from the user (e.g. 最近一周/最近一个月/上周). Users rarely volunteer a time range in casual requests like '搜一下 X 的评价' — if either keyword or time is missing or vague, you MUST ask the user to clarify BEFORE calling run_task; do not guess or invent values. Pass the natural-language request to run_task and let the dispatcher compute the ISO timestamps.",
+	"scope": "user",
+	"createdAt": "2026-06-28T14:32:00.000Z",
+	"updatedAt": "2026-06-30T07:13:39.707Z",
+	"tags": [
+		"x",
+		"twitter",
+		"search",
+		"cdp"
+	],
+	"runs": [
+		{
+			"timestamp": "2026-06-28T11:45:21.978Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "medtrum",
+				"timePhrase": "最近一个月",
+				"timeMode": "rolling",
+				"timeAmount": 1,
+				"timeUnit": "month",
+				"startIso": "2026-05-28T11:43:36.888Z",
+				"endIso": "2026-06-28T11:43:36.888Z",
+				"canonical": "30days"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 105.093,
+			"phases": {
+				"workerMs": 99346,
+				"verifyMs": 89,
+				"workerFirstOutputMs": 5061,
+				"worker.coldStartMs": 780,
+				"worker.llmDecisionMs": 11610,
+				"worker.toolMs": 12332
+			}
+		},
+		{
+			"timestamp": "2026-06-28T14:24:43.317Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "ShipFast 使用体验",
+				"timePhrase": "最近一个月",
+				"timeMode": "rolling",
+				"timeAmount": 1,
+				"timeUnit": "month",
+				"startIso": "2026-05-29T14:22:59.961Z",
+				"endIso": "2026-06-28T14:22:59.961Z",
+				"canonical": "30days"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 103.358,
+			"phases": {
+				"workerMs": 82283,
+				"verifyMs": 59,
+				"workerFirstOutputMs": 6114,
+				"worker.coldStartMs": 1018,
+				"worker.llmDecisionMs": 11455,
+				"worker.toolMs": 8865
+			}
+		},
+		{
+			"timestamp": "2026-06-28T14:29:18.811Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "ShipFast",
+				"timePhrase": "最近一个月",
+				"timeMode": "rolling",
+				"timeAmount": 1,
+				"timeUnit": "month",
+				"startIso": "2026-05-28T14:24:51.593Z",
+				"endIso": "2026-06-28T14:24:51.593Z",
+				"canonical": "30days"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 267.219,
+			"phases": {
+				"workerMs": 255884,
+				"verifyMs": 104,
+				"workerFirstOutputMs": 5974,
+				"worker.coldStartMs": 845,
+				"worker.llmDecisionMs": 11465,
+				"worker.toolMs": 35383
+			}
+		},
+		{
+			"timestamp": "2026-06-29T01:25:33.387Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "GPT5",
+				"timePhrase": "3h",
+				"timeMode": "rolling",
+				"timeAmount": 3,
+				"timeUnit": "hour",
+				"startIso": "2026-06-28T22:23:54.780Z",
+				"endIso": "2026-06-29T01:23:54.780Z",
+				"canonical": "3hours"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 98.611,
+			"phases": {
+				"workerMs": 92413,
+				"verifyMs": 68,
+				"workerFirstOutputMs": 10721,
+				"worker.coldStartMs": 1113,
+				"worker.llmDecisionMs": 9535,
+				"worker.toolMs": 11435
+			}
+		},
+		{
+			"timestamp": "2026-06-29T03:18:16.754Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "GPT5",
+				"timePhrase": "3h",
+				"timeMode": "rolling",
+				"timeAmount": 3,
+				"timeUnit": "hour",
+				"startIso": "2026-06-29T00:16:29.092Z",
+				"endIso": "2026-06-29T03:16:29.092Z",
+				"canonical": "3hours"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 107.665,
+			"phases": {
+				"workerMs": 100950,
+				"verifyMs": 69,
+				"workerFirstOutputMs": 16467,
+				"worker.coldStartMs": 1247,
+				"worker.llmDecisionMs": 15169,
+				"worker.toolMs": 8869
+			}
+		},
+		{
+			"timestamp": "2026-06-29T05:21:45.936Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "GPT5",
+				"timePhrase": "3h",
+				"timeMode": "rolling",
+				"timeAmount": 3,
+				"timeUnit": "hour",
+				"startIso": "2026-06-29T02:19:56.872Z",
+				"endIso": "2026-06-29T05:19:56.872Z",
+				"canonical": "3hours"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 109.068,
+			"phases": {
+				"workerMs": 90658,
+				"verifyMs": 112,
+				"worker.coldStartMs": 1474,
+				"worker.llmDecisionMs": 14610,
+				"worker.toolMs": 12562
+			}
+		},
+		{
+			"timestamp": "2026-06-29T05:39:19.850Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "GPT5",
+				"timePhrase": "3h",
+				"timeMode": "rolling",
+				"timeAmount": 3,
+				"timeUnit": "hour",
+				"startIso": "2026-06-29T02:37:21.364Z",
+				"endIso": "2026-06-29T05:37:21.364Z",
+				"canonical": "3hours"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 118.487,
+			"phases": {
+				"workerMs": 110519,
+				"verifyMs": 68,
+				"worker.coldStartMs": 1931,
+				"worker.llmDecisionMs": 13547,
+				"worker.toolMs": 15599
+			}
+		},
+		{
+			"timestamp": "2026-06-29T06:25:31.278Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "GPT5",
+				"timePhrase": "3h",
+				"timeMode": "rolling",
+				"timeAmount": 3,
+				"timeUnit": "hour",
+				"startIso": "2026-06-29T03:22:55.250Z",
+				"endIso": "2026-06-29T06:22:55.250Z",
+				"canonical": "3hours"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 156.032,
+			"phases": {
+				"workerMs": 131092,
+				"verifyMs": 119,
+				"workerFirstOutputMs": 24051,
+				"worker.coldStartMs": 1410,
+				"worker.llmDecisionMs": 15736,
+				"worker.toolMs": 19894
+			}
+		},
+		{
+			"timestamp": "2026-06-30T06:21:16.657Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "msi",
+				"timePhrase": "最近一小时",
+				"timeMode": "rolling",
+				"timeAmount": 1,
+				"timeUnit": "hour",
+				"startIso": "2026-06-30T05:15:56.323Z",
+				"endIso": "2026-06-30T06:15:56.323Z",
+				"canonical": "1hours"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 320.337,
+			"phases": {
+				"workerMs": 302499,
+				"verifyMs": 63,
+				"workerFirstOutputMs": 6211,
+				"worker.coldStartMs": 1223,
+				"worker.llmDecisionMs": 10131,
+				"worker.toolMs": 40529
+			}
+		},
+		{
+			"timestamp": "2026-06-30T07:13:39.706Z",
+			"status": "pass",
+			"input": {
+				"maxSteps": 20,
+				"keyword": "medtrum",
+				"timePhrase": "最近一周",
+				"timeMode": "rolling",
+				"timeAmount": 1,
+				"timeUnit": "week",
+				"startIso": "2026-06-23T07:10:57.240Z",
+				"endIso": "2026-06-30T07:10:57.240Z",
+				"canonical": "7days"
+			},
+			"exitCode": 0,
+			"verifyFailures": [],
+			"duration": 162.482,
+			"phases": {
+				"workerMs": 150292,
+				"verifyMs": 54,
+				"workerFirstOutputMs": 24327,
+				"worker.coldStartMs": 5061,
+				"worker.llmDecisionMs": 26318,
+				"worker.toolMs": 11272
+			}
+		}
+	]
+}

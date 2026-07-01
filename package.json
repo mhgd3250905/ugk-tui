@@ -39,6 +39,7 @@
     "@earendil-works/pi-coding-agent": "0.79.4",
     "@earendil-works/pi-tui": "0.79.4",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "fflate": "^0.8.3",
     "node-cron": "^4.2.1"
   }
 }

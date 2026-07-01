@@ -233,7 +233,9 @@ test("bin/ugk.js handles task install before starting the interactive CLI", asyn
 		await writeFile(preloadPath, `
 const fixture = JSON.parse(process.env.UGK_TEST_TASK_FIXTURE);
 globalThis.fetch = async (url) => {
-	const key = String(url).endsWith('/manifest.json') ? 'manifest.json' : String(url).split('/').pop();
+	const u = String(url);
+	// manifest endpoint → manifest.json key; file URL → last path segment as key
+	const key = u.endsWith('/api/manifest') ? 'manifest.json' : decodeURIComponent(u.split('/').pop() ?? '');
 	const text = fixture[key];
 	return text === undefined
 		? { ok: false, status: 404, text: async () => 'missing' }
@@ -260,8 +262,8 @@ globalThis.fetch = async (url) => {
 	}
 });
 
-test("official task install manifest is served from Cloudflare Pages", () => {
-	assert.equal(OFFICIAL_MANIFEST_URL, "https://ugk-task-share.pages.dev/manifest.json");
+test("official task install manifest is served from the dynamic API endpoint", () => {
+	assert.equal(OFFICIAL_MANIFEST_URL, "https://ugk-task-share.pages.dev/api/manifest");
 });
 
 test("isTaskInstallCommand recognizes only the shell install form", () => {

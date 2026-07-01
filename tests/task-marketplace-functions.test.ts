@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { zipSync } from "fflate";
 import {
+	buildManifest,
 	createSessionCookie,
 	accountDownloads,
 	accountSubmissions,
@@ -17,10 +19,26 @@ import {
 	recordDownload,
 	reportTask,
 	reviewSubmission,
+	serveTaskFile,
 	submitTask,
 	toggleFavorite,
 	toggleLike,
 } from "../functions/_lib/marketplace.js";
+
+// Build a minimal valid task package zip in-memory for submit tests.
+const SAMPLE_FILES = {
+	"taskbook.json": JSON.stringify({ name: "pkg-task", description: "demo", scope: "user", tags: ["demo"], runs: [] }),
+	"spec.json": JSON.stringify({ goal: "demo task", hardConstraints: ["works"], acceptance: ["passes"] }),
+	"skill.md": "# Pkg Task\nWrite result.json.\n",
+	"verify.mjs": "process.exit(0);\n",
+	"contract.json": "{}",
+};
+
+function taskZip(name: string): Uint8Array {
+	const encoded: Record<string, Uint8Array> = {};
+	for (const [file, text] of Object.entries(SAMPLE_FILES)) encoded[file] = new TextEncoder().encode(file === "taskbook.json" ? JSON.stringify({ ...JSON.parse(text), name }) : text);
+	return zipSync(encoded);
+}
 
 function createDb() {
 	const users = new Map();
@@ -62,6 +80,8 @@ function createDb() {
 					if (sql.startsWith("SELECT 1 FROM download_events")) return downloads.some((item) => item.task_name === this.values[0] && item.user_id === this.values[1]) ? { ok: 1 } : null;
 					if (sql.startsWith("SELECT 1 FROM task_reports")) return reports.some((item) => item.task_name === this.values[0] && item.user_id === this.values[1]) ? { ok: 1 } : null;
 					if (sql.startsWith("SELECT download_count")) return tasks.get(this.values[0]) ?? null;
+					if (sql.startsWith("SELECT latest_version FROM tasks")) return tasks.get(this.values[0]) ?? null;
+					if (sql.startsWith("SELECT file_list FROM task_submissions")) return submissions.find((item) => item.name === this.values[0] && item.version === this.values[1] && item.status === "published") ?? null;
 					throw new Error(`Unhandled first SQL: ${sql}`);
 				},
 				async all() {
@@ -80,6 +100,9 @@ function createDb() {
 						return { results: [...counts].map(([day, download_count]) => ({ day, download_count })) };
 					}
 					if (sql.includes("FROM task_versions")) return { results: versions.filter((item) => item.task_name === this.values[0]) };
+					if (sql.includes("FROM tasks") && sql.includes("latest_version IS NOT NULL")) {
+						return { results: [...tasks.entries()].filter(([, task]: [string, any]) => task.latest_version).map(([name, task]: [string, any]) => ({ name, title: task.title, description: task.description, author_name: task.author_name, latest_version: task.latest_version })).sort((a: any, b: any) => a.name.localeCompare(b.name)) };
+					}
 					if (sql.includes("FROM task_reports")) return { results: reports.map((item) => ({ ...item, reporter_login: usersById.get(item.user_id)?.login ?? "unknown" })) };
 					throw new Error(`Unhandled all SQL: ${sql}`);
 				},
@@ -103,10 +126,10 @@ function createDb() {
 						return { success: true };
 					}
 					if (sql.startsWith("INSERT INTO task_submissions")) {
-						const [userId, name, title, description, sourceType, sourceUrl, artifactKey, artifactName, now] = this.values;
-						submissions.push({ id: nextSubmissionId++, user_id: userId, name, title, description, source_type: sourceType, source_url: sourceUrl, artifact_key: artifactKey, artifact_name: artifactName, status: "pending", created_at: now, updated_at: now, author_login: usersById.get(userId)?.login ?? "unknown" });
-						return { success: true };
-					}
+							const [userId, name, version, title, description, sourceType, sourceUrl, artifactKey, artifactName, fileList, now] = this.values;
+							submissions.push({ id: nextSubmissionId++, user_id: userId, name, version, title, description, source_type: sourceType, source_url: sourceUrl, artifact_key: artifactKey, artifact_name: artifactName, file_list: fileList, status: "pending", created_at: now, updated_at: now, author_login: usersById.get(userId)?.login ?? "unknown" });
+							return { success: true };
+						}
 					if (sql.startsWith("UPDATE task_submissions SET status")) {
 						const [status, reviewerId, note, now, id] = this.values;
 						const item = submissions.find((submission) => submission.id === id);
@@ -122,10 +145,10 @@ function createDb() {
 						return { success: true };
 					}
 					if (sql.startsWith("INSERT INTO tasks")) {
-						const [name, title, description, authorUserId, authorName, now] = this.values;
-						tasks.set(name, { title, description, author_user_id: authorUserId, author_name: authorName, created_at: now, download_count: 0, like_count: 0, favorite_count: 0 });
-						return { success: true };
-					}
+							const [name, title, description, authorUserId, authorName, latestVersion, now] = this.values;
+							tasks.set(name, { title, description, author_user_id: authorUserId, author_name: authorName, latest_version: latestVersion, created_at: now, download_count: 0, like_count: 0, favorite_count: 0 });
+							return { success: true };
+						}
 					if (sql.startsWith("INSERT INTO task_likes")) {
 						likes.add(`${this.values[0]}:${this.values[1]}`);
 						return { success: true };
@@ -179,7 +202,7 @@ function createR2() {
 			objects.set(key, value);
 		},
 		async get(key) {
-			return objects.has(key) ? { body: objects.get(key), httpMetadata: { contentType: "application/zip" } } : null;
+			return objects.has(key) ? { body: objects.get(key), httpMetadata: {} } : null;
 		},
 	};
 }
@@ -304,16 +327,16 @@ test("marketplace stats summarize live D1 counters", async () => {
 	assert.deepEqual(body, { tasks: 1, downloads: 1, likes: 0, favorites: 0 });
 });
 
-test("signed-in users submit taskbooks and see pending submissions", async () => {
+test("signed-in users submit task packages and see pending submissions", async () => {
 	const testEnv = env();
 	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
 	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
 	const form = new FormData();
 	form.set("name", "my-task");
+	form.set("version", "1.0.0");
 	form.set("title", "My Task");
 	form.set("description", "Does one useful thing");
-	form.set("sourceUrl", "https://github.com/example/my-task");
-	form.set("artifact", new File(["zip"], "my-task.zip", { type: "application/zip" }));
+	form.set("artifact", new File([taskZip("my-task") as BlobPart], "my-task.zip", { type: "application/zip" }));
 
 	const submitResponse = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
 	const submitted = await submitResponse.json();
@@ -322,61 +345,103 @@ test("signed-in users submit taskbooks and see pending submissions", async () =>
 
 	assert.equal(submitted.status, "pending");
 	assert.equal(submitted.name, "my-task");
+	assert.equal(submitted.version, "1.0.0");
 	assert.equal(account.submissions.length, 1);
-	assert.equal(testEnv.TASK_UPLOADS.objects.size, 1);
+	// 5 required files stored as loose objects in R2
+	assert.equal(testEnv.TASK_UPLOADS.objects.size, 5);
 });
 
-test("task submissions reject unsafe source URLs", async () => {
+test("task submissions reject missing artifact", async () => {
 	const testEnv = env();
 	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
 	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
 	const form = new FormData();
-	form.set("name", "unsafe-url-task");
-	form.set("title", "Unsafe URL Task");
-	form.set("description", "Attempts to persist a javascript URL");
-	form.set("sourceUrl", "javascript:alert(1)");
+	form.set("name", "no-artifact-task");
+	form.set("version", "1.0.0");
+	form.set("title", "No Artifact");
+	form.set("description", "Missing the zip");
 
 	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
 	const body = await response.json();
 
 	assert.equal(response.status, 400);
-	assert.equal(body.error, "invalid_url_scheme");
+	assert.equal(body.error, "artifact_required");
 });
 
-test("task submissions reject malformed source URLs", async () => {
+test("task submissions reject invalid semver version", async () => {
 	const testEnv = env();
 	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
 	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
 	const form = new FormData();
-	form.set("name", "bad-url-task");
-	form.set("title", "Bad URL Task");
-	form.set("description", "Attempts to persist an invalid URL");
-	form.set("sourceUrl", "not a url");
+	form.set("name", "bad-version-task");
+	form.set("version", "latest");
+	form.set("title", "Bad Version");
+	form.set("description", "Non-semver version");
+	form.set("artifact", new File([taskZip("bad-version-task") as BlobPart], "bad.zip", { type: "application/zip" }));
 
 	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
 	const body = await response.json();
 
 	assert.equal(response.status, 400);
-	assert.equal(body.error, "invalid_url");
+	assert.equal(body.error, "invalid_version");
 });
 
-test("task submissions accept https source URLs without an artifact", async () => {
+test("task submissions reject malformed zip before R2 write", async () => {
 	const testEnv = env();
 	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
 	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
 	const form = new FormData();
-	form.set("name", "source-only-task");
-	form.set("title", "Source Only Task");
-	form.set("description", "Uses a reviewed source URL");
-	form.set("sourceUrl", "https://github.com/example/source-only-task");
+	form.set("name", "bad-zip-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Bad Zip");
+	form.set("description", "Not a real zip");
+	form.set("artifact", new File([new Uint8Array([0, 1, 2, 3]) as BlobPart], "bad.zip", { type: "application/zip" }));
 
 	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
 	const body = await response.json();
 
-	assert.equal(response.status, 200);
-	assert.equal(body.status, "pending");
-	assert.equal(body.sourceUrl, "https://github.com/example/source-only-task");
+	assert.equal(response.status, 400);
+	assert.equal(body.error, "invalid_zip");
 	assert.equal(testEnv.TASK_UPLOADS.objects.size, 0);
+});
+
+test("task submissions reject a package missing required files", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	// zip with only taskbook.json, missing the other 4 required files
+	const partial = zipSync({ "taskbook.json": new TextEncoder().encode(SAMPLE_FILES["taskbook.json"]) });
+	const form = new FormData();
+	form.set("name", "pkg-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Partial");
+	form.set("description", "Missing files");
+	form.set("artifact", new File([partial as BlobPart], "partial.zip", { type: "application/zip" }));
+
+	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 400);
+	assert.equal(body.error, "invalid_package");
+});
+
+test("task submissions reject a package whose taskbook name mismatches", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "declared-name");
+	form.set("version", "1.0.0");
+	form.set("title", "Name Mismatch");
+	form.set("description", "taskbook.json name != form name");
+	// zip's taskbook.json says name: pkg-task, but form says declared-name
+	form.set("artifact", new File([taskZip("pkg-task") as BlobPart], "mismatch.zip", { type: "application/zip" }));
+
+	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 400);
+	assert.equal(body.error, "invalid_package");
 });
 
 test("task submissions reject oversized artifacts before R2 upload", async () => {
@@ -385,9 +450,10 @@ test("task submissions reject oversized artifacts before R2 upload", async () =>
 	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
 	const form = new FormData();
 	form.set("name", "huge-artifact-task");
+	form.set("version", "1.0.0");
 	form.set("title", "Huge Artifact Task");
 	form.set("description", "Attempts to upload too much data");
-	form.set("artifact", new File([new Uint8Array(25 * 1024 * 1024 + 1)], "huge.zip", { type: "application/zip" }));
+	form.set("artifact", new File([new Uint8Array(25 * 1024 * 1024 + 1) as BlobPart], "huge.zip", { type: "application/zip" }));
 
 	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
 	const body = await response.json();
@@ -403,9 +469,10 @@ test("admins publish pending submissions into the public queue", async () => {
 	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
 	const form = new FormData();
 	form.set("name", "public-task");
+	form.set("version", "1.0.0");
 	form.set("title", "Public Task");
 	form.set("description", "Ready for review");
-	form.set("sourceUrl", "https://github.com/example/public-task");
+	form.set("artifact", new File([taskZip("public-task") as BlobPart], "public-task.zip", { type: "application/zip" }));
 	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
 
 	const pending = await (await adminSubmissions(new Request("https://ugk-task-share.pages.dev/api/admin/submissions", { headers: { cookie } }), testEnv)).json();
@@ -462,9 +529,10 @@ test("published submissions expose immutable task versions", async () => {
 	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
 	const form = new FormData();
 	form.set("name", "versioned-task");
+	form.set("version", "2.1.0");
 	form.set("title", "Versioned Task");
 	form.set("description", "Ready for versions");
-	form.set("sourceUrl", "https://github.com/example/versioned-task");
+	form.set("artifact", new File([taskZip("versioned-task") as BlobPart], "versioned-task.zip", { type: "application/zip" }));
 
 	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
 	await reviewSubmission(
@@ -474,7 +542,46 @@ test("published submissions expose immutable task versions", async () => {
 	);
 	const versions = await (await getTaskVersions(testEnv, "versioned-task")).json();
 
-	assert.equal(versions.versions[0].version, "1.0.0");
+	assert.equal(versions.versions[0].version, "2.1.0");
+});
+
+test("buildManifest lists published tasks with loose-file URLs and serveTaskFile delivers them", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "manifest-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Manifest Task");
+	form.set("description", "For manifest test");
+	form.set("artifact", new File([taskZip("manifest-task") as BlobPart], "manifest-task.zip", { type: "application/zip" }));
+	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	await reviewSubmission(
+		new Request("https://ugk-task-share.pages.dev/api/admin/submissions/1", { method: "POST", headers: { cookie }, body: JSON.stringify({ status: "published" }) }),
+		testEnv,
+		1,
+	);
+
+	const manifestResponse = await buildManifest(new Request("https://ugk-task-share.pages.dev/api/manifest"), testEnv);
+	const manifest = await manifestResponse.json();
+
+	assert.equal(manifest.tasks.length, 1);
+	assert.equal(manifest.tasks[0].name, "manifest-task");
+	assert.equal(manifest.tasks[0].version, "1.0.0");
+	// 5 required files, each mapped to a fetchable URL
+	assert.equal(Object.keys(manifest.tasks[0].files).length, 5);
+	assert.match(manifest.tasks[0].files["taskbook.json"], /\/api\/tasks\/manifest-task\/files\?f=taskbook\.json$/);
+
+	// Serve one of the loose files — should return the stored content
+	const fileResponse = await serveTaskFile(testEnv, "manifest-task", "contract.json");
+	assert.equal(fileResponse.status, 200);
+	const text = await fileResponse.text();
+	assert.deepEqual(JSON.parse(text), {}); // contract.json is "{}"
+});
+
+test("serveTaskFile rejects path traversal", async () => {
+	const testEnv = env();
+	await assert.rejects(() => serveTaskFile(testEnv, "any", "../../etc/passwd"));
 });
 
 test("stats detail rolls download events up by day", async () => {

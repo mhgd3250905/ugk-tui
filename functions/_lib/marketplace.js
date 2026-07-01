@@ -1,8 +1,12 @@
+import { unzipSync } from "fflate";
+
 const SESSION_COOKIE = "ugk_session";
 const OAUTH_STATE_COOKIE = "ugk_oauth_state";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 const TASK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/;
+const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
+const REQUIRED_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"];
 
 const encoder = new TextEncoder();
 
@@ -51,6 +55,72 @@ function cleanText(value) {
 
 function safeFileName(value) {
 	return cleanText(value).replaceAll("\\", "/").split("/").pop().replace(/[^A-Za-z0-9._-]/g, "-") || "task.zip";
+}
+
+// --- task package validation (server-side mirror of bin/task-install.js) ---
+// ponytail: CLI (Node) and Functions (Workers runtime) have different bundling
+// boundaries; cross-runtime "reuse" adds build complexity. Two equivalent pure
+// functions with cross-referencing comments beat a shared module. Extract when a
+// third consumer appears. <=> bin/task-install.js isTaskbook/isRequirementsSpec
+
+function isStringArray(value) {
+	return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isTaskbook(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	return (
+		typeof value.name === "string" &&
+		typeof value.description === "string" &&
+		(value.scope === "user" || value.scope === "project") &&
+		(value.tags === undefined || isStringArray(value.tags))
+	);
+}
+
+function isRequirementsSpec(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	return (
+		typeof value.goal === "string" &&
+		value.goal.trim().length > 0 &&
+		isStringArray(value.hardConstraints) &&
+		value.hardConstraints.length > 0 &&
+		isStringArray(value.acceptance) &&
+		value.acceptance.length > 0
+	);
+}
+
+function assertValidContract(contract) {
+	if (!contract || typeof contract !== "object" || Array.isArray(contract)) throw new Error("Invalid contract.json");
+	if (contract.runtimeInput !== undefined && !isStringArray(contract.runtimeInput)) throw new Error("Invalid contract.runtimeInput");
+	if (contract.runtimeInputMeta === undefined) return;
+	if (!contract.runtimeInputMeta || typeof contract.runtimeInputMeta !== "object" || Array.isArray(contract.runtimeInputMeta)) {
+		throw new Error("Invalid contract.runtimeInputMeta");
+	}
+}
+
+function assertSafePath(file) {
+	if (
+		typeof file !== "string" ||
+		file.length === 0 ||
+		file.includes("\\") ||
+		file.split("/").some((part) => part === "" || part === "." || part === "..")
+	) {
+		throw new Error(`Unsafe file path: ${String(file)}`);
+	}
+}
+
+function validateTaskPackage(name, files) {
+	if (!REQUIRED_FILES.every((file) => files[file] !== undefined)) {
+		throw new Error(`Missing required files: ${REQUIRED_FILES.filter((file) => files[file] === undefined).join(", ")}`);
+	}
+	for (const file of Object.keys(files)) assertSafePath(file);
+	const taskbook = JSON.parse(files["taskbook.json"]);
+	const spec = JSON.parse(files["spec.json"]);
+	const contract = JSON.parse(files["contract.json"]);
+	if (!isTaskbook(taskbook)) throw new Error("Invalid taskbook.json");
+	if (!isRequirementsSpec(spec)) throw new Error("Invalid spec.json");
+	assertValidContract(contract);
+	if (taskbook.name !== name) throw new Error(`taskbook.json name mismatch: expected ${name}, got ${String(taskbook.name)}`);
 }
 
 function invalidSourceUrlError(value) {
@@ -245,37 +315,52 @@ export async function submitTask(request, env) {
 	if (auth.response) return auth.response;
 	const form = await request.formData();
 	const name = cleanText(form.get("name"));
+	const version = cleanText(form.get("version"));
 	const title = cleanText(form.get("title"));
 	const description = cleanText(form.get("description"));
-	const sourceUrl = cleanText(form.get("sourceUrl"));
 	const artifact = form.get("artifact");
 	const hasArtifact = artifact && typeof artifact === "object" && "arrayBuffer" in artifact && artifact.size > 0;
 	if (!TASK_NAME_RE.test(name)) return json({ error: "invalid_name" }, { status: 400 });
+	if (!VERSION_RE.test(version)) return json({ error: "invalid_version" }, { status: 400 });
 	if (!title || !description) return json({ error: "missing_required_fields" }, { status: 400 });
-	if (!sourceUrl && !hasArtifact) return json({ error: "source_required" }, { status: 400 });
-	if (sourceUrl) {
-		const error = invalidSourceUrlError(sourceUrl);
-		if (error) return json({ error }, { status: 400 });
-	}
-	if (hasArtifact && artifact.size > MAX_ARTIFACT_BYTES) return json({ error: "artifact_too_large" }, { status: 413 });
+	if (!hasArtifact) return json({ error: "artifact_required" }, { status: 400 });
+	if (artifact.size > MAX_ARTIFACT_BYTES) return json({ error: "artifact_too_large" }, { status: 413 });
+	if (!env.TASK_UPLOADS) return json({ error: "upload_storage_not_configured" }, { status: 500 });
 
-	let artifactKey = null;
-	let artifactName = null;
-	if (hasArtifact) {
-		if (!env.TASK_UPLOADS) return json({ error: "upload_storage_not_configured" }, { status: 500 });
-		artifactName = safeFileName(artifact.name || `${name}.zip`);
-		artifactKey = `submissions/${auth.user.id}/${Date.now()}-${artifactName}`;
-		await env.TASK_UPLOADS.put(artifactKey, await artifact.arrayBuffer(), {
-			httpMetadata: { contentType: artifact.type || "application/zip" },
-		});
+	// Unzip → validate → store as individual files in R2 (not the raw zip).
+	// CLI fetches files individually via manifest; storing loose files means
+	// zero changes on the client side (no zip decompression in Node).
+	const bytes = new Uint8Array(await artifact.arrayBuffer());
+	let files;
+	try {
+		const extracted = unzipSync(bytes);
+		files = {};
+		for (const [path, data] of Object.entries(extracted)) {
+			if (path.endsWith("/")) continue;
+			// Strip leading directory prefix (creators may zip a wrapper folder)
+			const rel = path.split("/").filter(Boolean).join("/");
+			files[rel] = new TextDecoder().decode(data);
+		}
+	} catch {
+		return json({ error: "invalid_zip" }, { status: 400 });
+	}
+	try {
+		validateTaskPackage(name, files);
+	} catch (error) {
+		return json({ error: "invalid_package", detail: error instanceof Error ? error.message : String(error) }, { status: 400 });
+	}
+
+	const prefix = `tasks/${name}/${version}`;
+	for (const [file, content] of Object.entries(files)) {
+		await env.TASK_UPLOADS.put(`${prefix}/${file}`, content);
 	}
 
 	const now = new Date().toISOString();
 	const result = await env.DB.prepare(
-		`INSERT INTO task_submissions (user_id, name, title, description, source_type, source_url, artifact_key, artifact_name, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-	).bind(auth.user.id, name, title, description, hasArtifact ? "upload" : "url", sourceUrl || null, artifactKey, artifactName, now, now).run();
-	return json({ id: result.meta?.last_row_id ?? null, name, title, description, status: "pending", sourceUrl: sourceUrl || null, artifactKey, artifactName });
+		`INSERT INTO task_submissions (user_id, name, version, title, description, source_type, source_url, artifact_key, artifact_name, file_list, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	).bind(auth.user.id, name, version, title, description, "upload", null, prefix, `${name}-${version}.zip`, JSON.stringify(Object.keys(files)), now, now).run();
+	return json({ id: result.meta?.last_row_id ?? null, name, version, title, description, status: "pending" });
 }
 
 export async function accountSubmissions(request, env) {
@@ -347,20 +432,22 @@ export async function reviewSubmission(request, env, id) {
 
 	const now = new Date().toISOString();
 	if (status === "published") {
+		const version = submission.version;
 		await env.DB.prepare(
-			`INSERT INTO tasks (name, title, description, author_user_id, author_name, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO tasks (name, title, description, author_user_id, author_name, latest_version, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
 				title = excluded.title,
 				description = excluded.description,
 				author_user_id = excluded.author_user_id,
-				author_name = excluded.author_name`,
-		).bind(submission.name, submission.title, submission.description, submission.user_id, submission.author_login ?? "Community", now).run();
+				author_name = excluded.author_name,
+				latest_version = excluded.latest_version`,
+		).bind(submission.name, submission.title, submission.description, submission.user_id, submission.author_login ?? "Community", version, now).run();
 		await env.DB.prepare(
 			`INSERT INTO task_versions (task_name, version, submission_id, artifact_key, source_url, published_by_user_id, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(task_name, version) DO NOTHING`,
-		).bind(submission.name, "1.0.0", submission.id, submission.artifact_key, submission.source_url, auth.user.id, now).run();
+		).bind(submission.name, version, submission.id, submission.artifact_key, submission.source_url, auth.user.id, now).run();
 	}
 	await env.DB.prepare(
 		"UPDATE task_submissions SET status = ?, reviewer_user_id = ?, review_note = ?, updated_at = ? WHERE id = ?",
@@ -488,4 +575,42 @@ export async function recordDownload(request, env, name) {
 	await env.DB.prepare("INSERT INTO download_events (task_name, user_id, created_at) VALUES (?, ?, ?)").bind(name, user?.id ?? null, new Date().toISOString()).run();
 	await env.DB.prepare("UPDATE tasks SET download_count = download_count + 1 WHERE name = ?").bind(name).run();
 	return json(await taskCounts(env, name));
+}
+
+// --- manifest: CLI install entry point ---
+// Reads published tasks from D1 and maps each to its latest version's loose
+// files in R2. One source of truth (no static + dynamic merge); CLI fetches
+// this JSON then pulls each file URL individually.
+
+export async function buildManifest(request, env) {
+	const rows = await env.DB.prepare(
+		`SELECT name, title, description, author_name, latest_version
+		FROM tasks
+		WHERE latest_version IS NOT NULL
+		ORDER BY name`,
+	).all();
+	const origin = new URL(request.url).origin;
+	const tasks = await Promise.all((rows.results ?? []).map(async (task) => {
+		const submission = await env.DB.prepare(
+			"SELECT file_list FROM task_submissions WHERE name = ? AND version = ? AND status = 'published' ORDER BY updated_at DESC LIMIT 1",
+		).bind(task.name, task.latest_version).first();
+		const fileList = JSON.parse(submission?.file_list ?? "[]");
+		const files = Object.fromEntries(fileList.map((file) => [
+			file,
+			`${origin}/api/tasks/${encodeURIComponent(task.name)}/files?f=${encodeURIComponent(file)}`,
+		]));
+		return { name: task.name, title: task.title, description: task.description, author: task.author_name, version: task.latest_version, files };
+	}));
+	return json({ version: 1, generatedAt: new Date().toISOString(), tasks });
+}
+
+export async function serveTaskFile(env, name, file) {
+	assertSafePath(file);
+	const task = await env.DB.prepare("SELECT latest_version FROM tasks WHERE name = ?").bind(name).first();
+	if (!task?.latest_version) return json({ error: "task_not_found" }, { status: 404 });
+	const object = await env.TASK_UPLOADS.get(`tasks/${name}/${task.latest_version}/${file}`);
+	if (!object) return json({ error: "file_not_found" }, { status: 404 });
+	return new Response(object.body, {
+		headers: { "content-type": "text/plain; charset=utf-8" },
+	});
 }

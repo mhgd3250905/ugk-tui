@@ -3,7 +3,7 @@ import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { defaultAgentDir } from "./paths.js";
 
-export const OFFICIAL_MANIFEST_URL = "https://ugk-task-share.pages.dev/manifest.json";
+export const OFFICIAL_MANIFEST_URL = "https://ugk-task-share.pages.dev/api/manifest";
 
 const REQUIRED_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"];
 const NAME_RE = /^[A-Za-z0-9_-]+$/;

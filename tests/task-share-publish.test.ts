@@ -59,7 +59,7 @@ test("publishTask sends multipart with name/version/artifact and Bearer token", 
 		return new Response(JSON.stringify({ status: "pending", name: "demo-task", version: "1.0.0" }), { headers: { "content-type": "application/json" } });
 	};
 
-	const result = await publishTask(sampleLoaded(), "1.0.0", "TOKEN", "https://m.test", undefined, { fetchFn });
+	const result = await publishTask(sampleLoaded(), "1.0.0", "TOKEN", "https://m.test", undefined, undefined, { fetchFn });
 
 	assert.equal(result.ok, true);
 	assert.equal(result.name, "demo-task");
@@ -68,7 +68,8 @@ test("publishTask sends multipart with name/version/artifact and Bearer token", 
 	assert.equal(captured!.headers.get("authorization"), "Bearer TOKEN");
 	assert.equal(captured!.form.get("name"), "demo-task");
 	assert.equal(captured!.form.get("version"), "1.0.0");
-	assert.equal(captured!.form.get("title"), "a demo task"); // defaults to description
+	assert.equal(captured!.form.get("title"), "demo-task"); // defaults to name when no custom title
+	assert.equal(captured!.form.get("description"), "a demo task"); // description falls back to taskbook.description
 	const artifact = captured!.form.get("artifact") as File;
 	assert.equal(artifact.type, "application/zip");
 	assert.match(artifact.name, /demo-task-1\.0\.0\.zip$/);
@@ -80,14 +81,27 @@ test("publishTask uses an explicit title when provided", async () => {
 		captured = init.body as FormData;
 		return new Response(JSON.stringify({ status: "pending" }), { headers: { "content-type": "application/json" } });
 	};
-	await publishTask(sampleLoaded(), "2.0.0", "T", "https://m.test", "Custom Title", { fetchFn });
+	await publishTask(sampleLoaded(), "2.0.0", "T", "https://m.test", "Custom Title", undefined, { fetchFn });
 	assert.equal(captured!.get("title"), "Custom Title");
+});
+
+test("publishTask uses an explicit description when provided (separate from title)", async () => {
+	// title and description are distinct fields; a custom short description must
+	// override the long agent-facing taskbook.description.
+	let captured: FormData | null = null;
+	const fetchFn = async (_url: string, init: any) => {
+		captured = init.body as FormData;
+		return new Response(JSON.stringify({ status: "pending" }), { headers: { "content-type": "application/json" } });
+	};
+	await publishTask(sampleLoaded(), "3.0.0", "T", "https://m.test", "Short Title", "One-line summary for the card", { fetchFn });
+	assert.equal(captured!.get("title"), "Short Title");
+	assert.equal(captured!.get("description"), "One-line summary for the card");
 });
 
 test("publishTask throws with the server error detail on failure", async () => {
 	const fetchFn = async () => new Response(JSON.stringify({ error: "invalid_version" }), { status: 400, headers: { "content-type": "application/json" } });
 	await assert.rejects(
-		() => publishTask(sampleLoaded(), "bad", "T", "https://m.test", undefined, { fetchFn }),
+		() => publishTask(sampleLoaded(), "bad", "T", "https://m.test", undefined, undefined, { fetchFn }),
 		/invalid_version/,
 	);
 });

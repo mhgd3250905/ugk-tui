@@ -42,7 +42,10 @@ export function buildTaskZip(loaded: LoadedTaskbook): Uint8Array {
 
 /**
  * 打包并上传 taskbook 到市场。
- * @param title 可选自定义标题,缺省取 taskbook.description。
+ * @param title 自定义标题(市场卡片用);空则回退 taskbook.name。
+ * @param description 自定义一句话描述(市场卡片用);空则回退 taskbook.description。
+ *   两者分离是因为 taskbook.description 是给 agent 的运行指令(常很长),
+ *   不适合市场卡片给人看的简短文案。
  * @throws Error 上传失败(网络/鉴权/校验)。
  */
 export async function publishTask(
@@ -51,6 +54,7 @@ export async function publishTask(
 	token: string,
 	marketplaceUrl: string,
 	title: string | undefined,
+	description: string | undefined,
 	deps: TaskSharePublishDeps = {},
 ): Promise<PublishResult> {
 	const fetchFn = deps.fetchFn ?? fetch;
@@ -60,8 +64,8 @@ export async function publishTask(
 	const form = new FormData();
 	form.set("name", name);
 	form.set("version", version);
-	form.set("title", title || loaded.taskbook.description);
-	form.set("description", loaded.taskbook.description);
+	form.set("title", title || name);
+	form.set("description", description || loaded.taskbook.description);
 	form.set("artifact", new File([zip as BlobPart], `${name}-${version}.zip`, { type: "application/zip" }));
 
 	const res = await fetchFn(`${marketplaceUrl}/api/tasks/submit`, {

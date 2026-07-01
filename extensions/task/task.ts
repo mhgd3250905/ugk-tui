@@ -1733,10 +1733,20 @@ async function handleTaskPublish(ctx: any, name: string | undefined): Promise<vo
 		return;
 	}
 
-	// 3. 打包上传(内部清空 runs 历史,只传 5 核心文件)。
+	// 3. 问市场展示文案。taskbook.description 是给 agent 的运行指令(常很长),
+	// 不适合市场卡片给人看的标题/描述。这里让用户确认/改写,默认值取 taskbook
+	// 字段但鼓励改短。title 默认用 name,description 默认截断取首句。
+	const rawDesc = loaded.taskbook.description ?? "";
+	const descDefault = rawDesc.length > 100 ? rawDesc.slice(0, 97) + "…" : rawDesc;
+	const title = await ctx.ui?.input?.(`市场展示标题(简短)`, finalName);
+	if (title === undefined) { ctx.ui.notify("已取消上传。", "info"); return; }
+	const description = await ctx.ui?.input?.(`一句话描述(市场卡片用)`, descDefault);
+	if (description === undefined) { ctx.ui.notify("已取消上传。", "info"); return; }
+
+	// 4. 打包上传(内部清空 runs 历史,只传 5 核心文件)。
 	ctx.ui.notify(`正在上传 "${finalName}" v${version.trim()}...`, "info");
 	try {
-		const result = await publishTask(loaded, version.trim(), config.token!, config.marketplaceUrl, undefined);
+		const result = await publishTask(loaded, version.trim(), config.token!, config.marketplaceUrl, title.trim() || undefined, description.trim() || undefined);
 		ctx.ui.notify(`✅ 已提交 "${result.name}" v${result.version},等待管理员审核。`, "info");
 	} catch (error) {
 		ctx.ui.notify(`上传失败: ${error instanceof Error ? error.message : String(error)}`, "error");

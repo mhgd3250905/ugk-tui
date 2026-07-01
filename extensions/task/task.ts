@@ -49,6 +49,8 @@ import {
 	type TaskState,
 } from "./task-state.ts";
 import { appendRunToTaskbook, assertValidContract, deleteTaskbook, listTaskbooks, loadTaskbook, renameTaskbook, saveTaskbook, type LoadedTaskbook } from "./task-book.ts";
+import { ensureCliAuth, readTaskShareConfig } from "./task-share-auth.ts";
+import { publishTask } from "./task-share-publish.ts";
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
@@ -180,6 +182,7 @@ const MENU_TO_ACTION = new Map<string, string | undefined>([
 	["自动保存并自证", "save"],
 	["自动保存 taskbook", "save"],
 	["删除 taskbook", "delete"],
+	["上传到市场", "publish"],
 	["进入复盘", "continue-review"],
 	["继续复盘", "continue-review"],
 	["修正本 taskbook", "repair"],
@@ -217,7 +220,7 @@ export function getTaskCommandMenuOptions(state: TaskState): string[] {
 	}
 	if (state.phase === "executing") return ["进入复盘", "停止本次执行", "Exit"];
 	if (state.phase === "reviewing") return ["自动保存并自证", "继续复盘", "放弃", "退出 Task", "Exit"];
-	return ["新建任务", "运行 taskbook(复用)", "查看 taskbook 详情", "编辑 taskbook", "重命名 taskbook", "删除 taskbook", "Exit"];
+	return ["新建任务", "运行 taskbook(复用)", "查看 taskbook 详情", "编辑 taskbook", "重命名 taskbook", "删除 taskbook", "上传到市场", "Exit"];
 }
 
 export async function resolveTaskCommandArgs(args: string, ctx: any, state: TaskState, runActive = false, hasLastRunReview = false): Promise<string | undefined> {
@@ -1700,6 +1703,46 @@ async function handleTaskRename(ctx: any, name: string | undefined, tokens: stri
 	}
 }
 
+// 上传 taskbook 到分享市场(首次走市场网站 OAuth 中转授权,凭证存本地复用)。
+// 设计见 docs/design/2026-07-01-task-publish-from-tui.md §6.6。
+async function handleTaskPublish(ctx: any, name: string | undefined): Promise<void> {
+	const finalName = await chooseTaskbookName(ctx, name);
+	if (!finalName) return;
+	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
+	if (!loaded) {
+		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
+		return;
+	}
+
+	// 1. 确保授权:无本地凭证则走 OAuth 中转(浏览器登录 → 轮询拿 cli_token)。
+	let config = readTaskShareConfig();
+	if (!config.token) {
+		try {
+			const auth = await ensureCliAuth((message, level) => ctx.ui?.notify?.(message, level));
+			config = auth.config;
+		} catch (error) {
+			ctx.ui.notify(`授权失败: ${error instanceof Error ? error.message : String(error)}`, "error");
+			return;
+		}
+	}
+
+	// 2. 问版本号(默认 1.0.0;重复发布需升版本,由服务端 version 唯一约束兜底)。
+	const version = await ctx.ui?.input?.(`上传版本号`, "1.0.0");
+	if (!version?.trim()) {
+		ctx.ui.notify("已取消上传。", "info");
+		return;
+	}
+
+	// 3. 打包上传(内部清空 runs 历史,只传 5 核心文件)。
+	ctx.ui.notify(`正在上传 "${finalName}" v${version.trim()}...`, "info");
+	try {
+		const result = await publishTask(loaded, version.trim(), config.token!, config.marketplaceUrl, undefined);
+		ctx.ui.notify(`✅ 已提交 "${result.name}" v${result.version},等待管理员审核。`, "info");
+	} catch (error) {
+		ctx.ui.notify(`上传失败: ${error instanceof Error ? error.message : String(error)}`, "error");
+	}
+}
+
 export function registerTask(pi: ExtensionAPI): void {
 	(pi as any).registerMessageRenderer?.("task-progress", renderTaskProgressMessage);
 	(pi as any).registerMessageRenderer?.(TASK_REVIEW_PROMPT_TYPE, renderTaskReviewPromptMessage);
@@ -2159,6 +2202,7 @@ export function registerTask(pi: ExtensionAPI): void {
 			});
 			if (action === "delete") return await handleTaskDelete(ctx, name, tokens);
 			if (action === "rename") return await handleTaskRename(ctx, name, tokens);
+			if (action === "publish") return await handleTaskPublish(ctx, name);
 			if (action === "stop" || action === "exit" || action === "toggle" || action === "abort") {
 				state = abortTask(state);
 				persistState();
@@ -2170,7 +2214,7 @@ export function registerTask(pi: ExtensionAPI): void {
 				ctx.ui.notify("Task disabled.", "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /task list|show|new|run|edit|save|delete|toggle|exit", "warning");
+			ctx.ui.notify("Usage: /task list|show|new|run|edit|save|delete|publish|toggle|exit", "warning");
 	}
 
 	pi.registerCommand("task", {

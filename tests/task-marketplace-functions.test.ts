@@ -23,6 +23,8 @@ import {
 	submitTask,
 	toggleFavorite,
 	toggleLike,
+	startCliAuth,
+	pollCliAuth,
 } from "../functions/_lib/marketplace.js";
 
 // Build a minimal valid task package zip in-memory for submit tests.
@@ -57,6 +59,8 @@ function createDb() {
 	const reports = [];
 	const likes = new Set();
 	const favorites = new Set();
+	const cliPending = new Map(); // challenge -> { created_at }
+	const cliTokens = []; // { token, user_id, challenge, created_at }
 	let nextUserId = 1;
 	let nextSubmissionId = 1;
 	return {
@@ -89,6 +93,19 @@ function createDb() {
 					if (sql.startsWith("SELECT download_count")) return tasks.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT latest_version FROM tasks")) return tasks.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT file_list FROM task_submissions")) return submissions.find((item) => item.name === this.values[0] && item.version === this.values[1] && item.status === "published") ?? null;
+					if (sql.startsWith("SELECT 1 FROM cli_auth_pending")) return cliPending.has(this.values[0]) ? { "1": 1 } : null;
+					if (sql.startsWith("SELECT token, user_id, created_at FROM cli_tokens")) {
+						const tok = cliTokens.filter((t) => t.challenge === this.values[0]).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+						return tok ? { token: tok.token, user_id: tok.user_id, created_at: tok.created_at } : null;
+					}
+					if (sql.startsWith("SELECT login, avatar_url FROM users WHERE id = ?")) {
+						const u = usersById.get(this.values[0]);
+						return u ? { login: u.login, avatar_url: u.avatar_url } : null;
+					}
+					if (sql.startsWith("SELECT users.* FROM cli_tokens JOIN users")) {
+						const tok = cliTokens.find((t) => t.token === this.values[0]);
+						return tok ? (usersById.get(tok.user_id) ?? null) : null;
+					}
 					throw new Error(`Unhandled first SQL: ${sql}`);
 				},
 				async all() {
@@ -192,6 +209,31 @@ function createDb() {
 					}
 					if (sql.startsWith("UPDATE tasks SET download_count")) {
 						tasks.get(this.values[0]).download_count++;
+						return { success: true };
+					}
+					if (sql.startsWith("INSERT OR REPLACE INTO cli_auth_pending") || sql.startsWith("INSERT INTO cli_auth_pending")) {
+						const [challenge, createdAt] = this.values;
+						cliPending.set(challenge, { created_at: createdAt });
+						return { success: true };
+					}
+					if (sql.startsWith("DELETE FROM cli_auth_pending WHERE challenge = ?")) {
+						cliPending.delete(this.values[0]);
+						return { success: true };
+					}
+					if (sql.startsWith("DELETE FROM cli_auth_pending WHERE created_at < ?")) {
+						for (const [k, v] of cliPending) if (v.created_at < this.values[0]) cliPending.delete(k);
+						return { success: true };
+					}
+					if (sql.startsWith("INSERT INTO cli_tokens")) {
+						const [token, userId, challenge, createdAt] = this.values;
+						cliTokens.push({ token, user_id: userId, challenge, created_at: createdAt });
+						return { success: true, meta: { last_row_id: cliTokens.length } };
+					}
+					if (sql.startsWith("DELETE FROM cli_tokens WHERE challenge = ? AND created_at < ?")) {
+						// drop older sibling tokens for this challenge, keep the newest
+						for (let i = cliTokens.length - 1; i >= 0; i--) {
+							if (cliTokens[i].challenge === this.values[0] && cliTokens[i].created_at < this.values[1]) cliTokens.splice(i, 1);
+						}
 						return { success: true };
 					}
 					throw new Error(`Unhandled run SQL: ${sql}`);
@@ -599,3 +641,229 @@ test("stats detail rolls download events up by day", async () => {
 	assert.equal(detail.days[0].downloads, 1);
 	assert.match(detail.days[0].day, /^\d{4}-\d{2}-\d{2}$/);
 });
+
+// --- CLI publish auth (TUI -> site-brokered GitHub OAuth) ---
+
+async function seedUser(testEnv) {
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "https://avatar.test/u.png", new Date().toISOString()).run();
+	return await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+}
+
+test("startCliAuth records the challenge and returns the authorize url", async () => {
+	const testEnv = env();
+	const response = await startCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge: "a".repeat(64) }) }),
+		testEnv,
+	);
+	const body = await response.json();
+
+	assert.equal(response.status, 200);
+	assert.match(body.url, /\/cli-auth\?c=/);
+});
+
+test("startCliAuth rejects a malformed challenge", async () => {
+	const testEnv = env();
+	const response = await startCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge: "short" }) }),
+		testEnv,
+	);
+	const body = await response.json();
+
+	assert.equal(response.status, 400);
+	assert.equal(body.error, "invalid_challenge");
+});
+
+test("pollCliAuth reports pending while the user has not logged in", async () => {
+	const testEnv = env();
+	await startCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge: "b".repeat(64) }) }),
+		testEnv,
+	);
+	const response = await pollCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge: "b".repeat(64) }) }),
+		testEnv,
+	);
+	const body = await response.json();
+
+	assert.equal(body.status, "pending");
+});
+
+test("pollCliAuth returns the token after the callback signs one", async () => {
+	const testEnv = env();
+	const cookie = await seedUser(testEnv);
+	const challenge = "c".repeat(64);
+	await startCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge }) }),
+		testEnv,
+	);
+	// Simulate the OAuth callback signing a cli_token for this challenge.
+	const callback = await githubCallback(
+		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1`, { headers: { cookie: `ugk_oauth_state=s1; ugk_cli_challenge=${challenge}` } }),
+		testEnv,
+		{
+			fetch: async (url) => {
+				if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "token" }), { headers: { "content-type": "application/json" } });
+				return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
+			},
+			randomUUID: () => "11111111-2222-3333-4444-555555555555",
+		},
+	);
+	assert.equal(callback.headers.get("location"), "/cli-auth?cli=done");
+
+	const poll = await pollCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge }) }),
+		testEnv,
+	);
+	const polled = await poll.json();
+
+	assert.equal(polled.status, "ok");
+	assert.equal(polled.login, "octo");
+	assert.equal(polled.token, "11111111222233334444555555555555"); // uuid with dashes stripped
+	// Challenge is single-use: pending cleared after claim.
+	assert.equal((await testEnv.DB.prepare("SELECT 1 FROM cli_auth_pending WHERE challenge = ?").bind(challenge).first()), null);
+});
+
+test("pollCliAuth reports an error for an unknown challenge", async () => {
+	const testEnv = env();
+	const response = await pollCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge: "z".repeat(64) }) }),
+		testEnv,
+	);
+	const body = await response.json();
+
+	assert.equal(response.status, 410);
+	assert.equal(body.status, "error");
+});
+
+test("requireUser accepts a valid Bearer cli_token", async () => {
+	const testEnv = env();
+	const cookie = await seedUser(testEnv);
+	const challenge = "d".repeat(64);
+	await startCliAuth(
+		new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge }) }),
+		testEnv,
+	);
+	await githubCallback(
+		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1`, { headers: { cookie: `ugk_oauth_state=s1; ugk_cli_challenge=${challenge}` } }),
+		testEnv,
+		{
+			fetch: async (url) => {
+				if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "token" }), { headers: { "content-type": "application/json" } });
+				return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
+			},
+			randomUUID: () => "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		},
+	);
+	const poll = await (await pollCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv)).json();
+	assert.equal(poll.status, "ok");
+
+	// Submit via Bearer token (no cookie session) should authenticate the user.
+	const form = new FormData();
+	form.set("name", "bearer-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Bearer Task");
+	form.set("description", "Authed via cli_token");
+	form.set("artifact", new File([taskZip("bearer-task") as BlobPart], "bearer-task.zip", { type: "application/zip" }));
+	const response = await submitTask(
+		new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { authorization: `Bearer ${poll.token}` }, body: form }),
+		testEnv,
+	);
+	const submitted = await response.json();
+
+	assert.equal(response.status, 200);
+	assert.equal(submitted.name, "bearer-task");
+	assert.equal(submitted.status, "pending");
+});
+
+test("requireUser rejects an invalid Bearer token", async () => {
+	const testEnv = env();
+	const form = new FormData();
+	form.set("name", "x");
+	form.set("version", "1.0.0");
+	form.set("title", "X");
+	form.set("description", "X");
+	form.set("artifact", new File([taskZip("x") as BlobPart], "x.zip", { type: "application/zip" }));
+	const response = await submitTask(
+		new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { authorization: "Bearer not-a-real-token" }, body: form }),
+		testEnv,
+	);
+	const body = await response.json();
+
+	assert.equal(response.status, 401);
+	assert.equal(body.error, "invalid_token");
+});
+
+test("githubCallback without a cli_challenge cookie redirects home as before", async () => {
+	const testEnv = env();
+	const response = await githubCallback(
+		new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1", { headers: { cookie: "ugk_oauth_state=s1" } }),
+		testEnv,
+		{
+			fetch: async (url) => {
+				if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "token" }), { headers: { "content-type": "application/json" } });
+				return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
+			},
+		},
+	);
+
+	assert.equal(response.headers.get("location"), "/");
+});
+
+test("githubCallback with a stale cli_challenge cookie (challenge no longer pending) falls back to a normal home redirect", async () => {
+	// review M1: a lingering cli cookie after an interrupted CLI auth must not
+	// hijack every later web login. createCliToken refuses to sign when the
+	// challenge isn't pending, so the callback redirects to "/" not "/cli-auth".
+	const testEnv = env();
+	const response = await githubCallback(
+		new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1", { headers: { cookie: "ugk_oauth_state=s1; ugk_cli_challenge=stale-not-pending" } }),
+		testEnv,
+		{
+			fetch: async (url) => {
+				if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "token" }), { headers: { "content-type": "application/json" } });
+				return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
+			},
+			randomUUID: () => "11111111-2222-3333-4444-555555555555",
+		},
+	);
+
+	assert.equal(response.headers.get("location"), "/");
+	// cli cookie is cleared either way
+	assert.match(response.headers.get("set-cookie") ?? "", /ugk_cli_challenge=;/);
+});
+
+test("createCliToken refuses a second signing for an already-claimed challenge (caps token growth)", async () => {
+	// review H2/M1: the first callback deletes the pending row inside
+	// createCliToken, so a second OAuth completion for the same challenge finds
+	// no pending entry and signs nothing. This is what prevents duplicate
+	// long-lived tokens piling up per challenge.
+	const testEnv = env();
+	const cookie = await seedUser(testEnv);
+	const challenge = "e".repeat(64);
+	await startCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv);
+
+	// first completion: signs a token
+	const cb1 = await githubCallback(new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1", { headers: { cookie: `ugk_oauth_state=s1; ugk_cli_challenge=${challenge}` } }), testEnv, {
+		fetch: async (url) => {
+			if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } });
+			return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
+		},
+		randomUUID: () => "11111111-2222-3333-4444-555555555555",
+	});
+	assert.equal(cb1.headers.get("location"), "/cli-auth?cli=done");
+
+	// second completion for the SAME challenge: pending is gone → no token, normal home redirect
+	const cb2 = await githubCallback(new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s2", { headers: { cookie: `ugk_oauth_state=s2; ugk_cli_challenge=${challenge}` } }), testEnv, {
+		fetch: async (url) => {
+			if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } });
+			return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
+		},
+		randomUUID: () => "22222222-3333-4444-5555-666666666666",
+	});
+	assert.equal(cb2.headers.get("location"), "/");
+
+	// poll returns the one signed token
+	const poll = await (await pollCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv)).json();
+	assert.equal(poll.status, "ok");
+	assert.equal(poll.token, "11111111222233334444555555555555");
+});
+

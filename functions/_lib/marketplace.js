@@ -8,6 +8,12 @@ const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 const REQUIRED_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"];
 
+// CLI publish auth: market site brokers GitHub OAuth for the TUI. TUI POSTs a
+// challenge, user logs in on the site, callback detects the cli_challenge cookie
+// and signs a cli_token the TUI polls for. See migrations/0007_cli_auth.sql.
+const CLI_CHALLENGE_COOKIE = "ugk_cli_challenge";
+const CLI_AUTH_TTL_SECONDS = 5 * 60; // pending challenge expiry
+
 const encoder = new TextEncoder();
 
 function bytesToBase64Url(bytes) {
@@ -253,9 +259,24 @@ export async function githubCallback(request, env, deps = {}) {
 		"INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(github_id) DO UPDATE SET login = excluded.login, avatar_url = excluded.avatar_url",
 	).bind(String(githubUser.id), githubUser.login, githubUser.avatar_url ?? "", now).run();
 	const user = await env.DB.prepare("SELECT * FROM users WHERE github_id = ?").bind(String(githubUser.id)).first();
-	const headers = new Headers({ location: "/" });
+	const cliChallenge = parseCookies(request)[CLI_CHALLENGE_COOKIE];
+	const headers = new Headers();
+	// CLI publish flow: a challenge cookie means the TUI initiated this OAuth
+	// hop. Sign a cli_token bound to the challenge (TUI polls for it), then send
+	// the browser to the cli-auth page's success view. Still set the session
+	// cookie so the browser is logged in too — no separate login needed later.
+	if (cliChallenge) {
+		const cliToken = await createCliToken(user, cliChallenge, env, deps);
+		// If the challenge is no longer pending (expired/already-claimed/stale),
+		// don't hijack this login into the CLI flow — fall through to a normal
+		// home redirect. The stale cookie is cleared below either way.
+		headers.set("location", cliToken ? `/cli-auth?cli=done` : "/");
+	} else {
+		headers.set("location", "/");
+	}
 	headers.append("set-cookie", await createSessionCookie(user, env));
 	headers.append("set-cookie", `${OAUTH_STATE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
+	headers.append("set-cookie", `${CLI_CHALLENGE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
 	return new Response(null, { status: 302, headers });
 }
 
@@ -296,6 +317,22 @@ export function logout() {
 	});
 }
 
+// CLI publish flow: Bearer token (random, stored in cli_tokens) lets the TUI
+// authenticate without a cookie. Isolated from requireUser on purpose — Bearer
+// must NOT silently widen every cookie-authed write endpoint (like/favorite/
+// report/...), so only submitTask opts into it. ponytail: design doc proposed
+// HMAC-signed user_id, but that can't be revoked without a denylist; a random
+// token validated by table lookup is natively revocable (DELETE FROM cli_tokens).
+async function requireBearerUser(request, env) {
+	const bearer = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
+	if (!bearer) return { response: json({ error: "login_required" }, { status: 401 }) };
+	const row = await env.DB.prepare(
+		"SELECT users.* FROM cli_tokens JOIN users ON users.id = cli_tokens.user_id WHERE cli_tokens.token = ?",
+	).bind(bearer).first();
+	if (row) return { user: row };
+	return { response: json({ error: "invalid_token" }, { status: 401 }) };
+}
+
 async function requireUser(request, env) {
 	const user = await sessionUser(request, env);
 	if (!user) return { response: json({ error: "login_required" }, { status: 401 }) };
@@ -310,8 +347,75 @@ async function requireAdmin(request, env) {
 	return auth;
 }
 
+// --- CLI publish auth (TUI -> site-brokered GitHub OAuth) ---
+// TUI generates challenge, POSTs here; site records it pending. User then
+// visits /cli-auth?c=<challenge>, which stashes it in a cookie and kicks off
+// GitHub OAuth. On callback, createCliToken signs a cli_token bound to the
+// challenge; TUI polls pollCliAuth to retrieve it.
+
+export async function startCliAuth(request, env, deps = {}) {
+	const body = await request.json().catch(() => ({}));
+	const challenge = cleanText(body.challenge);
+	if (!challenge || !/^[A-Za-z0-9_-]{16,128}$/.test(challenge)) {
+		return json({ error: "invalid_challenge" }, { status: 400 });
+	}
+	const now = new Date().toISOString();
+	// Clean expired pending entries on write (lazy GC; no cron in Workers free).
+	await env.DB.prepare("DELETE FROM cli_auth_pending WHERE created_at < ?").bind(new Date(Date.now() - CLI_AUTH_TTL_SECONDS * 1000).toISOString()).run();
+	await env.DB.prepare(
+		"INSERT OR REPLACE INTO cli_auth_pending (challenge, created_at) VALUES (?, ?)",
+	).bind(challenge, now).run();
+	const origin = env.SITE_URL ?? new URL(request.url).origin;
+	return json({ url: `${origin}/cli-auth?c=${encodeURIComponent(challenge)}` });
+}
+
+export async function pollCliAuth(request, env) {
+	const body = await request.json().catch(() => ({}));
+	const challenge = cleanText(body.challenge);
+	if (!challenge) return json({ error: "invalid_challenge" }, { status: 400 });
+	const tokenRow = await env.DB.prepare(
+		"SELECT token, user_id, created_at FROM cli_tokens WHERE challenge = ? ORDER BY created_at DESC LIMIT 1",
+	).bind(challenge).first();
+	if (tokenRow) {
+		const user = await env.DB.prepare("SELECT login, avatar_url FROM users WHERE id = ?").bind(tokenRow.user_id).first();
+		// Claim: drop pending + any older sibling tokens for this challenge,
+		// keeping only the newest (the one returned). submitTask looks up
+		// cli_tokens BY token (not challenge), so the kept token stays usable;
+		// revocation stays a manual DELETE. A repeated poll of the same challenge
+		// returns the same (still-valid) token — that's harmless idempotency for
+		// a TUI retry, and only the 32-byte-random challenge holder can poll it.
+		await env.DB.prepare("DELETE FROM cli_auth_pending WHERE challenge = ?").bind(challenge).run();
+		await env.DB.prepare("DELETE FROM cli_tokens WHERE challenge = ? AND created_at < ?").bind(challenge, tokenRow.created_at ?? "").run();
+		return json({ status: "ok", token: tokenRow.token, login: user?.login ?? null, avatarUrl: user?.avatar_url ?? null });
+	}
+	const pending = await env.DB.prepare("SELECT 1 FROM cli_auth_pending WHERE challenge = ?").bind(challenge).first();
+	if (pending) return json({ status: "pending" });
+	return json({ status: "error", error: "challenge_expired_or_unknown" }, { status: 410 });
+}
+
+// Called from githubCallback when a cli_challenge cookie is present: signs a
+// random cli_token bound to (user, challenge) so the polling TUI can claim it.
+// Returns null (and signs nothing) if the challenge isn't pending — this guards
+// the normal web-login path against a stale cli cookie that lingered after a
+// previous CLI auth was interrupted/expired (review M1): without it, a stale
+// cookie would hijack every subsequent web login into the CLI flow.
+export async function createCliToken(user, challenge, env, deps = {}) {
+	const pending = await env.DB.prepare("SELECT 1 FROM cli_auth_pending WHERE challenge = ?").bind(challenge).first();
+	if (!pending) return null;
+	const token = (deps.randomUUID ?? crypto.randomUUID)().replaceAll("-", "");
+	await env.DB.prepare(
+		"INSERT INTO cli_tokens (token, user_id, challenge, created_at) VALUES (?, ?, ?, ?)",
+	).bind(token, user.id, challenge, new Date().toISOString()).run();
+	await env.DB.prepare("DELETE FROM cli_auth_pending WHERE challenge = ?").bind(challenge).run();
+	return token;
+}
+
 export async function submitTask(request, env) {
-	const auth = await requireUser(request, env);
+	// Submit is the only endpoint that accepts BOTH a cookie session (web upload
+	// page) and a Bearer cli_token (TUI publish). Bearer is preferred when the
+	// Authorization header is present; otherwise fall back to the cookie session.
+	const hasBearer = request.headers.get("authorization")?.startsWith("Bearer ");
+	const auth = hasBearer ? await requireBearerUser(request, env) : await requireUser(request, env);
 	if (auth.response) return auth.response;
 	const form = await request.formData();
 	const name = cleanText(form.get("name"));

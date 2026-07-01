@@ -141,3 +141,25 @@ test("task share page exposes marketplace actions for every official task", asyn
 		assert.deepEqual(zipEntryNames(zipPath), Object.keys(task.files).sort());
 	}
 });
+
+test("task share pages use the Binance-style design system", async () => {
+	const pages = [
+		path.join(root, "index.html"),
+		path.join(root, "account", "index.html"),
+		path.join(root, "upload", "index.html"),
+		path.join(root, "admin", "index.html"),
+		path.join(root, "tasks", "video-downloader", "index.html"),
+	];
+
+	for (const file of pages) {
+		const html = await readFile(file, "utf8");
+		assert.match(html, /data-design="binance"/);
+		assert.match(html, /--canvas:#0b0e11/);
+		assert.match(html, /--yellow:#fcd535/);
+		assert.match(html, /BinancePlex/);
+		assert.doesNotMatch(html, /linear-gradient|glass|blur\(|orb|bokeh/i);
+	}
+
+	assert.match(await readFile(path.join(root, "upload", "index.html"), "utf8"), /data-surface="transactional"/);
+	assert.match(await readFile(path.join(root, "admin", "index.html"), "utf8"), /data-surface="transactional"/);
+});

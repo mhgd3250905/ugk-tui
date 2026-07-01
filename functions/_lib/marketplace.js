@@ -2,6 +2,7 @@ const SESSION_COOKIE = "ugk_session";
 const OAUTH_STATE_COOKIE = "ugk_oauth_state";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 const TASK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/;
+const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 
 const encoder = new TextEncoder();
 
@@ -50,6 +51,14 @@ function cleanText(value) {
 
 function safeFileName(value) {
 	return cleanText(value).replaceAll("\\", "/").split("/").pop().replace(/[^A-Za-z0-9._-]/g, "-") || "task.zip";
+}
+
+function invalidSourceUrlError(value) {
+	try {
+		return /^https?:$/i.test(new URL(value).protocol) ? null : "invalid_url_scheme";
+	} catch {
+		return "invalid_url";
+	}
 }
 
 async function signature(data, secret) {
@@ -244,6 +253,11 @@ export async function submitTask(request, env) {
 	if (!TASK_NAME_RE.test(name)) return json({ error: "invalid_name" }, { status: 400 });
 	if (!title || !description) return json({ error: "missing_required_fields" }, { status: 400 });
 	if (!sourceUrl && !hasArtifact) return json({ error: "source_required" }, { status: 400 });
+	if (sourceUrl) {
+		const error = invalidSourceUrlError(sourceUrl);
+		if (error) return json({ error }, { status: 400 });
+	}
+	if (hasArtifact && artifact.size > MAX_ARTIFACT_BYTES) return json({ error: "artifact_too_large" }, { status: 413 });
 
 	let artifactKey = null;
 	let artifactName = null;

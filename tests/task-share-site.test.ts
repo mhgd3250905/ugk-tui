@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import vm from "node:vm";
 
 const root = path.resolve("docs", "task-share");
 const requiredFiles = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"];
@@ -27,6 +28,17 @@ function zipEntryNames(filePath: string) {
 		offset += 46 + nameLength + extraLength + commentLength;
 	}
 	return names.sort();
+}
+
+function runGeneratedSafeHref(html: string, url: string) {
+	const script = html.match(/<script>([\s\S]*)<\/script><\/body><\/html>$/)?.[1] ?? "";
+	const escLine = script.split("\n").find((line) => line.startsWith("function esc("));
+	const safeHrefLine = script.split("\n").find((line) => line.startsWith("function safeHref("));
+	assert.ok(escLine, "generated script should define esc");
+	assert.ok(safeHrefLine, "generated script should define safeHref");
+	const context = { result: "" };
+	vm.runInNewContext(`${escLine}\n${safeHrefLine}\nresult=safeHref(${JSON.stringify(url)});`, context);
+	return context.result;
 }
 
 test("task share manifest describes official taskbooks with matching local files", async () => {
@@ -140,6 +152,18 @@ test("task share page exposes marketplace actions for every official task", asyn
 		assert.equal(existsSync(zipPath), true, `${zipPath} should exist`);
 		assert.deepEqual(zipEntryNames(zipPath), Object.keys(task.files).sort());
 	}
+});
+
+test("community task download links sanitize unsafe href values", async () => {
+	const html = await readFile(path.join(root, "index.html"), "utf8");
+
+	assert.equal(runGeneratedSafeHref(html, "javascript:alert(1)"), "#");
+	assert.equal(runGeneratedSafeHref(html, "data:text/html,<script>alert(1)</script>"), "#");
+	assert.equal(runGeneratedSafeHref(html, "//evil.example/task.zip"), "#");
+	assert.equal(runGeneratedSafeHref(html, "/api/submissions/12/artifact"), "/api/submissions/12/artifact");
+	assert.equal(runGeneratedSafeHref(html, "https://example.com/task.zip?q=<x>&n=1"), "https://example.com/task.zip?q=&lt;x&gt;&amp;n=1");
+	assert.equal(html.includes(`href="'+esc(t.downloadUrl||t.sourceUrl||'#')+'"`), false);
+	assert.equal(html.includes(`href="'+safeHref(t.downloadUrl||t.sourceUrl)+'"`), true);
 });
 
 test("task share pages use the Binance-style design system", async () => {

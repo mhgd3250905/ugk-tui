@@ -326,6 +326,77 @@ test("signed-in users submit taskbooks and see pending submissions", async () =>
 	assert.equal(testEnv.TASK_UPLOADS.objects.size, 1);
 });
 
+test("task submissions reject unsafe source URLs", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "unsafe-url-task");
+	form.set("title", "Unsafe URL Task");
+	form.set("description", "Attempts to persist a javascript URL");
+	form.set("sourceUrl", "javascript:alert(1)");
+
+	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 400);
+	assert.equal(body.error, "invalid_url_scheme");
+});
+
+test("task submissions reject malformed source URLs", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "bad-url-task");
+	form.set("title", "Bad URL Task");
+	form.set("description", "Attempts to persist an invalid URL");
+	form.set("sourceUrl", "not a url");
+
+	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 400);
+	assert.equal(body.error, "invalid_url");
+});
+
+test("task submissions accept https source URLs without an artifact", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "source-only-task");
+	form.set("title", "Source Only Task");
+	form.set("description", "Uses a reviewed source URL");
+	form.set("sourceUrl", "https://github.com/example/source-only-task");
+
+	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 200);
+	assert.equal(body.status, "pending");
+	assert.equal(body.sourceUrl, "https://github.com/example/source-only-task");
+	assert.equal(testEnv.TASK_UPLOADS.objects.size, 0);
+});
+
+test("task submissions reject oversized artifacts before R2 upload", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "huge-artifact-task");
+	form.set("title", "Huge Artifact Task");
+	form.set("description", "Attempts to upload too much data");
+	form.set("artifact", new File([new Uint8Array(25 * 1024 * 1024 + 1)], "huge.zip", { type: "application/zip" }));
+
+	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 413);
+	assert.equal(body.error, "artifact_too_large");
+	assert.equal(testEnv.TASK_UPLOADS.objects.size, 0);
+});
+
 test("admins publish pending submissions into the public queue", async () => {
 	const testEnv = env();
 	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();

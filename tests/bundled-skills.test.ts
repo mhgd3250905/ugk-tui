@@ -14,6 +14,7 @@ const mcpConfigureScriptPath = new URL("../skills/mcp-guide/scripts/configure_mc
 const bashGuidePath = new URL("../skills/bash-guide/SKILL.md", import.meta.url);
 const chromeCdpGuidePath = new URL("../skills/chrome-cdp-guide/SKILL.md", import.meta.url);
 const environmentDoctorPath = new URL("../skills/ugk-environment-doctor/SKILL.md", import.meta.url);
+const taskInstallGuidePath = new URL("../skills/task-install-guide/SKILL.md", import.meta.url);
 const environmentDoctorRefs = [
 	"windows-shell.md",
 	"chrome-cdp.md",
@@ -104,6 +105,17 @@ test("bundles Chrome CDP guide with broad tool-first trigger guidance", () => {
 	assert.match(skill, /do not control CDP through bash\/curl\/node scripts/i);
 	assert.match(skill, /action=launch/);
 	assert.match(skill, /Start with `chrome_cdp` `action=status`/);
+});
+
+test("bundles task install guide for pasted install commands", () => {
+	const skill = fs.readFileSync(taskInstallGuidePath, "utf8");
+	const { frontmatter } = parseFrontmatter(skill);
+
+	assert.equal(frontmatter.name, "task-install-guide");
+	assert.match(frontmatter.description as string, /ugk task install NAME/);
+	assert.match(frontmatter.description as string, /pastes|Chinese/i);
+	assert.match(skill, /Run `ugk task install <name>`/);
+	assert.match(skill, /Do not manually download/);
 });
 
 test("npm package excludes local MCP config files", () => {

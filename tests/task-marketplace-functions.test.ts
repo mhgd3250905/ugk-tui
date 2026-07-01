@@ -59,7 +59,7 @@ function createDb() {
 	const reports = [];
 	const likes = new Set();
 	const favorites = new Set();
-	const cliPending = new Map(); // challenge -> { created_at }
+	const cliPending = new Map(); // challenge -> { created_at, state }
 	const cliTokens = []; // { token, user_id, challenge, created_at }
 	let nextUserId = 1;
 	let nextSubmissionId = 1;
@@ -94,6 +94,10 @@ function createDb() {
 					if (sql.startsWith("SELECT latest_version FROM tasks")) return tasks.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT file_list FROM task_submissions")) return submissions.find((item) => item.name === this.values[0] && item.version === this.values[1] && item.status === "published") ?? null;
 					if (sql.startsWith("SELECT 1 FROM cli_auth_pending")) return cliPending.has(this.values[0]) ? { "1": 1 } : null;
+					if (sql.startsWith("SELECT challenge FROM cli_auth_pending WHERE state = ?")) {
+						const found = [...cliPending.entries()].find(([, v]) => v.state === this.values[0]);
+						return found ? { challenge: found[0] } : null;
+					}
 					if (sql.startsWith("SELECT 1 FROM task_versions WHERE task_name = ? AND version = ?")) return versions.some((v) => v.task_name === this.values[0] && v.version === this.values[1]) ? { ok: 1 } : null;
 					if (sql.startsWith("SELECT token, user_id, created_at FROM cli_tokens")) {
 						const tok = cliTokens.filter((t) => t.challenge === this.values[0]).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
@@ -104,7 +108,8 @@ function createDb() {
 						return u ? { login: u.login, avatar_url: u.avatar_url } : null;
 					}
 					if (sql.startsWith("SELECT users.* FROM cli_tokens JOIN users")) {
-						const tok = cliTokens.find((t) => t.token === this.values[0]);
+						// P0 H2: lookup now enforces created_at > cutoff (this.values[1]).
+						const tok = cliTokens.find((t) => t.token === this.values[0] && t.created_at > this.values[1]);
 						return tok ? (usersById.get(tok.user_id) ?? null) : null;
 					}
 					throw new Error(`Unhandled first SQL: ${sql}`);
@@ -214,7 +219,13 @@ function createDb() {
 					}
 					if (sql.startsWith("INSERT OR REPLACE INTO cli_auth_pending") || sql.startsWith("INSERT INTO cli_auth_pending")) {
 						const [challenge, createdAt] = this.values;
-						cliPending.set(challenge, { created_at: createdAt });
+						cliPending.set(challenge, { created_at: createdAt, state: cliPending.get(challenge)?.state ?? null });
+						return { success: true };
+					}
+					if (sql.startsWith("UPDATE cli_auth_pending SET state = ?")) {
+						const [stateVal, challenge] = this.values;
+						const row = cliPending.get(challenge);
+						if (row) row.state = stateVal;
 						return { success: true };
 					}
 					if (sql.startsWith("DELETE FROM cli_auth_pending WHERE challenge = ?")) {
@@ -234,6 +245,13 @@ function createDb() {
 						// drop older sibling tokens for this challenge, keep the newest
 						for (let i = cliTokens.length - 1; i >= 0; i--) {
 							if (cliTokens[i].challenge === this.values[0] && cliTokens[i].created_at < this.values[1]) cliTokens.splice(i, 1);
+						}
+						return { success: true };
+					}
+					if (sql.startsWith("DELETE FROM cli_tokens WHERE created_at < ?")) {
+						// P0 H2: lazy GC of expired tokens (requireBearerUser).
+						for (let i = cliTokens.length - 1; i >= 0; i--) {
+							if (cliTokens[i].created_at < this.values[0]) cliTokens.splice(i, 1);
 						}
 						return { success: true };
 					}
@@ -723,22 +741,28 @@ test("pollCliAuth reports pending while the user has not logged in", async () =>
 
 test("pollCliAuth returns the token after the callback signs one", async () => {
 	const testEnv = env();
-	const cookie = await seedUser(testEnv);
+	await seedUser(testEnv);
 	const challenge = "c".repeat(64);
 	await startCliAuth(
 		new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge }) }),
 		testEnv,
 	);
-	// Simulate the OAuth callback signing a cli_token for this challenge.
+	// P0 C1+C2: githubLogin binds state<->challenge server-side; callback
+	// reverse-looks-up challenge from the trusted oauth_state (no challenge cookie).
+	const loginState = "11111111-2222-3333-4444-555555555555";
+	await githubLogin(
+		new Request(`https://ugk-task-share.pages.dev/api/auth/github?cli_challenge=${challenge}`),
+		testEnv,
+		{ randomUUID: () => loginState },
+	);
 	const callback = await githubCallback(
-		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1`, { headers: { cookie: `ugk_oauth_state=s1; ugk_cli_challenge=${challenge}` } }),
+		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${loginState}`, { headers: { cookie: `ugk_oauth_state=${loginState}` } }),
 		testEnv,
 		{
 			fetch: async (url) => {
 				if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "token" }), { headers: { "content-type": "application/json" } });
 				return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
 			},
-			randomUUID: () => "11111111-2222-3333-4444-555555555555",
 		},
 	);
 	assert.equal(callback.headers.get("location"), "/cli-auth?cli=done");
@@ -751,7 +775,7 @@ test("pollCliAuth returns the token after the callback signs one", async () => {
 
 	assert.equal(polled.status, "ok");
 	assert.equal(polled.login, "octo");
-	assert.equal(polled.token, "11111111222233334444555555555555"); // uuid with dashes stripped
+	assert.match(polled.token, /^[0-9a-f]{32}$/); // createCliToken's random uuid, dashes stripped
 	// Challenge is single-use: pending cleared after claim.
 	assert.equal((await testEnv.DB.prepare("SELECT 1 FROM cli_auth_pending WHERE challenge = ?").bind(challenge).first()), null);
 });
@@ -776,15 +800,20 @@ test("requireUser accepts a valid Bearer cli_token", async () => {
 		new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge }) }),
 		testEnv,
 	);
+	const loginState = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+	await githubLogin(
+		new Request(`https://ugk-task-share.pages.dev/api/auth/github?cli_challenge=${challenge}`),
+		testEnv,
+		{ randomUUID: () => loginState },
+	);
 	await githubCallback(
-		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1`, { headers: { cookie: `ugk_oauth_state=s1; ugk_cli_challenge=${challenge}` } }),
+		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${loginState}`, { headers: { cookie: `ugk_oauth_state=${loginState}` } }),
 		testEnv,
 		{
 			fetch: async (url) => {
 				if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "token" }), { headers: { "content-type": "application/json" } });
 				return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
 			},
-			randomUUID: () => "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 		},
 	);
 	const poll = await (await pollCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv)).json();
@@ -826,7 +855,35 @@ test("requireUser rejects an invalid Bearer token", async () => {
 	assert.equal(body.error, "invalid_token");
 });
 
-test("githubCallback without a cli_challenge cookie redirects home as before", async () => {
+test("requireBearerUser rejects an expired cli_token (P0 H2)", async () => {
+	// A token older than CLI_TOKEN_TTL_SECONDS (90d) must 401 even before the
+	// lazy GC physically deletes it — the lookup enforces created_at > cutoff.
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	// Insert a token with a 1-year-old created_at (well past the 90d TTL).
+	const stale = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+	await testEnv.DB.prepare("INSERT INTO cli_tokens (token, user_id, challenge, created_at) VALUES (?, ?, ?, ?)").bind("stale-but-real-token", 1, "oldchallenge", stale).run();
+
+	const form = new FormData();
+	form.set("name", "x");
+	form.set("version", "1.0.0");
+	form.set("title", "X");
+	form.set("description", "X");
+	form.set("artifact", new File([taskZip("x") as BlobPart], "x.zip", { type: "application/zip" }));
+	const response = await submitTask(
+		new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { authorization: "Bearer stale-but-real-token" }, body: form }),
+		testEnv,
+	);
+	const body = await response.json();
+
+	assert.equal(response.status, 401);
+	assert.equal(body.error, "invalid_token");
+});
+
+test("githubCallback without a state-bound challenge redirects home as before (normal web login)", async () => {
+	// P0 C1+C2: callback reverse-looks-up the challenge from the trusted state.
+	// A state with no pending binding = normal web login → redirect "/", not the
+	// CLI success page. This is what keeps ordinary web login un-hijacked.
 	const testEnv = env();
 	const response = await githubCallback(
 		new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1", { headers: { cookie: "ugk_oauth_state=s1" } }),
@@ -842,61 +899,61 @@ test("githubCallback without a cli_challenge cookie redirects home as before", a
 	assert.equal(response.headers.get("location"), "/");
 });
 
-test("githubCallback with a stale cli_challenge cookie (challenge no longer pending) falls back to a normal home redirect", async () => {
-	// review M1: a lingering cli cookie after an interrupted CLI auth must not
-	// hijack every later web login. createCliToken refuses to sign when the
-	// challenge isn't pending, so the callback redirects to "/" not "/cli-auth".
+test("githubCallback whose pending challenge was already claimed falls back to a normal home redirect", async () => {
+	// review M1: an already-consumed challenge (pending row gone) must not
+	// hijack a later login into the CLI flow. createCliToken returns null when
+	// the challenge isn't pending, so callback redirects to "/" not "/cli-auth".
 	const testEnv = env();
-	const response = await githubCallback(
-		new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1", { headers: { cookie: "ugk_oauth_state=s1; ugk_cli_challenge=stale-not-pending" } }),
+	await seedUser(testEnv);
+	const challenge = "f".repeat(64);
+	await startCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv);
+	const loginState = "22222222-3333-4444-5555-666666666666";
+	await githubLogin(new Request(`https://ugk-task-share.pages.dev/api/auth/github?cli_challenge=${challenge}`), testEnv, { randomUUID: () => loginState });
+	// Claim it once (createCliToken deletes the pending row).
+	await githubCallback(
+		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${loginState}`, { headers: { cookie: `ugk_oauth_state=${loginState}` } }),
 		testEnv,
-		{
-			fetch: async (url) => {
-				if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "token" }), { headers: { "content-type": "application/json" } });
-				return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
-			},
-			randomUUID: () => "11111111-2222-3333-4444-555555555555",
-		},
+		{ fetch: async (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } }) },
+	);
+	// A second callback with the SAME state: pending row is gone (state no longer
+	// bound), so this must behave like a normal login → "/".
+	const response = await githubCallback(
+		new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${loginState}`, { headers: { cookie: `ugk_oauth_state=${loginState}` } }),
+		testEnv,
+		{ fetch: async (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } }) },
 	);
 
 	assert.equal(response.headers.get("location"), "/");
-	// cli cookie is cleared either way
-	assert.match(response.headers.get("set-cookie") ?? "", /ugk_cli_challenge=;/);
 });
 
 test("createCliToken refuses a second signing for an already-claimed challenge (caps token growth)", async () => {
 	// review H2/M1: the first callback deletes the pending row inside
-	// createCliToken, so a second OAuth completion for the same challenge finds
-	// no pending entry and signs nothing. This is what prevents duplicate
-	// long-lived tokens piling up per challenge.
+	// createCliToken, so a second OAuth completion finds no pending entry and
+	// signs nothing. This is what prevents duplicate long-lived tokens piling up.
 	const testEnv = env();
-	const cookie = await seedUser(testEnv);
+	await seedUser(testEnv);
 	const challenge = "e".repeat(64);
 	await startCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/start", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv);
 
-	// first completion: signs a token
-	const cb1 = await githubCallback(new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s1", { headers: { cookie: `ugk_oauth_state=s1; ugk_cli_challenge=${challenge}` } }), testEnv, {
-		fetch: async (url) => {
-			if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } });
-			return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
-		},
-		randomUUID: () => "11111111-2222-3333-4444-555555555555",
+	// first completion: githubLogin binds state1, callback signs a token
+	const state1 = "11111111-2222-3333-4444-555555555555";
+	await githubLogin(new Request(`https://ugk-task-share.pages.dev/api/auth/github?cli_challenge=${challenge}`), testEnv, { randomUUID: () => state1 });
+	const cb1 = await githubCallback(new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${state1}`, { headers: { cookie: `ugk_oauth_state=${state1}` } }), testEnv, {
+		fetch: async (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } }),
 	});
 	assert.equal(cb1.headers.get("location"), "/cli-auth?cli=done");
 
-	// second completion for the SAME challenge: pending is gone → no token, normal home redirect
-	const cb2 = await githubCallback(new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=s2", { headers: { cookie: `ugk_oauth_state=s2; ugk_cli_challenge=${challenge}` } }), testEnv, {
-		fetch: async (url) => {
-			if (String(url).includes("access_token")) return new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } });
-			return new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } });
-		},
-		randomUUID: () => "22222222-3333-4444-5555-666666666666",
+	// second completion: state2 was never bound to the challenge (pending row is
+	// already gone), so this behaves like a normal login → "/".
+	const state2 = "22222222-3333-4444-5555-666666666666";
+	const cb2 = await githubCallback(new Request(`https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=${state2}`, { headers: { cookie: `ugk_oauth_state=${state2}` } }), testEnv, {
+		fetch: async (url) => url.includes("access_token") ? new Response(JSON.stringify({ access_token: "t" }), { headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ id: 42, login: "octo", avatar_url: "" }), { headers: { "content-type": "application/json" } }),
 	});
 	assert.equal(cb2.headers.get("location"), "/");
 
-	// poll returns the one signed token
+	// poll returns the one signed token (value is random; just assert it exists)
 	const poll = await (await pollCliAuth(new Request("https://ugk-task-share.pages.dev/api/cli/auth/poll", { method: "POST", body: JSON.stringify({ challenge }) }), testEnv)).json();
 	assert.equal(poll.status, "ok");
-	assert.equal(poll.token, "11111111222233334444555555555555");
+	assert.match(poll.token, /^[0-9a-f]{32}$/);
 });
 

@@ -9,10 +9,13 @@ const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 const REQUIRED_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"];
 
 // CLI publish auth: market site brokers GitHub OAuth for the TUI. TUI POSTs a
-// challenge, user logs in on the site, callback detects the cli_challenge cookie
-// and signs a cli_token the TUI polls for. See migrations/0007_cli_auth.sql.
-const CLI_CHALLENGE_COOKIE = "ugk_cli_challenge";
+// challenge, user logs in on the site; state<->challenge is bound server-side
+// (migration 0009) so callback signs a cli_token the TUI polls for. No
+// JS-readable challenge cookie — state rides the existing HttpOnly oauth_state.
 const CLI_AUTH_TTL_SECONDS = 5 * 60; // pending challenge expiry
+// P0 H2: cli_tokens are long-lived but not eternal. 90d balances "don't make
+// the user re-auth constantly" against "stale tokens shouldn't linger forever".
+const CLI_TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 const encoder = new TextEncoder();
 
@@ -222,6 +225,15 @@ export async function githubLogin(request, env, deps = {}) {
 	}
 
 	const state = deps.randomUUID?.() ?? crypto.randomUUID();
+	// P0 C1+C2: CLI publish flow arrives as /api/auth/github?cli_challenge=<c>.
+	// Bind state<->challenge server-side so callback can reverse-look-up the
+	// challenge from the HttpOnly oauth_state cookie it already trusts — the
+	// challenge never enters a JS-readable cookie. No param = normal web login.
+	const cliChallenge = new URL(request.url).searchParams.get("cli_challenge");
+	if (cliChallenge) {
+		await env.DB.prepare("UPDATE cli_auth_pending SET state = ? WHERE challenge = ?")
+			.bind(state, cliChallenge).run();
+	}
 	const url = new URL("https://github.com/login/oauth/authorize");
 	const origin = env.SITE_URL ?? new URL(request.url).origin;
 	url.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
@@ -243,9 +255,13 @@ export async function githubCallback(request, env, deps = {}) {
 	const state = url.searchParams.get("state");
 	const code = url.searchParams.get("code");
 	const cookieState = parseCookies(request)[OAUTH_STATE_COOKIE];
-	const cliChallenge = parseCookies(request)[CLI_CHALLENGE_COOKIE];
-	await debugLog(env, "callback", "enter", { stateOk: state === cookieState, hasCode: Boolean(code), hasCliChallenge: Boolean(cliChallenge), origin: url.origin });
+	await debugLog(env, "callback", "enter", { stateOk: state === cookieState, hasCode: Boolean(code), origin: url.origin });
 	if (!state || !cookieState || state !== cookieState) return htmlError("Invalid OAuth state", 400);
+	// P0 C1+C2: reverse-look-up the CLI challenge from the now-trusted state.
+	// No row = normal web login (state wasn't bound to a challenge). This replaces
+	// the old JS-readable ugk_cli_challenge cookie entirely.
+	const cliPending = await env.DB.prepare("SELECT challenge FROM cli_auth_pending WHERE state = ?").bind(state).first();
+	const cliChallenge = cliPending?.challenge ?? null;
 	if (!code) return htmlError("Missing OAuth code", 400);
 	if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.SESSION_SECRET) return htmlError("GitHub OAuth is not configured", 500);
 
@@ -285,11 +301,10 @@ export async function githubCallback(request, env, deps = {}) {
 	).bind(String(githubUser.id), githubUser.login, githubUser.avatar_url ?? "", now).run();
 	const user = await env.DB.prepare("SELECT * FROM users WHERE github_id = ?").bind(String(githubUser.id)).first();
 	const headers = new Headers();
-	// CLI publish flow: a cli_challenge cookie means the TUI initiated this OAuth
-	// hop. createCliToken signs a cli_token bound to the challenge (TUI polls for
-	// it); if the challenge isn't pending anymore (stale/expired/claimed), it
-	// returns null and we fall through to a normal home redirect rather than
-	// hijacking a regular web login. Either way the cookie is cleared below.
+	// cliChallenge came from the state<->challenge binding (reverse-looked-up
+	// above from the trusted oauth_state). createCliToken signs a cli_token bound
+	// to it (TUI polls for it); if the challenge isn't pending anymore (stale/
+	// expired/claimed) it returns null → normal home redirect, no session hijack.
 	if (cliChallenge) {
 		const cliToken = await createCliToken(user, cliChallenge, env, deps);
 		await debugLog(env, "callback", "cli_token", { challenge: cliChallenge, signed: Boolean(cliToken) });
@@ -299,7 +314,6 @@ export async function githubCallback(request, env, deps = {}) {
 	}
 	headers.append("set-cookie", await createSessionCookie(user, env));
 	headers.append("set-cookie", `${OAUTH_STATE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
-	headers.append("set-cookie", `${CLI_CHALLENGE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
 	return new Response(null, { status: 302, headers });
  } catch (e) {
 	await debugLog(env, "callback", "exception", String(e && e.stack ? e.stack : e));
@@ -353,9 +367,14 @@ export function logout() {
 async function requireBearerUser(request, env) {
 	const bearer = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
 	if (!bearer) return { response: json({ error: "login_required" }, { status: 401 }) };
+	// P0 H2: expire old tokens. Lazy GC (same pattern as cli_auth_pending cleanup
+	// in startCliAuth — Workers free has no cron) trims expired rows, then the
+	// lookup enforces the TTL so a GC-missed expired token still 401s.
+	const cutoff = new Date(Date.now() - CLI_TOKEN_TTL_SECONDS * 1000).toISOString();
+	await env.DB.prepare("DELETE FROM cli_tokens WHERE created_at < ?").bind(cutoff).run();
 	const row = await env.DB.prepare(
-		"SELECT users.* FROM cli_tokens JOIN users ON users.id = cli_tokens.user_id WHERE cli_tokens.token = ?",
-	).bind(bearer).first();
+		"SELECT users.* FROM cli_tokens JOIN users ON users.id = cli_tokens.user_id WHERE cli_tokens.token = ? AND cli_tokens.created_at > ?",
+	).bind(bearer, cutoff).first();
 	if (row) return { user: row };
 	return { response: json({ error: "invalid_token" }, { status: 401 }) };
 }

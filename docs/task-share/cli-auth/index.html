@@ -19,9 +19,11 @@
 
 <script>
 	// CLI publish auth handoff page. Two modes:
-	//   ?c=<challenge> — stashes the challenge in a short-lived cookie and
-	//                    kicks off GitHub OAuth. The callback signs a cli_token
-	//                    bound to this challenge, which the TUI polls for.
+	//   ?c=<challenge> — kicks off GitHub OAuth, passing the challenge to
+	//                    /api/auth/github?cli_challenge=<c>. The server binds
+	//                    state<->challenge (no JS-readable cookie); the callback
+	//                    reverse-looks-up the challenge from the trusted state
+	//                    and signs a cli_token the TUI polls for.
 	//   ?cli=done       — shown after the callback; tells the user to go back.
 	(function () {
 		var params = new URLSearchParams(location.search);
@@ -41,11 +43,9 @@
 			return;
 		}
 
-		// SameSite=Lax survives the /api/auth/github → GitHub → /api/auth/callback
-		// navigation hops (all same-site). Max-Age matches the pending TTL.
-		document.cookie = "ugk_cli_challenge=" + encodeURIComponent(challenge) + "; Secure; SameSite=Lax; Path=/; Max-Age=600";
-		// Give the cookie a tick to settle, then start GitHub OAuth.
-		setTimeout(function () { window.location.href = "/api/auth/github"; }, 100);
+		// Pure redirect: the server-side githubLogin binds state<->challenge.
+		// No cookie is written here (P0 C2: challenge must not ride a JS-readable cookie).
+		window.location.href = "/api/auth/github?cli_challenge=" + encodeURIComponent(challenge);
 	})();
 </script>
 </body>

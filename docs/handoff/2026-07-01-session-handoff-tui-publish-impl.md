@@ -1,10 +1,11 @@
-# 会话交接:TUI 内上传 task 到市场 — 实现完成
+# 会话交接:TUI 内上传 task 到市场 — 实现完成 + 真机验证通过
 
 > **日期**:2026-07-01
-> **交接对象**:接手"TUI 内上传 task"后续工作(真机验证 / 部署 / 后续优化)的会话
+> **交接对象**:接手"TUI 内上传 task"后续工作(发布到市场/admin 审核/后续优化)的会话
 > **上一会话产出**:需求文档 `docs/design/2026-07-01-task-publish-from-tui.md` + 三份交接
-> **本会话产出**:Phase 1-4 全部代码 + 测试,545/545 pass,**未部署未真机验证**
-> **当前 main HEAD**(本会话开起时):`f5ed928`(本会话改动尚未提交)
+> **本会话产出**:Phase 1-4 全部代码 + 测试 + **部署 + 真机验证通过**(首次 OAuth 中转 + 后续凭证复用两条路径)
+> **状态**:**547/547 pass**,已部署到生产 `ugk-task-share.pages.dev`,migration 0007+0008 已应用
+> **分支**:`feat/tui-publish-task`(3 个 commit,待合并)
 
 ---
 
@@ -53,60 +54,80 @@
 
 ---
 
-## 3. 接手要做的(部署 + 真机验证)
+## 3. 部署 + 真机验证(✅ 已完成)
 
-⚠️ **本会话只写代码跑单测,没部署、没真机验证**。Workers runtime 行为与 Node 不同(交接 §踩坑),以下步骤不可省:
+本会话已部署到生产并通过真机验证。**核心功能可用**。
 
-### 3.1 部署后端
+### 3.1 已部署状态(2026-07-01)
 
-```bash
-# 1. 跑 migration 0007(新建两表)
-npx wrangler d1 migrations apply ugk-task-share-db --remote
+| 组件 | 状态 |
+|---|---|
+| migration 0007(cli_auth_pending + cli_tokens) | ✅ 已应用远端 |
+| migration 0008(debug_log 开发期日志表) | ✅ 已应用远端 |
+| Pages Functions(含 CLI auth 端点) | ✅ 已部署(`cbd90f2b`) |
+| 主域名 `ugk-task-share.pages.dev` | ✅ 指向最新 main 部署 |
+| `debug_log` 表 | ✅ 已建,带 500 行容量上限 |
 
-# 2. 部署(Functions + HTML 一起)
-npx wrangler pages deploy docs/task-share --project-name ugk-task-share --commit-dirty=true
-```
+### 3.2 真机验证结果(两条路径全通)
 
-### 3.2 真机验证(按优先级)
+**路径 A:首次上传(OAuth 中转)**
+- TUI `/task publish` → start 写 pending → 浏览器打开授权 URL → GitHub 登录 → callback 签 cli_token → TUI 轮询拿到 token → 上传 `x-search` v1.0.0
+- ✅ D1 task_submissions 收到(id=5, pending)
 
-1. **后端 curl 链路**(不依赖 TUI):
-   ```bash
-   # start
-   curl -X POST https://ugk-task-share.pages.dev/api/cli/auth/start \
-     -H 'content-type: application/json' -d '{"challenge":"a]".repeat(64)}'
-   # → {"url":".../cli-auth?c=..."}
+**路径 B:后续上传(凭证复用)**
+- TUI `/task publish` → 检测本地有 token → 跳过授权 → 直接上传 `subtitle-fluent-translator` v1.0.0
+- ✅ D1 task_submissions 收到(id=6, pending),无新 OAuth 流程
 
-   # poll(此时应 pending)
-   curl -X POST https://ugk-task-share.pages.dev/api/cli/auth/poll \
-     -H 'content-type: application/json' -d '{"challenge":"<同上>"}'
-   # → {"status":"pending"}
-   ```
-2. **OAuth 中转端到端**:浏览器打开 `/cli-auth?c=<challenge>` → 登录 GitHub → 回调到 `/cli-auth?cli=done` → poll 拿到 token
-3. **Bearer submit**:用拿到的 token `curl -H "Authorization: Bearer <token>"` 调 `/api/tasks/submit` 上传一个 zip
-4. **TUI 端到端**:本地 `ugk` 跑 `/task publish` → 首次授权 → 上传 → 市场 admin 队列出现
-5. **普通网页登录未回归**:确认 `/cli-auth` 残留 cookie 场景下普通 GitHub 登录仍回 `/`(M1 修复点)
+**curl 链路**:start/poll/submit 七项全部符合预期(详见 debug_log 完整 6 节点链路)。
 
-### 3.3 token 安全加固建议(可选,见 §4)
+### 3.3 真机踩坑(本会话暴露的,文档不会写)
+
+**⚠️ 踩坑 #1(关键):`crypto.randomUUID` 在 Workers 的 Illegal invocation**
+
+`createCliToken` 原写法 `(deps.randomUUID ?? crypto.randomUUID)()` —— 把 `crypto.randomUUID` 当裸函数引用调用,丢失 `this` 绑定。**Node 的 crypto 宽容不报错(单测全过),但 Workers 严格校验 `this`,抛 `TypeError: Illegal invocation: function called with incorrect this reference`**(Worker 异常 → 前端看到 Error 1101)。
+
+根因诊断极其困难:Error 1101 是 Worker 未捕获异常,不返回响应体。靠**开发期日志(debugLog → debug_log 表)** 才定位——日志显示 token_exchange/user_fetch 都成功,崩在 createCliToken。
+
+**修复**:`deps.randomUUID ? deps.randomUUID() : crypto.randomUUID()`,直接在 `crypto` 上调用保 `this`。注释记 `ponytail:` 标明这是 Workers-only 差异。
+
+**教训**:任何 `obj.method` 形式的引用脱离对象调用,在 Workers 都可能 Illegal invocation。`githubLogin` 里 `crypto.randomUUID()`(直接调用)是正确的,`createCliToken` 里(取引用后调用)是错的。**这类 bug 只有真机能抓**。
+
+**⚠️ 踩坑 #2:Pages 分支部署 vs 主域名**
+
+`wrangler pages deploy --branch feat/tui-publish-task` 会生成别名域名 `feat-tui-publish-task.ugk-task-share.pages.dev`,但**主域名 `ugk-task-share.pages.dev` 仍指向旧 main 部署**。curl 主域名会发现新 Functions 没生效(404/旧行为)。必须 `--branch main` 部署才更新主域名。
+
+**⚠️ 踩坑 #3:`/cli-auth` URL 规范化**
+
+Pages 对 `/cli-auth`(无尾斜驳)返回 308 重定向到 `/cli-auth/`(加尾斜杠,保留 query)。curl 默认不跟随重定向,测试时要加 `-L`。浏览器自动跟随,不影响真实用户。
 
 ---
 
 ## 4. 已知债(审查未修 + 待办)
 
-### 安全(纵深防御,本轮未做)
+### ✅ 本会话已修复(commit `5448c84`)
+
+- ~~**task-share.json 文件权限**(L1)~~ → 生产路径补 `chmodSync(filePath, 0o600)`
+- ~~**版本号重复静默失败**(M6)~~ → submitTask 查 task_versions,重复返回 409 `version_already_published`
+- ~~**token 格式未校验**(M4)~~ → ensureCliAuth 校验 `/^[0-9a-f]{32}$/`,损坏立即报错
+- ~~**reviewSubmission 无 try-catch**~~ → publish 的 INSERT/UPDATE 包进 try-catch,失败返回 JSON 而非崩 HTML 500
+- ~~**debug_log 表无限增长**~~ → DEBUG_LOG_MAX_ROWS=500,rowid 裁剪
+
+### 安全(纵深防御,仍未做)
 
 1. **OAuth state 未与 challenge 绑定**(审查 C1):state 只防 OAuth CSRF(攻击者无法预知 state),未与 cli challenge 绑定。理论重放面需要 XSS/中间人配合。**加固方向**:start 时生成 state 存入 pending,callback 校验 state∈pending(challenge)。
 2. **challenge cookie 无 HttpOnly**(审查 C2):`cli-auth` 页面用 JS 写 cookie,无法设 HttpOnly。challenge 是 5min 单次握手标识(非长期凭证),cli_token 从不进 cookie。**根治方向**:改由 `startCliAuth` 服务端 `Set-Cookie`(HttpOnly)+ 直接 302,删掉前端写 cookie 逻辑(改动较大)。
 3. **`/api/cli/auth/start` 无速率限制**(审查 M3):公开端点,可被灌 pending 表。Workers free 无内置限流。**加固方向**:Cloudflare WAF / Turnstile,或改服务端生成 challenge。
-4. **task-share.json 文件权限**(审查 L1):默认 0644,cli_token 同机其他用户可读。**修复**:`writeFileSync(path, content, { mode: 0o600 })`。
-5. **cli_tokens 表无自动过期**(审查 H2 余项):token 长期有效,仅手动 DELETE 吊销。可加 `created_at` 过期清理或吊销接口。
+4. **cli_tokens 表无自动过期**(审查 H2 余项):token 长期有效,仅手动 DELETE 吊销。可加 `created_at` 过期清理或吊销接口。
 
-### 功能 / UX
+### 功能 / UX(仍未做)
 
-6. **版本号重复静默失败**(审查 M6):`submitTask` 不查重,重复 version 在 admin publish 时才 `ON CONFLICT DO NOTHING` 静默跳过,用户以为发了新版实际没更新。**修复**:submit 前查 `task_versions` 同 name+version,有则 409。
-7. **token 格式未校验**(审查 M4):损坏的本地 token 会发 `Bearer garbage` → 服务端 401,用户看到 `invalid_token` 但不知根因。**修复**:`ensureCliAuth` 校验 `data.token` 匹配 `/^[0-9a-f]{64}$/`;本地读取时校验。
-8. **`openBrowser` URL 未引用**(审查 L2):win32 `start` 对含 `&` 的 URL 敏感。当前 URL 安全(marketplace 固定 + challenge 纯 hex),自定义 marketplaceUrl 含特殊字符时可能失败。有 URL 兜底显示,影响有限。
-9. **轮询无 jitter**(审查 L3):固定 2s 间隔。超时错误文案硬编码"120 秒"但 `timeoutMs` 可注入 → 文案与实际不符。
-10. **`reviewSubmission` 无 try-catch**(上一会话已知债,延续):publish 时 D1 两 INSERT 无错误捕获。
+5. **`openBrowser` URL 未引用**(审查 L2):win32 `start` 对含 `&` 的 URL 敏感。当前 URL 安全(marketplace 固定 + challenge 纯 hex),自定义 marketplaceUrl 含特殊字符时可能失败。有 URL 兜底显示,影响有限。
+6. **轮询无 jitter**(审查 L3):固定 2s 间隔。超时错误文案硬编码"120 秒"但 `timeoutMs` 可注入 → 文案与实际不符。
+7. **开发期日志待清理**:流程稳定后删 `debugLog` 调用点 + `debug_log` 表 + migration 0008 + `debugLog`/`DEBUG_LOG_MAX_ROWS` 定义。当前留着有价值(本次定位 Illegal invocation 靠它)。
+
+### TUI 测试覆盖
+
+8. **`handleTaskPublish` 无集成测试**:菜单项/action 分支/Usage 文案有测,但 `handleTaskPublish` 函数本身的编排(ensureCliAuth → 问 version → publishTask)只通过单元测覆盖其内部调用,没测 task.ts 里的胶水逻辑。需像其他 `handleTask*` 一样建集成测(注入 mock ctx.ui + mock 模块)。
 
 ### TUI 测试覆盖
 
@@ -120,18 +141,19 @@ npx wrangler pages deploy docs/task-share --project-name ugk-task-share --commit
 | 文件 | 作用 |
 |---|---|
 | `migrations/0007_cli_auth.sql` | cli_auth_pending + cli_tokens 表 |
+| `migrations/0008_debug_log.sql` | 开发期 debug_log 表(流程稳定后删) |
 | `functions/api/cli/auth/start.js` `poll.js` | thin endpoints |
 | `docs/task-share/cli-auth/index.html` | OAuth 中转页 |
-| `extensions/task/task-share-auth.ts` | TUI 授权(challenge/json/轮询/openBrowser) |
+| `extensions/task/task-share-auth.ts` | TUI 授权(challenge/json/轮询/openBrowser/token 格式校验) |
 | `extensions/task/task-share-publish.ts` | TUI 打包上传 |
 | `tests/task-share-auth.test.ts` `task-share-publish.test.ts` | TUI 单测 |
 
 ### 改动
 | 文件 | 改动点 |
 |---|---|
-| `functions/_lib/marketplace.js` | 顶部常量;`requireBearerUser`(新)+ `requireUser`(恢复纯 cookie);`startCliAuth`/`pollCliAuth`/`createCliToken`(新);`githubCallback` cli 分支;`submitTask` 双鉴权 |
+| `functions/_lib/marketplace.js` | 顶部常量 + `debugLog`(开发期);`requireBearerUser`(新,隔离 Bearer)+ `requireUser`(恢复纯 cookie);`startCliAuth`/`pollCliAuth`/`createCliToken`(新,含 Illegal invocation 修复);`githubCallback` cli 分支 + try-catch;`submitTask` 双鉴权 + 版本查重;`reviewSubmission` try-catch |
 | `extensions/task/task.ts` | import;`MENU_TO_ACTION`;菜单选项;`publish` action;`handleTaskPublish`;Usage 文案 |
-| `tests/task-marketplace-functions.test.ts` | mock DB 加 cli 两表支持;+10 测试 |
+| `tests/task-marketplace-functions.test.ts` | mock DB 加 cli 两表 + task_versions 查重支持;+11 测试 |
 | `tests/task-extension.test.ts` | 菜单断言 +1 项 |
 
 ---
@@ -141,7 +163,7 @@ npx wrangler pages deploy docs/task-share --project-name ugk-task-share --commit
 - **ponytail full**:最短可用 diff、根因修复、复用优先、`ponytail:` 注释标刻意简化
 - **对抗式审查**:设计/排查派 sub agent 审,逐条自己读源码复核(本次审查报告见 §2)
 - **改坏验证**:每个核心逻辑实现/修复后,临时改回 buggy 确认测试转红
-- **真机验证不可省**:Workers runtime ≠ Node(本会话代码只过单测,**部署+真机是接手第一要务**)
+- **真机验证不可省**:Workers runtime ≠ Node——本会话正是靠真机 + debugLog 日志定位了 `crypto.randomUUID` Illegal invocation(Node 宽容、Workers 严格,单测抓不到)
 - **bash 走 Git Bash**,Linux 语法,Windows 路径正斜杠
 - **危险操作前确认**
 

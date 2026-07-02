@@ -519,6 +519,32 @@ test("task submissions reject a package whose taskbook name mismatches", async (
 	assert.equal(body.error, "invalid_package");
 });
 
+test("task submissions reject a package that references a missing scripts file", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	// 合法包(5 核心文件齐全),但 skill.md 引用了 scripts/missing.mjs 而包里没有
+	const encoded: Record<string, Uint8Array> = {};
+	for (const [file, text] of Object.entries({ ...SAMPLE_FILES, "skill.md": "# Task\n读 $TASK_DIR/scripts/missing.mjs 全文\n" })) {
+		encoded[file] = new TextEncoder().encode(file === "taskbook.json" ? JSON.stringify({ ...JSON.parse(text), name: "pkg-task" }) : text);
+	}
+	const zip = zipSync(encoded);
+	const form = new FormData();
+	form.set("name", "pkg-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Broken Ref");
+	form.set("description", "skill.md references a missing script");
+	form.set("artifact", new File([zip as BlobPart], "broken.zip", { type: "application/zip" }));
+
+	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 400);
+	assert.equal(body.error, "missing_referenced_file");
+	assert.match(body.detail, /scripts\/missing\.mjs/);
+	assert.equal(testEnv.TASK_UPLOADS.objects.size, 0, "no files written on rejection");
+});
+
 test("task submissions reject a version that is already published (review M6)", async () => {
 	// Re-submitting an existing version would silently no-op at publish time
 	// (task_versions UNIQUE DO NOTHING) and mislead the user. Fail fast at submit.

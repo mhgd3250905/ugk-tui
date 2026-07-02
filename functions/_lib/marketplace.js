@@ -6,6 +6,9 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 const TASK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/;
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
+// 此清单是"最小必需校验集",不是打包全集。CLI publish 扫目录打包全部文件
+// (含 scripts/,见 task-share-publish.ts collectExtraFiles),不参考此清单决定打包内容。
+// 此处仅用于校验"一个 taskbook 至少得有这 5 个"。
 const REQUIRED_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"];
 
 // CLI publish auth: market site brokers GitHub OAuth for the TUI. TUI POSTs a
@@ -150,6 +153,32 @@ function validateTaskPackage(name, files) {
 	if (!isRequirementsSpec(spec)) throw new Error("Invalid spec.json");
 	assertValidContract(contract);
 	if (taskbook.name !== name) throw new Error(`taskbook.json name mismatch: expected ${name}, got ${String(taskbook.name)}`);
+}
+
+// ponytail: 纯 JS 复制版,与 extensions/task/task-share-publish.ts extractScriptReferences
+// 同源(Workers 不能直接 import TS)。改一处规则记得同步另一处。第三个消费者出现再抽共享模块。
+// 匹配 $TASK_DIR/scripts/x 或 \bscripts/x(文件名带扩展)。
+function extractScriptReferences(text) {
+	const re = /(?:\$TASK_DIR\/)?(scripts\/[A-Za-z0-9._\-\/]+\.[A-Za-z0-9]+)/g;
+	const hits = new Set();
+	let m;
+	while ((m = re.exec(text)) !== null) {
+		hits.add(m[1].replace(/['"\s]/g, ""));
+	}
+	return [...hits];
+}
+
+// 服务端兜底:skill.md/verify.mjs 引用的 scripts 文件必须在包里,否则拒绝发布。
+// 跨途径保护(网页直传 zip 也校验),不依赖 CLI publish 端自觉。
+function missingReferencedFiles(files) {
+	const packaged = new Set(Object.keys(files));
+	const missing = [];
+	for (const [label, text] of [["skill.md", files["skill.md"] ?? ""], ["verify.mjs", files["verify.mjs"] ?? ""]]) {
+		for (const ref of extractScriptReferences(text)) {
+			if (!packaged.has(ref)) missing.push({ label, ref });
+		}
+	}
+	return missing;
 }
 
 function invalidSourceUrlError(value) {
@@ -546,6 +575,13 @@ export async function submitTask(request, env) {
 		validateTaskPackage(name, files);
 	} catch (error) {
 		return json({ error: "invalid_package", detail: error instanceof Error ? error.message : String(error) }, { status: 400 });
+	}
+
+	// 引用完整性兜底:skill.md/verify.mjs 引用的 scripts 文件必须在包里。
+	// CLI publish 端有同源校验,这里保护网页直传等其他途径。
+	const missing = missingReferencedFiles(files);
+	if (missing.length > 0) {
+		return json({ error: "missing_referenced_file", detail: missing.map((m) => `${m.label} 引用 ${m.ref} 但包内无此文件`).join("; ") }, { status: 400 });
 	}
 
 	const prefix = `tasks/${name}/${version}`;

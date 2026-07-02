@@ -6,6 +6,9 @@ import { defaultAgentDir } from "./paths.js";
 
 export const OFFICIAL_MANIFEST_URL = "https://ugk-task-share.pages.dev/api/manifest";
 
+// 此清单是"最小必需校验集",不是打包全集。CLI publish 扫目录打包全部文件
+// (含 scripts/,见 task-share-publish.ts collectExtraFiles);此处仅用于校验
+// "一个 taskbook 至少得有这 5 个",不决定打包/下载的全部内容。
 const REQUIRED_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"];
 const NAME_RE = /^[A-Za-z0-9_-]+$/;
 

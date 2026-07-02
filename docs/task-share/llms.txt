@@ -1,6 +1,7 @@
-# UGK Task Marketplace
+# UGK
 
-UGK Task Marketplace shares installable taskbooks for the UGK agent.
+UGK helps users run AI-assisted computer tasks and shares installable taskbooks through the Task Marketplace.
 
 - Homepage: https://ugk-task-share.pages.dev/
+- Marketplace: https://ugk-task-share.pages.dev/marketplace/
 - Manifest API: https://ugk-task-share.pages.dev/api/manifest

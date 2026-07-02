@@ -79,12 +79,31 @@ test("task-share theme can switch to light and persist", () => {
 test("task-share nav pages expose a theme switcher slot", () => {
 	for (const file of [
 		"docs/task-share/index.html",
+		"docs/task-share/marketplace/index.html",
 		"docs/task-share/upload/index.html",
 		"docs/task-share/account/index.html",
 		"docs/task-share/admin/index.html",
 	]) {
 		assert.match(readFileSync(file, "utf8"), /data-theme-switcher/, file);
 	}
+});
+
+test("task-share product homepage points consumers to the marketplace", () => {
+	const html = readFileSync("docs/task-share/index.html", "utf8");
+	assert.match(html, /<body class="marketplace-page product-home">/);
+	assert.match(html, /把“我想做的事”交给电脑执行/);
+	assert.match(html, /href="marketplace\/"/);
+	assert.match(html, /assets\/product-marketplace-preview\.png/);
+	assert.doesNotMatch(html, /data-catalog/);
+});
+
+test("task-share marketplace moved under marketplace route", () => {
+	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
+	assert.match(html, /<link rel="stylesheet" href="\.\.\/styles\.css">/);
+	assert.match(html, /<script src="\.\.\/i18n\.js"><\/script>/);
+	assert.match(html, /data-catalog/);
+	assert.match(html, /href="\.\.\/upload\/"/);
+	assert.match(html, /\.\.\/assets\/empty-taskbook\.png/);
 });
 
 test("cli auth page uses the marketplace shell and localized copy", () => {
@@ -105,7 +124,7 @@ test("cli auth page uses the marketplace shell and localized copy", () => {
 
 test("task-share mobile nav keeps theme and auth actions inside the menu", () => {
 	for (const file of [
-		"docs/task-share/index.html",
+		"docs/task-share/marketplace/index.html",
 		"docs/task-share/upload/index.html",
 		"docs/task-share/account/index.html",
 		"docs/task-share/admin/index.html",
@@ -125,7 +144,7 @@ test("task-share mobile nav keeps theme and auth actions inside the menu", () =>
 });
 
 test("task-share mobile keeps marketplace filters usable", () => {
-	const html = readFileSync("docs/task-share/index.html", "utf8");
+	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
 	const css = readFileSync("docs/task-share/styles.css", "utf8");
 	assert.match(html, /data-search[^>]*name="q"|name="q"[^>]*data-search/);
 	assert.match(html, /data-category-filter[^>]*name="category"|name="category"[^>]*data-category-filter/);
@@ -137,6 +156,7 @@ test("task-share mobile keeps marketplace filters usable", () => {
 test("task-share pages expose basic SEO and main landmark", () => {
 	for (const file of [
 		"docs/task-share/index.html",
+		"docs/task-share/marketplace/index.html",
 		"docs/task-share/upload/index.html",
 		"docs/task-share/account/index.html",
 		"docs/task-share/admin/index.html",
@@ -144,14 +164,14 @@ test("task-share pages expose basic SEO and main landmark", () => {
 	]) {
 		const html = readFileSync(file, "utf8");
 		assert.match(html, /<meta name="description" content="[^"]+">/, file);
-		assert.match(html, /<main class="shell/, file);
+		assert.match(html, /<main[\s>]/, file);
 		assert.match(html, /<link rel="icon" href="\/favicon\.ico">/, file);
 	}
 });
 
 test("task-share static crawler files are real files", () => {
 	assert.match(readFileSync("docs/task-share/robots.txt", "utf8"), /^User-agent: \*/);
-	assert.match(readFileSync("docs/task-share/llms.txt", "utf8"), /^# UGK Task Marketplace/);
+	assert.match(readFileSync("docs/task-share/llms.txt", "utf8"), /^# UGK/);
 	assert.ok(existsSync("docs/task-share/favicon.ico"));
 	const favicon = readFileSync("docs/task-share/favicon.ico");
 	assert.equal(favicon[0], 0);

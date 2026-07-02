@@ -15,6 +15,11 @@
       "nav.signIn": "Sign in",
       "nav.menu": "Menu",
       "lang.label": "Language",
+      "theme.label": "Theme",
+      "theme.light": "Light",
+      "theme.dark": "Dark",
+      "theme.toLight": "Switch to light mode",
+      "theme.toDark": "Switch to dark mode",
       "footer.product": "Product",
       "footer.author": "Author",
       "footer.contact": "Contact",
@@ -138,6 +143,11 @@
       "nav.signIn": "登录",
       "nav.menu": "菜单",
       "lang.label": "语言",
+      "theme.label": "主题",
+      "theme.light": "浅色",
+      "theme.dark": "深色",
+      "theme.toLight": "切换到浅色模式",
+      "theme.toDark": "切换到深色模式",
       "footer.product": "产品",
       "footer.author": "作者",
       "footer.contact": "联系方式",
@@ -261,6 +271,11 @@
       "nav.signIn": "ログイン",
       "nav.menu": "メニュー",
       "lang.label": "言語",
+      "theme.label": "テーマ",
+      "theme.light": "ライト",
+      "theme.dark": "ダーク",
+      "theme.toLight": "ライトモードに切り替え",
+      "theme.toDark": "ダークモードに切り替え",
       "footer.product": "製品",
       "footer.author": "作者",
       "footer.contact": "連絡先",
@@ -384,6 +399,11 @@
       "nav.signIn": "로그인",
       "nav.menu": "메뉴",
       "lang.label": "언어",
+      "theme.label": "테마",
+      "theme.light": "라이트",
+      "theme.dark": "다크",
+      "theme.toLight": "라이트 모드로 전환",
+      "theme.toDark": "다크 모드로 전환",
       "footer.product": "제품",
       "footer.author": "작성자",
       "footer.contact": "연락처",
@@ -496,12 +516,16 @@
   const names = { en: "English", "zh-CN": "简体中文", ja: "日本語", ko: "한국어" };
   const aliases = { zh: "zh-CN", "zh-cn": "zh-CN", "zh-hans": "zh-CN", en: "en", "en-us": "en", "en-gb": "en", ja: "ja", jp: "ja", ko: "ko", "ko-kr": "ko" };
   const storageKey = "ugk.taskShare.lang";
+  const themeStorageKey = "ugk.taskShare.theme";
   function normalize(value) {
     const key = String(value || "").toLowerCase();
     return aliases[key] || aliases[key.split("-")[0]] || "";
   }
   function storedLang() { try { return localStorage.getItem(storageKey); } catch { return ""; } }
   function saveLang(lang) { try { localStorage.setItem(storageKey, lang); } catch {} }
+  function normalizeTheme(value) { return value === "light" ? "light" : "dark"; }
+  function storedTheme() { try { return localStorage.getItem(themeStorageKey); } catch { return ""; } }
+  function saveTheme(theme) { try { localStorage.setItem(themeStorageKey, theme); } catch {} }
   function detectLang() {
     const query = normalize(new URLSearchParams(window.location.search).get("lang"));
     if (query) { saveLang(query); return query; }
@@ -514,6 +538,7 @@
     return "en";
   }
   let current = detectLang();
+  let currentTheme = normalizeTheme(storedTheme());
   let navOutsideBound = false;
   function t(key, vars) {
     const text = (messages[current] && messages[current][key]) || messages.en[key] || key;
@@ -526,6 +551,16 @@
     root.querySelectorAll("[data-language-switcher]").forEach(slot => {
       slot.innerHTML = '<label class="language-select"><span class="sr-only">' + t("lang.label") + '</span><select aria-label="' + t("lang.label") + '">' + Object.entries(names).map(([value, label]) => '<option value="' + value + '"' + (value === current ? " selected" : "") + ">" + label + "</option>").join("") + "</select></label>";
       slot.querySelector("select").addEventListener("change", event => setLang(event.target.value));
+    });
+  }
+  function applyTheme() {
+    document.documentElement.dataset.theme = currentTheme;
+  }
+  function renderThemeSwitchers(root) {
+    root.querySelectorAll("[data-theme-switcher]").forEach(slot => {
+      const next = currentTheme === "light" ? "dark" : "light";
+      slot.innerHTML = '<button class="theme-toggle" type="button" data-theme-toggle aria-label="' + t("theme.to" + (next === "light" ? "Light" : "Dark")) + '" title="' + t("theme.to" + (next === "light" ? "Light" : "Dark")) + '"><span aria-hidden="true">' + (currentTheme === "light" ? "☀" : "☾") + '</span><span>' + t("theme." + currentTheme) + "</span></button>";
+      slot.querySelector("[data-theme-toggle]").addEventListener("click", () => setTheme(next));
     });
   }
   function bindNavToggle(root) {
@@ -562,12 +597,20 @@
   function apply(root) {
     root = root || document;
     document.documentElement.lang = current;
+    applyTheme();
     root.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
     setAttr(root, "placeholder", "data-i18n-placeholder");
     setAttr(root, "aria-label", "data-i18n-aria-label");
     setAttr(root, "title", "data-i18n-title");
+    renderThemeSwitchers(root);
     renderLanguageSwitchers(root);
     bindNavToggle(root);
+  }
+  function setTheme(theme) {
+    currentTheme = normalizeTheme(theme);
+    saveTheme(currentTheme);
+    apply(document);
+    window.dispatchEvent(new CustomEvent("ugk:theme", { detail: { theme: currentTheme } }));
   }
   function setLang(lang) {
     const next = normalize(lang) || "en";
@@ -584,7 +627,7 @@
     apply(document);
     window.dispatchEvent(new CustomEvent("ugk:i18n", { detail: { lang: current } }));
   }
-  window.UGKI18N = { t, apply, setLang, messages, languages: names, get lang() { return current; } };
+  window.UGKI18N = { t, apply, setLang, setTheme, messages, languages: names, get lang() { return current; }, get theme() { return currentTheme; } };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => apply(document));
   else apply(document);
 })();

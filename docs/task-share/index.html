@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="UGK Task Marketplace shares installable automation taskbooks for the UGK agent.">
 <title data-i18n="title.home">UGK Task Marketplace</title>
+<link rel="icon" href="/favicon.ico">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body class="marketplace-page">
@@ -32,7 +34,7 @@
   </div>
 </div></div></nav>
 
-<div class="shell">
+<main class="shell">
   <section class="hero">
     <div class="hero-copy">
       <span class="hero-logo" aria-hidden="true">
@@ -53,16 +55,16 @@
 
   <section id="catalog">
     <div class="toolbar">
-      <input class="search" data-search data-i18n-aria-label="filters.searchLabel" data-i18n-placeholder="filters.search" aria-label="Search tasks" placeholder="Search tasks...">
-      <select class="search" data-category-filter data-i18n-aria-label="filters.categoryLabel" aria-label="Filter category"><option value="" data-i18n="filters.all">All</option></select>
-      <select class="search" data-sort data-i18n-aria-label="filters.sortLabel" aria-label="Sort"><option value="name" data-i18n="filters.name">Name</option><option value="downloads" data-i18n="filters.downloads">Downloads</option><option value="likes" data-i18n="filters.likes">Likes</option><option value="newest" data-i18n="filters.newest">Newest</option></select>
+      <input class="search" name="q" data-search data-i18n-aria-label="filters.searchLabel" data-i18n-placeholder="filters.search" aria-label="Search tasks" placeholder="Search tasks...">
+      <select class="search" name="category" data-category-filter data-i18n-aria-label="filters.categoryLabel" aria-label="Filter category"><option value="" data-i18n="filters.all">All</option></select>
+      <select class="search" name="sort" data-sort data-i18n-aria-label="filters.sortLabel" aria-label="Sort"><option value="name" data-i18n="filters.name">Name</option><option value="downloads" data-i18n="filters.downloads">Downloads</option><option value="likes" data-i18n="filters.likes">Likes</option><option value="newest" data-i18n="filters.newest">Newest</option></select>
       <span class="search-status" data-search-status aria-live="polite"></span>
     </div>
     <div class="catalog" data-catalog><p class="empty" data-i18n="catalog.loading">Loading tasks...</p></div>
   </section>
 
   <section class="community" style="display:none"></section>
-</div>
+</main>
 
 <footer class="footer"><div class="shell"><div class="footer-inner">
   <span><span data-i18n="footer.product">Product</span> UGK</span>
@@ -73,7 +75,7 @@
 <script src="i18n.js"></script>
 <script>
 function tr(key,vars){return window.UGKI18N?.t(key,vars)||key}
-function applyTaskData(name,data){for(const [key,value]of Object.entries(data)){document.querySelectorAll('[data-count="'+name+':'+key+'"]').forEach(n=>{n.textContent=value})}document.querySelectorAll('[data-action="like"][data-task="'+name+'"]').forEach(b=>{if('liked'in data){b.dataset.active=String(data.liked);b.setAttribute('aria-pressed',String(data.liked))}});document.querySelectorAll('[data-action="favorite"][data-task="'+name+'"]').forEach(b=>{if('favorited'in data){b.dataset.active=String(data.favorited);b.setAttribute('aria-pressed',String(data.favorited))}})}
+function applyTaskData(name,data){for(const [key,value]of Object.entries(data)){document.querySelectorAll('[data-count="'+name+':'+key+'"]').forEach(n=>{n.textContent=value;const b=n.closest('button.metric');if(b){const label=b.dataset.action==='like'?tr('card.like'):b.dataset.action==='favorite'?tr('card.save'):'';if(label)b.setAttribute('aria-label',label+': '+value)}})}document.querySelectorAll('[data-action="like"][data-task="'+name+'"]').forEach(b=>{if('liked'in data){b.dataset.active=String(data.liked);b.setAttribute('aria-pressed',String(data.liked))}});document.querySelectorAll('[data-action="favorite"][data-task="'+name+'"]').forEach(b=>{if('favorited'in data){b.dataset.active=String(data.favorited);b.setAttribute('aria-pressed',String(data.favorited))}})}
 function applyMarketplaceStats(data){for(const [key,value]of Object.entries(data)){document.querySelectorAll('[data-marketplace-stat="'+key+'"]').forEach(n=>{n.textContent=value})}}
 function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function safeHref(value){const url=String(value??'');if(/^https?:\/\//i.test(url))return esc(url);if(/^\/api\/submissions\/[0-9]+\/artifact$/i.test(url))return esc(url);return '#'}

@@ -1,0 +1,6 @@
+# UGK Task Marketplace
+
+UGK Task Marketplace shares installable taskbooks for the UGK agent.
+
+- Homepage: https://ugk-task-share.pages.dev/
+- Manifest API: https://ugk-task-share.pages.dev/api/manifest

@@ -633,7 +633,7 @@
   }
   function renderLanguageSwitchers(root) {
     root.querySelectorAll("[data-language-switcher]").forEach(slot => {
-      slot.innerHTML = '<label class="language-select"><span class="sr-only">' + t("lang.label") + '</span><select aria-label="' + t("lang.label") + '">' + Object.entries(names).map(([value, label]) => '<option value="' + value + '"' + (value === current ? " selected" : "") + ">" + label + "</option>").join("") + "</select></label>";
+      slot.innerHTML = '<label class="language-select"><span class="sr-only">' + t("lang.label") + '</span><select name="language" aria-label="' + t("lang.label") + '">' + Object.entries(names).map(([value, label]) => '<option value="' + value + '"' + (value === current ? " selected" : "") + ">" + label + "</option>").join("") + "</select></label>";
       slot.querySelector("select").addEventListener("change", event => setLang(event.target.value));
     });
   }
@@ -643,7 +643,7 @@
   function renderThemeSwitchers(root) {
     root.querySelectorAll("[data-theme-switcher]").forEach(slot => {
       const next = currentTheme === "light" ? "dark" : "light";
-      slot.innerHTML = '<button class="theme-toggle" type="button" data-theme-toggle aria-label="' + t("theme.to" + (next === "light" ? "Light" : "Dark")) + '" title="' + t("theme.to" + (next === "light" ? "Light" : "Dark")) + '"><span aria-hidden="true">' + (currentTheme === "light" ? "☀" : "☾") + '</span><span>' + t("theme." + currentTheme) + "</span></button>";
+      slot.innerHTML = '<button class="theme-toggle" type="button" data-theme-toggle aria-label="' + t("theme.to" + (next === "light" ? "Light" : "Dark")) + '" title="' + t("theme.to" + (next === "light" ? "Light" : "Dark")) + '"><span aria-hidden="true">' + (currentTheme === "light" ? "☀" : "☾") + '</span><span aria-hidden="true">' + t("theme." + currentTheme) + "</span></button>";
       slot.querySelector("[data-theme-toggle]").addEventListener("click", () => setTheme(next));
     });
   }

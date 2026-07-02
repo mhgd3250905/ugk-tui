@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 function loadI18n(search = "") {
 	const stored: Record<string, string> = {};
@@ -122,4 +122,40 @@ test("task-share mobile nav keeps theme and auth actions inside the menu", () =>
 	assert.match(css, /\.nav-menu-actions/);
 	assert.match(css, /\.nav-menu-actions \.btn \{[^}]*border-radius: var\(--pill\)/);
 	assert.match(css, /\.nav-menu-actions \.btn-primary/);
+});
+
+test("task-share mobile keeps marketplace filters usable", () => {
+	const html = readFileSync("docs/task-share/index.html", "utf8");
+	const css = readFileSync("docs/task-share/styles.css", "utf8");
+	assert.match(html, /data-search[^>]*name="q"|name="q"[^>]*data-search/);
+	assert.match(html, /data-category-filter[^>]*name="category"|name="category"[^>]*data-category-filter/);
+	assert.match(html, /data-sort[^>]*name="sort"|name="sort"[^>]*data-sort/);
+	assert.doesNotMatch(css, /\.toolbar select\.search,\s*[\r\n]+\s*\.search-status \{ display: none; \}/);
+	assert.match(css, /\.toolbar select\.search \{ width: 100% !important; max-width: none; \}/);
+});
+
+test("task-share pages expose basic SEO and main landmark", () => {
+	for (const file of [
+		"docs/task-share/index.html",
+		"docs/task-share/upload/index.html",
+		"docs/task-share/account/index.html",
+		"docs/task-share/admin/index.html",
+		"docs/task-share/cli-auth/index.html",
+	]) {
+		const html = readFileSync(file, "utf8");
+		assert.match(html, /<meta name="description" content="[^"]+">/, file);
+		assert.match(html, /<main class="shell/, file);
+		assert.match(html, /<link rel="icon" href="\/favicon\.ico">/, file);
+	}
+});
+
+test("task-share static crawler files are real files", () => {
+	assert.match(readFileSync("docs/task-share/robots.txt", "utf8"), /^User-agent: \*/);
+	assert.match(readFileSync("docs/task-share/llms.txt", "utf8"), /^# UGK Task Marketplace/);
+	assert.ok(existsSync("docs/task-share/favicon.ico"));
+	const favicon = readFileSync("docs/task-share/favicon.ico");
+	assert.equal(favicon[0], 0);
+	assert.equal(favicon[1], 0);
+	assert.equal(favicon[2], 1);
+	assert.equal(favicon[3], 0);
 });

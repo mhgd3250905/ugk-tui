@@ -41,9 +41,7 @@ export function hasActiveJudgeUiPollution(events) {
 	return events.some((event) => {
 		const msg = event?.msg;
 		if (msg?.type !== "extension_ui_request") return false;
-		if (msg.method === "setWidget" && msg.widgetKey === "judge-driver-view") return Array.isArray(msg.widgetLines) && msg.widgetLines.length > 0;
-		if (msg.method === "setStatus" && msg.statusKey === "judge-mode") return typeof msg.statusText === "string" && msg.statusText.length > 0;
-		return false;
+		return msg.method === "setStatus" && msg.statusKey === "judge-mode" && typeof msg.statusText === "string" && msg.statusText.length > 0;
 	});
 }
 

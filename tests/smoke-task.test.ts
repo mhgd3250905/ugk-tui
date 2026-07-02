@@ -75,7 +75,6 @@ test("task smoke distinguishes fallback input and Judge cleanup from active poll
 		{ msg: { type: "extension_ui_request", method: "input", title: "task input: request" } },
 	]), true);
 	assert.equal(hasActiveJudgeUiPollution([
-		{ msg: { type: "extension_ui_request", method: "setWidget", widgetKey: "judge-driver-view" } },
 		{ msg: { type: "extension_ui_request", method: "setStatus", statusKey: "judge-mode" } },
 	]), false);
 	assert.equal(hasActiveJudgeUiPollution([

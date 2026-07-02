@@ -5,6 +5,7 @@
       "title.upload": "Upload Task | UGK Tasks",
       "title.account": "Account | UGK Tasks",
       "title.admin": "Admin | UGK Tasks",
+      "title.cliAuth": "CLI Authorization | UGK Tasks",
       "nav.collectedPrefix": "Collected",
       "nav.collectedSuffix": "Tasks",
       "nav.marketplace": "Marketplace",
@@ -15,6 +16,31 @@
       "nav.signIn": "Sign in",
       "nav.menu": "Menu",
       "lang.label": "Language",
+      "theme.label": "Theme",
+      "theme.light": "Light",
+      "theme.dark": "Dark",
+      "theme.toLight": "Switch to light mode",
+      "theme.toDark": "Switch to dark mode",
+      "cli.kicker": "Task publish",
+      "cli.initial.title": "Authorizing UGK CLI",
+      "cli.initial.message": "One moment while we connect to GitHub.",
+      "cli.initial.notice": "Connecting to GitHub...",
+      "cli.confirm.title": "Authorize UGK CLI",
+      "cli.confirm.message": "Confirm this browser action before this terminal receives a publish token.",
+      "cli.confirm.notice": "Only continue if you started /task publish in UGK.",
+      "cli.confirm.action": "Authorize",
+      "cli.confirm.busy": "Authorizing...",
+      "cli.done.title": "Authorization complete",
+      "cli.done.message": "Return to your terminal. UGK will continue automatically.",
+      "cli.done.notice": "You can close this tab.",
+      "cli.invalid.title": "Invalid authorization request",
+      "cli.invalid.message": "This link is malformed or expired.",
+      "cli.invalid.notice": "Re-run /task publish in your terminal.",
+      "cli.failure.title": "Authorization failed",
+      "cli.failure.message": "UGK could not issue a publish token.",
+      "cli.failure.notice": "Re-run /task publish in your terminal.",
+      "cli.network.title": "Network error",
+      "cli.network.message": "The confirmation request could not finish.",
       "footer.product": "Product",
       "footer.author": "Author",
       "footer.contact": "Contact",
@@ -128,6 +154,7 @@
       "title.upload": "上传 Task | UGK Tasks",
       "title.account": "账户 | UGK Tasks",
       "title.admin": "管理 | UGK Tasks",
+      "title.cliAuth": "CLI 授权 | UGK Tasks",
       "nav.collectedPrefix": "已收录",
       "nav.collectedSuffix": "个 Task",
       "nav.marketplace": "市场",
@@ -138,6 +165,31 @@
       "nav.signIn": "登录",
       "nav.menu": "菜单",
       "lang.label": "语言",
+      "theme.label": "主题",
+      "theme.light": "浅色",
+      "theme.dark": "深色",
+      "theme.toLight": "切换到浅色模式",
+      "theme.toDark": "切换到深色模式",
+      "cli.kicker": "Task 发布",
+      "cli.initial.title": "正在授权 UGK CLI",
+      "cli.initial.message": "正在连接 GitHub，请稍候。",
+      "cli.initial.notice": "正在跳转到 GitHub...",
+      "cli.confirm.title": "授权 UGK CLI",
+      "cli.confirm.message": "确认后，这个终端会收到用于发布 Task 的凭证。",
+      "cli.confirm.notice": "只有在你刚刚启动 /task publish 时才继续。",
+      "cli.confirm.action": "授权",
+      "cli.confirm.busy": "授权中...",
+      "cli.done.title": "授权完成",
+      "cli.done.message": "回到终端，UGK 会自动继续。",
+      "cli.done.notice": "现在可以关闭这个标签页。",
+      "cli.invalid.title": "授权请求无效",
+      "cli.invalid.message": "这个链接格式错误或已经过期。",
+      "cli.invalid.notice": "请在终端重新执行 /task publish。",
+      "cli.failure.title": "授权失败",
+      "cli.failure.message": "UGK 没能签发发布凭证。",
+      "cli.failure.notice": "请在终端重新执行 /task publish。",
+      "cli.network.title": "网络错误",
+      "cli.network.message": "确认请求未能完成。",
       "footer.product": "产品",
       "footer.author": "作者",
       "footer.contact": "联系方式",
@@ -251,6 +303,7 @@
       "title.upload": "Task をアップロード | UGK Tasks",
       "title.account": "アカウント | UGK Tasks",
       "title.admin": "管理 | UGK Tasks",
+      "title.cliAuth": "CLI 認可 | UGK Tasks",
       "nav.collectedPrefix": "収録",
       "nav.collectedSuffix": "Tasks",
       "nav.marketplace": "マーケット",
@@ -261,6 +314,31 @@
       "nav.signIn": "ログイン",
       "nav.menu": "メニュー",
       "lang.label": "言語",
+      "theme.label": "テーマ",
+      "theme.light": "ライト",
+      "theme.dark": "ダーク",
+      "theme.toLight": "ライトモードに切り替え",
+      "theme.toDark": "ダークモードに切り替え",
+      "cli.kicker": "Task 公開",
+      "cli.initial.title": "UGK CLI を認可中",
+      "cli.initial.message": "GitHub に接続しています。少々お待ちください。",
+      "cli.initial.notice": "GitHub に移動しています...",
+      "cli.confirm.title": "UGK CLI を認可",
+      "cli.confirm.message": "確認すると、この端末に Task 公開用トークンを発行します。",
+      "cli.confirm.notice": "UGK で /task publish を開始した場合だけ続行してください。",
+      "cli.confirm.action": "認可",
+      "cli.confirm.busy": "認可中...",
+      "cli.done.title": "認可が完了しました",
+      "cli.done.message": "端末に戻ってください。UGK が自動で続行します。",
+      "cli.done.notice": "このタブは閉じてかまいません。",
+      "cli.invalid.title": "認可リクエストが無効です",
+      "cli.invalid.message": "このリンクは不正か期限切れです。",
+      "cli.invalid.notice": "端末で /task publish をもう一度実行してください。",
+      "cli.failure.title": "認可に失敗しました",
+      "cli.failure.message": "UGK は公開用トークンを発行できませんでした。",
+      "cli.failure.notice": "端末で /task publish をもう一度実行してください。",
+      "cli.network.title": "ネットワークエラー",
+      "cli.network.message": "確認リクエストを完了できませんでした。",
       "footer.product": "製品",
       "footer.author": "作者",
       "footer.contact": "連絡先",
@@ -374,6 +452,7 @@
       "title.upload": "Task 업로드 | UGK Tasks",
       "title.account": "계정 | UGK Tasks",
       "title.admin": "관리 | UGK Tasks",
+      "title.cliAuth": "CLI 인증 | UGK Tasks",
       "nav.collectedPrefix": "수록",
       "nav.collectedSuffix": "Tasks",
       "nav.marketplace": "마켓",
@@ -384,6 +463,31 @@
       "nav.signIn": "로그인",
       "nav.menu": "메뉴",
       "lang.label": "언어",
+      "theme.label": "테마",
+      "theme.light": "라이트",
+      "theme.dark": "다크",
+      "theme.toLight": "라이트 모드로 전환",
+      "theme.toDark": "다크 모드로 전환",
+      "cli.kicker": "Task 게시",
+      "cli.initial.title": "UGK CLI 인증 중",
+      "cli.initial.message": "GitHub에 연결하는 중입니다.",
+      "cli.initial.notice": "GitHub로 이동하는 중...",
+      "cli.confirm.title": "UGK CLI 인증",
+      "cli.confirm.message": "확인하면 이 터미널에 Task 게시 토큰이 발급됩니다.",
+      "cli.confirm.notice": "UGK에서 /task publish를 시작한 경우에만 계속하세요.",
+      "cli.confirm.action": "인증",
+      "cli.confirm.busy": "인증 중...",
+      "cli.done.title": "인증 완료",
+      "cli.done.message": "터미널로 돌아가세요. UGK가 자동으로 계속합니다.",
+      "cli.done.notice": "이 탭은 닫아도 됩니다.",
+      "cli.invalid.title": "인증 요청이 올바르지 않습니다",
+      "cli.invalid.message": "이 링크는 잘못되었거나 만료되었습니다.",
+      "cli.invalid.notice": "터미널에서 /task publish를 다시 실행하세요.",
+      "cli.failure.title": "인증 실패",
+      "cli.failure.message": "UGK가 게시 토큰을 발급하지 못했습니다.",
+      "cli.failure.notice": "터미널에서 /task publish를 다시 실행하세요.",
+      "cli.network.title": "네트워크 오류",
+      "cli.network.message": "확인 요청을 완료하지 못했습니다.",
       "footer.product": "제품",
       "footer.author": "작성자",
       "footer.contact": "연락처",
@@ -496,12 +600,16 @@
   const names = { en: "English", "zh-CN": "简体中文", ja: "日本語", ko: "한국어" };
   const aliases = { zh: "zh-CN", "zh-cn": "zh-CN", "zh-hans": "zh-CN", en: "en", "en-us": "en", "en-gb": "en", ja: "ja", jp: "ja", ko: "ko", "ko-kr": "ko" };
   const storageKey = "ugk.taskShare.lang";
+  const themeStorageKey = "ugk.taskShare.theme";
   function normalize(value) {
     const key = String(value || "").toLowerCase();
     return aliases[key] || aliases[key.split("-")[0]] || "";
   }
   function storedLang() { try { return localStorage.getItem(storageKey); } catch { return ""; } }
   function saveLang(lang) { try { localStorage.setItem(storageKey, lang); } catch {} }
+  function normalizeTheme(value) { return value === "light" ? "light" : "dark"; }
+  function storedTheme() { try { return localStorage.getItem(themeStorageKey); } catch { return ""; } }
+  function saveTheme(theme) { try { localStorage.setItem(themeStorageKey, theme); } catch {} }
   function detectLang() {
     const query = normalize(new URLSearchParams(window.location.search).get("lang"));
     if (query) { saveLang(query); return query; }
@@ -514,6 +622,7 @@
     return "en";
   }
   let current = detectLang();
+  let currentTheme = normalizeTheme(storedTheme());
   let navOutsideBound = false;
   function t(key, vars) {
     const text = (messages[current] && messages[current][key]) || messages.en[key] || key;
@@ -526,6 +635,16 @@
     root.querySelectorAll("[data-language-switcher]").forEach(slot => {
       slot.innerHTML = '<label class="language-select"><span class="sr-only">' + t("lang.label") + '</span><select aria-label="' + t("lang.label") + '">' + Object.entries(names).map(([value, label]) => '<option value="' + value + '"' + (value === current ? " selected" : "") + ">" + label + "</option>").join("") + "</select></label>";
       slot.querySelector("select").addEventListener("change", event => setLang(event.target.value));
+    });
+  }
+  function applyTheme() {
+    document.documentElement.dataset.theme = currentTheme;
+  }
+  function renderThemeSwitchers(root) {
+    root.querySelectorAll("[data-theme-switcher]").forEach(slot => {
+      const next = currentTheme === "light" ? "dark" : "light";
+      slot.innerHTML = '<button class="theme-toggle" type="button" data-theme-toggle aria-label="' + t("theme.to" + (next === "light" ? "Light" : "Dark")) + '" title="' + t("theme.to" + (next === "light" ? "Light" : "Dark")) + '"><span aria-hidden="true">' + (currentTheme === "light" ? "☀" : "☾") + '</span><span>' + t("theme." + currentTheme) + "</span></button>";
+      slot.querySelector("[data-theme-toggle]").addEventListener("click", () => setTheme(next));
     });
   }
   function bindNavToggle(root) {
@@ -562,12 +681,20 @@
   function apply(root) {
     root = root || document;
     document.documentElement.lang = current;
+    applyTheme();
     root.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
     setAttr(root, "placeholder", "data-i18n-placeholder");
     setAttr(root, "aria-label", "data-i18n-aria-label");
     setAttr(root, "title", "data-i18n-title");
+    renderThemeSwitchers(root);
     renderLanguageSwitchers(root);
     bindNavToggle(root);
+  }
+  function setTheme(theme) {
+    currentTheme = normalizeTheme(theme);
+    saveTheme(currentTheme);
+    apply(document);
+    window.dispatchEvent(new CustomEvent("ugk:theme", { detail: { theme: currentTheme } }));
   }
   function setLang(lang) {
     const next = normalize(lang) || "en";
@@ -584,7 +711,7 @@
     apply(document);
     window.dispatchEvent(new CustomEvent("ugk:i18n", { detail: { lang: current } }));
   }
-  window.UGKI18N = { t, apply, setLang, messages, languages: names, get lang() { return current; } };
+  window.UGKI18N = { t, apply, setLang, setTheme, messages, languages: names, get lang() { return current; }, get theme() { return currentTheme; } };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => apply(document));
   else apply(document);
 })();

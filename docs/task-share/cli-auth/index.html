@@ -3,21 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CLI Authorization | UGK Tasks</title>
+<title data-i18n="title.cliAuth">CLI Authorization | UGK Tasks</title>
 <link rel="stylesheet" href="../styles.css">
 </head>
-<body>
-<div class="shell">
-  <section class="hero">
-    <div class="hero-copy">
-      <div class="kicker">UGK Task Marketplace</div>
-      <h1 id="title">Authorizing UGK CLI…</h1>
-      <p id="message" class="lede" style="max-width:680px;color:var(--text-muted);font-size:18px;line-height:1.7;">One moment while we connect to GitHub.</p>
-      <div id="actions"></div>
-    </div>
+<body class="marketplace-page">
+<div class="shell shell-narrow">
+  <div class="page-head">
+    <div class="kicker" data-i18n="cli.kicker">CLI authorization</div>
+    <h1 id="title" data-i18n="cli.initial.title">Authorizing UGK CLI</h1>
+    <p id="message" class="lede" data-i18n="cli.initial.message">One moment while we connect to GitHub.</p>
+  </div>
+
+  <section class="panel">
+    <p id="notice" class="notice" data-i18n="cli.initial.notice">Connecting to GitHub...</p>
+    <div class="submission-actions" id="actions"></div>
   </section>
 </div>
 
+<footer class="footer"><div class="shell"><div class="footer-inner">
+  <span><span data-i18n="footer.product">Product</span> UGK</span>
+  <span><span data-i18n="footer.author">Author</span> bboyUglyk</span>
+  <a href="mailto:ug1yk@foxmail.com"><span data-i18n="footer.contact">Contact</span> ug1yk@foxmail.com</a>
+</div></div></footer>
+
+<script src="../i18n.js"></script>
 <script>
 	// CLI publish auth handoff page. Three modes:
 	//   ?c=<challenge>     — kicks off GitHub OAuth (server binds state<->challenge).
@@ -30,11 +39,18 @@
 		var params = new URLSearchParams(location.search);
 		var title = document.getElementById("title");
 		var message = document.getElementById("message");
+		var notice = document.getElementById("notice");
 		var actions = document.getElementById("actions");
+		var tr = function (key) { return window.UGKI18N?.t(key) || key; };
+		var setCopy = function (titleKey, messageKey, noticeKey) {
+			[title, message, notice].forEach(function (el) { el.removeAttribute("data-i18n"); });
+			title.textContent = tr(titleKey);
+			message.textContent = tr(messageKey);
+			notice.textContent = tr(noticeKey);
+		};
 
 		if (params.get("cli") === "done") {
-			title.textContent = "✅ Authorization complete";
-			message.textContent = "Return to your terminal — UGK will continue automatically.";
+			setCopy("cli.done.title", "cli.done.message", "cli.done.notice");
 			return;
 		}
 
@@ -42,14 +58,13 @@
 			// Explicit confirmation gate (CSRF defense). POSTing confirms; the
 			// server signs the cli_token only on this authenticated click.
 			var state = params.get("state");
-			title.textContent = "Authorize UGK CLI to publish on your behalf?";
-			message.textContent = "Confirm to issue a token to this terminal. If you did NOT start /task publish, close this page.";
+			setCopy("cli.confirm.title", "cli.confirm.message", "cli.confirm.notice");
 			var btn = document.createElement("button");
 			btn.className = "btn btn-primary";
-			btn.textContent = "Authorize";
+			btn.textContent = tr("cli.confirm.action");
 			btn.onclick = function () {
 				btn.disabled = true;
-				btn.textContent = "Authorizing…";
+				btn.textContent = tr("cli.confirm.busy");
 				fetch("/api/cli/auth/confirm", {
 					method: "POST",
 					headers: { "content-type": "application/json" },
@@ -57,9 +72,9 @@
 				}).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
 				.then(function (res) {
 					if (res.ok) { window.location.href = "/cli-auth?cli=done"; }
-					else { title.textContent = "Authorization failed"; message.textContent = res.body.error || "Please re-run /task publish in your terminal."; btn.disabled = false; btn.textContent = "Authorize"; }
+					else { setCopy("cli.failure.title", "cli.failure.message", "cli.failure.notice"); notice.textContent = res.body.error || tr("cli.failure.notice"); btn.disabled = false; btn.textContent = tr("cli.confirm.action"); }
 				})
-				.catch(function () { title.textContent = "Network error"; message.textContent = "Please re-run /task publish in your terminal."; });
+				.catch(function () { setCopy("cli.network.title", "cli.network.message", "cli.failure.notice"); });
 			};
 			actions.appendChild(btn);
 			return;
@@ -67,8 +82,7 @@
 
 		var challenge = params.get("c");
 		if (!challenge || !/^[A-Za-z0-9_-]{16,128}$/.test(challenge)) {
-			title.textContent = "Invalid authorization request";
-			message.textContent = "The authorization link is malformed. Re-run /task publish in your terminal.";
+			setCopy("cli.invalid.title", "cli.invalid.message", "cli.invalid.notice");
 			return;
 		}
 

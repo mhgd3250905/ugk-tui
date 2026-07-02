@@ -20,7 +20,7 @@ function loadI18n(search = "") {
 			dispatchEvent() {},
 		},
 		document: {
-			documentElement: { lang: "" },
+			documentElement: { lang: "", dataset: {} },
 			readyState: "complete",
 			querySelectorAll: () => [],
 			addEventListener() {},
@@ -63,4 +63,63 @@ test("task-share i18n locale keys stay complete", () => {
 	for (const [lang, table] of Object.entries(messages)) {
 		assert.deepEqual(Object.keys(table as Record<string, string>).sort(), expected, lang);
 	}
+});
+
+test("task-share theme can switch to light and persist", () => {
+	const context = loadI18n();
+	const i18n = context.window.UGKI18N;
+	assert.equal(i18n.theme, "dark");
+	assert.equal(context.document.documentElement.dataset.theme, "dark");
+	i18n.setTheme("light");
+	assert.equal(i18n.theme, "light");
+	assert.equal(context.document.documentElement.dataset.theme, "light");
+	assert.equal(context.localStorage.getItem("ugk.taskShare.theme"), "light");
+});
+
+test("task-share nav pages expose a theme switcher slot", () => {
+	for (const file of [
+		"docs/task-share/index.html",
+		"docs/task-share/upload/index.html",
+		"docs/task-share/account/index.html",
+		"docs/task-share/admin/index.html",
+	]) {
+		assert.match(readFileSync(file, "utf8"), /data-theme-switcher/, file);
+	}
+});
+
+test("cli auth page uses the marketplace shell and localized copy", () => {
+	const html = readFileSync("docs/task-share/cli-auth/index.html", "utf8");
+	assert.match(html, /<body class="marketplace-page">/);
+	assert.match(html, /class="page-head"/);
+	assert.match(html, /class="panel"/);
+	assert.doesNotMatch(html, /style="/);
+	assert.match(html, /data-i18n="cli.kicker"/);
+	assert.match(html, /data-i18n="cli.initial.title"/);
+	assert.match(html, /data-i18n="cli.initial.message"/);
+	assert.match(html, /removeAttribute\("data-i18n"\)/);
+
+	const { window } = loadI18n("?lang=zh-CN");
+	assert.equal(window.UGKI18N.t("cli.done.title"), "授权完成");
+	assert.equal(window.UGKI18N.t("cli.confirm.action"), "授权");
+});
+
+test("task-share mobile nav keeps theme and auth actions inside the menu", () => {
+	for (const file of [
+		"docs/task-share/index.html",
+		"docs/task-share/upload/index.html",
+		"docs/task-share/account/index.html",
+		"docs/task-share/admin/index.html",
+	]) {
+		const html = readFileSync(file, "utf8");
+		const menuActions = html.match(/<div class="nav-menu-actions">([\s\S]*?)<\/div>/)?.[1] || "";
+		assert.match(menuActions, /data-theme-switcher[\s\S]*data-language-switcher/, file);
+		assert.match(html, /data-auth-link/, file);
+	}
+	const css = readFileSync("docs/task-share/styles.css", "utf8");
+	assert.match(css, /body\[data-signed-in="true"\] \[data-auth-link\]/);
+	assert.match(css, /\.nav-actions \[data-theme-switcher\]/);
+	assert.match(css, /\.nav-actions \[data-language-switcher\]/);
+	assert.match(css, /\.nav-menu-actions/);
+	assert.match(css, /\.nav-menu-actions \.btn \{[^}]*border-radius: var\(--pill\)/);
+	assert.match(css, /\.nav-menu-actions \.btn-primary/);
 });

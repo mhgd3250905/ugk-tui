@@ -90,6 +90,7 @@ test("task-share nav pages expose a theme switcher slot", () => {
 
 test("task-share product homepage points consumers to the marketplace", () => {
 	const html = readFileSync("docs/task-share/index.html", "utf8");
+	const css = readFileSync("docs/task-share/styles.css", "utf8");
 	assert.match(html, /<body class="marketplace-page product-home">/);
 	assert.match(html, /不用会编程，也能让电脑替你跑任务/);
 	assert.match(html, /assets\/ugk-pixel-logo\.svg/);
@@ -97,9 +98,16 @@ test("task-share product homepage points consumers to the marketplace", () => {
 	assert.match(html, /npm i -g ugk-agent/);
 	assert.match(html, /href="marketplace\/"/);
 	assert.match(html, /assets\/ugk-console-screenshot\.png/);
-	assert.match(html, /assets\/product-marketplace-preview\.png/);
+	assert.match(html, /class="task-marquee"/);
+	assert.match(html, /task-marquee-row-alt/);
+	assert.match(html, /tone-video/);
+	assert.match(html, /Browser Check/);
+	assert.match(html, /Release Notes/);
+	assert.doesNotMatch(html, /ugk task install /);
 	assert.match(html, /class="product-app-shot"/);
 	assert.doesNotMatch(html, /data-catalog/);
+	assert.match(css, /animation-timeline:\s*scroll\(root block\)/);
+	assert.doesNotMatch(css, /task-marquee 58s/);
 });
 
 test("task-share marketplace moved under marketplace route", () => {

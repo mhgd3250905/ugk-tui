@@ -11,11 +11,11 @@
 <body class="marketplace-page product-home">
 <nav class="nav"><div class="shell"><div class="nav-inner">
   <a class="nav-mobile-brand" href="./" aria-label="UGK"><span>UGK</span><em>Agent</em></a>
-  <span class="nav-stat-tag">给普通用户的 AI 执行器</span>
+  <span class="nav-stat-tag">Task 市场已上线</span>
   <button class="nav-menu-toggle" type="button" data-nav-toggle aria-expanded="false" data-i18n-aria-label="nav.menu" aria-label="Menu"><span></span><span></span><span></span></button>
   <div class="nav-links">
-    <a href="#use-cases">能做什么</a>
-    <a href="#start">怎么开始</a>
+    <a href="#flow">怎么工作</a>
+    <a href="#jobs">能做什么</a>
     <a href="marketplace/">Task 市场</a>
     <a href="#faq">FAQ</a>
     <div class="nav-menu-actions">
@@ -33,73 +33,88 @@
   <section class="product-hero shell">
     <div class="product-hero-copy">
       <div class="kicker">UGK Agent</div>
-      <h1>把“我想做的事”交给电脑执行</h1>
-      <p>UGK 面向普通用户：你不用写代码，只要选择一个现成 Task，或者直接描述目标，让 AI 帮你完成重复、繁琐、跨网页的电脑任务。</p>
+      <h1>不用会编程，也能让电脑替你跑任务</h1>
+      <p>从整理资料、批量处理文件，到打开网页检查信息。UGK 把“怎么操作”交给 AI，把“要不要执行”留给你。</p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="#start">开始了解</a>
-        <a class="btn btn-secondary" href="marketplace/">浏览 Task 市场</a>
+        <a class="btn btn-primary" href="marketplace/">去市场找 Task</a>
+        <a class="btn btn-secondary" href="#flow">看它怎么工作</a>
       </div>
       <div class="product-proof">
-        <span>已有 Task 分享市场</span>
-        <span>复制命令即可安装</span>
-        <span>适合不会写代码的用户</span>
+        <span>本地优先</span>
+        <span>关键动作确认</span>
+        <span>现成 Task 可安装</span>
       </div>
     </div>
-    <div class="product-hero-media">
+    <div class="agent-board" aria-label="UGK 执行任务流程示意">
+      <div class="agent-prompt">
+        <span>你说</span>
+        <strong>把下载文件夹按项目整理好，再给我一份清单</strong>
+      </div>
+      <div class="agent-flow">
+        <div><span>理解目标</span><b>识别文件类型和项目名</b></div>
+        <div><span>规划步骤</span><b>分组、重命名、移动</b></div>
+        <div><span>执行验收</span><b>生成结果清单</b></div>
+      </div>
+      <div class="agent-result">
+        <span>UGK 输出</span>
+        <ul>
+          <li>12 个文件已归档</li>
+          <li>3 个不确定文件等待确认</li>
+          <li>整理报告已生成</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="flow" class="product-section product-flow shell">
+    <div class="section-head">
+      <div class="kicker">Workflow</div>
+      <h2>像交代同事一样交代任务</h2>
+      <p>UGK 的体验重点不是给你一堆按钮，而是把目标拆成可确认、可执行、可检查的步骤。</p>
+    </div>
+    <div class="flow-strip">
+      <article><span>01</span><h3>说目标</h3><p>不用写流程图，直接描述你要的结果。</p></article>
+      <article><span>02</span><h3>选 Task</h3><p>从市场套用别人已经打包好的能力。</p></article>
+      <article><span>03</span><h3>看执行</h3><p>关键动作前确认，结果出来后可检查。</p></article>
+    </div>
+  </section>
+
+  <section class="product-section marketplace-showcase shell">
+    <div class="market-visual">
       <img src="assets/product-marketplace-preview.png" alt="UGK Task 市场界面，展示可直接安装的自动化任务卡片">
-      <div class="run-card" aria-hidden="true">
-        <span>正在执行</span>
-        <strong>帮我整理下载文件夹</strong>
-        <p>识别文件类型，按项目归档，生成一份清单。</p>
-      </div>
     </div>
-  </section>
-
-  <section id="use-cases" class="product-section shell">
-    <div class="section-head">
-      <div class="kicker">Use cases</div>
-      <h2>不用学工具，直接说结果</h2>
-      <p>官网先讲人话：你想完成什么，UGK 才去管网页、文件、命令和步骤。</p>
-    </div>
-    <div class="product-grid">
-      <article class="product-card"><h3>整理资料</h3><p>把散落的网页、文件和笔记汇总成结构化结果。</p></article>
-      <article class="product-card"><h3>批量处理</h3><p>重复下载、重命名、归档、转换格式，让 Task 替你跑。</p></article>
-      <article class="product-card"><h3>网页操作</h3><p>打开网页、检查内容、填写表单、截图记录。</p></article>
-      <article class="product-card"><h3>内容生成</h3><p>把原始材料整理成报告、清单、发布文案或说明文档。</p></article>
-    </div>
-  </section>
-
-  <section id="start" class="product-section shell">
-    <div class="section-head">
-      <div class="kicker">Start</div>
-      <h2>三步开始用</h2>
-      <p>先用别人做好的 Task，跑通之后再让 UGK 帮你定制自己的流程。</p>
-    </div>
-    <div class="steps">
-      <article><span>1</span><h3>找一个 Task</h3><p>从市场选择接近你需求的自动化任务。</p></article>
-      <article><span>2</span><h3>说清楚目标</h3><p>告诉 UGK 你要处理什么文件、网页或结果。</p></article>
-      <article><span>3</span><h3>确认后执行</h3><p>关键动作前由你确认，执行结果可检查。</p></article>
-    </div>
-  </section>
-
-  <section class="product-section product-market shell">
-    <div>
+    <div class="market-copy">
       <div class="kicker">Marketplace</div>
-      <h2>Task 市场已经可用</h2>
-      <p>市场里是别人已经打包好的自动化能力。你不需要理解里面的代码，先看描述，合适就安装使用。</p>
+      <h2>先从现成 Task 开始</h2>
+      <p>Task 市场是 UGK 的能力入口。你看到的是“这个任务能做什么”，安装时只需要复制命令，不需要理解里面的代码。</p>
+      <a class="btn btn-primary" href="marketplace/">浏览 Task 市场</a>
     </div>
-    <a class="btn btn-primary" href="marketplace/">进入 Task 市场</a>
+  </section>
+
+  <section id="jobs" class="product-section shell">
+    <div class="section-head">
+      <div class="kicker">Jobs to be done</div>
+      <h2>把具体麻烦事交出去</h2>
+      <p>官网不用堆技术名词，直接告诉用户哪些日常工作可以少动手。</p>
+    </div>
+    <div class="task-bento">
+      <article class="wide"><h3>整理和归档</h3><p>文件命名混乱、资料散落、下载夹爆炸时，让 UGK 按你的规则收拾。</p></article>
+      <article><h3>网页检查</h3><p>打开网页、对比内容、截图记录。</p></article>
+      <article><h3>批量处理</h3><p>重复下载、转换、复制、移动。</p></article>
+      <article><h3>报告生成</h3><p>把执行结果整理成清单或文档。</p></article>
+      <article class="wide"><h3>复用别人做好的流程</h3><p>从市场安装 Task，先跑通，再按自己的工作方式调整。</p></article>
+    </div>
   </section>
 
   <section class="product-section shell">
     <div class="section-head">
-      <div class="kicker">Trust</div>
-      <h2>把控制权留给用户</h2>
+      <div class="kicker">Capabilities</div>
+      <h2>看起来简单，底下要可靠</h2>
     </div>
-    <div class="trust-list">
-      <div><strong>本地执行</strong><span>任务在你的环境里运行，文件和账号不交给陌生网页处理。</span></div>
-      <div><strong>动作可确认</strong><span>登录、发布、关键操作保留确认步骤。</span></div>
-      <div><strong>Task 可审查</strong><span>市场里的 Task 有描述、作者和安装命令，方便判断是否适合。</span></div>
+    <div class="concept-grid">
+      <article><span>Context</span><h3>理解你的文件和网页</h3><p>围绕当前任务读取必要上下文，不靠你反复解释。</p></article>
+      <article><span>Tools</span><h3>用工具完成真实动作</h3><p>浏览器、文件、命令和 Task 能连接起来执行。</p></article>
+      <article><span>Control</span><h3>关键步骤由你确认</h3><p>授权、发布、敏感操作保留明确确认。</p></article>
     </div>
   </section>
 
@@ -110,9 +125,17 @@
     </div>
     <div class="faq-list">
       <details open><summary>我不会写代码，可以用吗？</summary><p>可以。你可以先从 Task 市场安装现成任务，再用自然语言描述要处理的内容。</p></details>
-      <details><summary>Task 市场是什么？</summary><p>它是 UGK 的自动化任务库，里面的 Task 可以被安装到本地 UGK 使用。</p></details>
+      <details><summary>Task 市场是什么？</summary><p>它是 UGK 的自动化任务库，里面的 Task 可以安装到本地 UGK 使用。</p></details>
       <details><summary>它会直接替我乱点吗？</summary><p>不会。涉及登录、发布、授权等关键动作时，流程会保留确认。</p></details>
     </div>
+  </section>
+
+  <section class="product-cta shell">
+    <div>
+      <div class="kicker">Start with one task</div>
+      <h2>先找一个你今天就想少做的重复任务</h2>
+    </div>
+    <a class="btn btn-primary" href="marketplace/">打开 Task 市场</a>
   </section>
 </main>
 

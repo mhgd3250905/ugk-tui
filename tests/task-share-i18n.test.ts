@@ -91,9 +91,10 @@ test("task-share nav pages expose a theme switcher slot", () => {
 test("task-share product homepage points consumers to the marketplace", () => {
 	const html = readFileSync("docs/task-share/index.html", "utf8");
 	assert.match(html, /<body class="marketplace-page product-home">/);
-	assert.match(html, /把“我想做的事”交给电脑执行/);
+	assert.match(html, /不用会编程，也能让电脑替你跑任务/);
 	assert.match(html, /href="marketplace\/"/);
 	assert.match(html, /assets\/product-marketplace-preview\.png/);
+	assert.match(html, /class="agent-board"/);
 	assert.doesNotMatch(html, /data-catalog/);
 });
 

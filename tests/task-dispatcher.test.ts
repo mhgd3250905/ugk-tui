@@ -639,3 +639,52 @@ test("interactive UI prefills dispatcher's valid partial output instead of re-as
 		setTaskDispatcherForTests(undefined);
 	}
 });
+
+// === 未声明字段门禁 ===
+// 复现 session 019f236b 的真 bug:agent/dispatcher 传了 `maxChars=150`,
+// 但合法字段是 `maxUnitChars`(默认 90)。旧行为:未知字段静默流到下游,
+// maxUnitChars 回退默认 90,agent 以为设了 150 实际跑 90,完全不知情。
+// 新行为:gate 硬失败,反馈里带可用字段列表,agent 能自己改对。
+const translatorContract = {
+	runtimeInput: ["subtitlePath", "maxUnitChars"],
+	runtimeInputMeta: {
+		subtitlePath: { description: "源字幕路径", required: true },
+		maxUnitChars: { description: "每单元最大字数", required: false, default: 90 },
+	},
+};
+
+test("unknown field gate: dispatcher returns undeclared field → throws with field list", async () => {
+	// ponytail: dispatcher 吐出 maxChars(不在 runtimeInput 里),headless 必须硬失败。
+	// 错误信息要同时含错误的字段名(maxChars)和可用字段列表(含 maxUnitChars),
+	// agent 看到"maxChars 错了 + 可用 maxUnitChars"能立刻自己改对 —— 显式反馈。
+	setTaskDispatcherForTests(async () => ({ subtitlePath: "x.srt", maxChars: 150 }));
+	try {
+		await assert.rejects(
+			() => resolveRuntimeInputFromText({}, "# Skill", translatorContract, "x.srt maxChars=150", undefined, true),
+			(err: Error) => {
+				assert.match(err.message, /未声明字段.*maxChars/, "报错应指出未声明的 maxChars");
+				assert.match(err.message, /可用字段.*maxUnitChars/, "报错应列出可用字段(含 maxUnitChars)");
+				return true;
+			},
+		);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("unknown field gate: dispatcher outputs only declared fields → passes (regression)", async () => {
+	// ponytail: 回归保护。全部合法字段正常通过,不被新 gate 误伤。
+	setTaskDispatcherForTests(async () => ({ subtitlePath: "x.srt", maxUnitChars: 150 }));
+	try {
+		const value = await resolveRuntimeInputFromText({}, "# Skill", translatorContract, "x.srt maxUnitChars=150", undefined, true);
+		assert.deepEqual(value, { subtitlePath: "x.srt", maxUnitChars: 150 });
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("unknown field gate: prompt instructs dispatcher to emit only declared fields", async () => {
+	// ponytail: 源头治理 —— prompt 明确禁止输出未声明字段,和机制层硬失败双层防御。
+	const prompt = buildTaskDispatcherPrompt("# Skill", { runtimeInput: ["url"] }, "https://x");
+	assert.match(prompt, /只输出.*声明的字段.*未声明字段.*解析失败/, "prompt 应禁止输出未声明字段");
+});

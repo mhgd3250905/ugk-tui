@@ -47,6 +47,7 @@ export function buildTaskDispatcherPrompt(skill: string, contract: unknown, rawI
 		"输出要求(严格遵守):",
 		"- 只输出一个完整的 fenced JSON 对象(```json ... ```),不要解释,不要输出多个 JSON。",
 		"- 每个字段值必须是完整、有效的最终值 —— 不要输出截断的、半成品的、占位的值。",
+		"- 只输出 contract.runtimeInput 里声明的字段,不要输出任何其他字段(未声明字段会导致解析失败)。",
 		"- 若某个 required 字段你无法从输入确定值,省略它(系统会判定为解析失败并报错,这比输出错误值好)。",
 		"",
 		"## skill.md",
@@ -139,6 +140,20 @@ function hasAllowedFieldValues(contract: unknown, input: unknown, fields: string
 
 function objectFields(input: unknown): string[] {
 	return input && typeof input === "object" && !Array.isArray(input) ? Object.keys(input as Record<string, unknown>) : [];
+}
+
+/**
+ * ponytail: 检测 dispatcher 输出里 contract 未声明的字段。
+ * 场景:agent/dispatcher 传了 `maxChars=150`,但合法字段是 `maxUnitChars`。
+ * 旧行为:未知字段静默流到 worker prompt 和 verify 环境,合法字段回退默认值,
+ * agent 以为设了 150 实际跑 90,完全不知情 —— 框架没尽到"明显错误显式反馈"的职责。
+ * 现在让 gate 硬失败,反馈里带可用字段列表,agent 看到 maxChars 报错 + 列表里有 maxUnitChars,
+ * 能立刻自己改对。
+ */
+function unknownRuntimeFields(contract: unknown, input: unknown): string[] {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return [];
+	const declared = new Set(runtimeFields(contract));
+	return Object.keys(input as Record<string, unknown>).filter((key) => !declared.has(key));
 }
 
 /**
@@ -304,7 +319,7 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 		const dispatched = await callDispatcher(ctx, skill, contract, rawInput, modelOverride, onApiUsage);
 		const partial = dispatched ?? {};
 		dispatcherPartial = partial as Record<string, unknown>;
-		if (dispatched && coversRequired(dispatched) && allowedFieldsValid(contract, dispatched) && hasAllowedFieldValues(contract, dispatched, localFields)) return runtimeInputWithDefaults(contract, dispatched);
+		if (dispatched && coversRequired(dispatched) && allowedFieldsValid(contract, dispatched) && hasAllowedFieldValues(contract, dispatched, localFields) && unknownRuntimeFields(contract, dispatched).length === 0) return runtimeInputWithDefaults(contract, dispatched);
 		if (partial && headless) {
 			// ponytail: 区分"缺字段"和"字段值无效",给用户精准反馈。
 			// 无效值(如 dispatcher 输出残片)和缺失一样视为解析失败 —— dispatcher 是唯一入口。
@@ -315,12 +330,14 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 			);
 			const invalidAllowed = invalidAllowedFields(contract, partial);
 			const missingLocal = localFields.filter((field) => !Object.prototype.hasOwnProperty.call(partial, field));
+			const unknown = unknownRuntimeFields(contract, partial);
 			const detail = [
 				!dispatched ? "dispatcher 无有效输出" : "",
 				missing.length ? `缺失字段: ${missing.join(", ")}` : "",
 				invalid.length ? `字段值无效(空值/残片): ${invalid.join(", ")}` : "",
 				invalidAllowed.length ? `字段值不在允许范围: ${invalidAllowed.map((field) => `${field}=${JSON.stringify((partial as Record<string, unknown>)[field])} (allowed: ${fieldAllowedValues(contract, field)?.join("|")})`).join(", ")}` : "",
 				missingLocal.length ? `dispatcher 未输出显式字段: ${missingLocal.join(", ")}` : "",
+				unknown.length ? `未声明字段(不在 runtimeInput 里): ${unknown.join(", ")}(可用字段: ${fields.join(", ")})` : "",
 			].filter(Boolean).join("; ");
 			throw new Error(`dispatcher 未能从输入解析出有效的必填字段 —— ${detail}。请用更明确、完整的 input 重试,或确认 taskbook 的 runtimeInput 定义。`);
 		}

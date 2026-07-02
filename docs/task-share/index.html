@@ -14,7 +14,7 @@
   <span class="nav-stat-tag">Task 市场已上线</span>
   <button class="nav-menu-toggle" type="button" data-nav-toggle aria-expanded="false" data-i18n-aria-label="nav.menu" aria-label="Menu"><span></span><span></span><span></span></button>
   <div class="nav-links">
-    <a href="#flow">怎么工作</a>
+    <a href="#install">怎么安装</a>
     <a href="#jobs">能做什么</a>
     <a href="marketplace/">Task 市场</a>
     <a href="#faq">FAQ</a>
@@ -33,11 +33,12 @@
   <section class="product-hero shell">
     <div class="product-hero-copy">
       <div class="kicker">UGK Agent</div>
-      <h1>不用会编程，也能让电脑替你跑任务</h1>
+      <h1 class="product-logo-title"><img class="product-pixel-logo" src="assets/ugk-pixel-logo.svg" alt="UGK"></h1>
+      <p class="hero-claim">不用会编程，也能让电脑替你跑任务</p>
       <p>从整理资料、批量处理文件，到打开网页检查信息。UGK 把“怎么操作”交给 AI，把“要不要执行”留给你。</p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="marketplace/">去市场找 Task</a>
-        <a class="btn btn-secondary" href="#flow">看它怎么工作</a>
+        <a class="btn btn-primary" href="#install">安装 UGK</a>
+        <a class="btn btn-secondary" href="marketplace/">浏览 Task 市场</a>
       </div>
       <div class="product-proof">
         <span>本地优先</span>
@@ -50,16 +51,26 @@
     </div>
   </section>
 
-  <section id="flow" class="product-section product-flow shell">
+  <section id="install" class="product-section install-guide shell">
     <div class="section-head">
-      <div class="kicker">Workflow</div>
-      <h2>像交代同事一样交代任务</h2>
-      <p>UGK 的体验重点不是给你一堆按钮，而是把目标拆成可确认、可执行、可检查的步骤。</p>
+      <div class="kicker">Install</div>
+      <h2>两种安装方式</h2>
+      <p>新手用安装器，熟悉 npm 的用户可以直接全局安装。</p>
     </div>
-    <div class="flow-strip">
-      <article><span>01</span><h3>说目标</h3><p>不用写流程图，直接描述你要的结果。</p></article>
-      <article><span>02</span><h3>选 Task</h3><p>从市场套用别人已经打包好的能力。</p></article>
-      <article><span>03</span><h3>看执行</h3><p>关键动作前确认，结果出来后可检查。</p></article>
+    <div class="install-grid">
+      <article class="install-card install-card-primary">
+        <span>推荐</span>
+        <h3>一键安装器</h3>
+        <p>自动检测 Node/npm，安装 UGK，并引导配置 DeepSeek API key。</p>
+        <code>npx ugk-install</code>
+      </article>
+      <article class="install-card">
+        <span>npm</span>
+        <h3>手动安装</h3>
+        <p>已安装 Node.js 18+ 时，直接全局安装后运行。</p>
+        <code>npm i -g ugk-agent</code>
+        <code>ugk</code>
+      </article>
     </div>
   </section>
 

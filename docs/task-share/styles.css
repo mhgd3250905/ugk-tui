@@ -300,12 +300,22 @@ body[data-signed-in="true"] [data-auth-link] { display: none !important; }
   padding: 96px 0 64px;
 }
 .product-hero-copy { display: grid; gap: 18px; align-content: center; min-width: 0; }
-.product-hero h1 {
+.product-logo-title {
   max-width: 760px;
-  color: var(--ink);
-  font-size: 70px;
-  line-height: 0.98;
-  letter-spacing: 0;
+  line-height: 1;
+}
+.product-pixel-logo {
+  display: block;
+  width: min(520px, 100%);
+  height: auto;
+  image-rendering: pixelated;
+}
+.hero-claim {
+  max-width: 660px;
+  color: var(--ink) !important;
+  font-size: 34px !important;
+  line-height: 1.12 !important;
+  font-weight: 850;
   text-wrap: balance;
 }
 .product-hero p { max-width: 620px; color: var(--text-muted); font-size: 18px; line-height: 1.72; }
@@ -351,20 +361,38 @@ body[data-signed-in="true"] [data-auth-link] { display: none !important; }
 .product-cta h2 { color: var(--text); font-size: 42px; line-height: 1.08; letter-spacing: 0; text-wrap: balance; }
 .section-head p,
 .market-copy p { color: var(--text-muted); font-size: 16px; }
-.flow-strip {
+.install-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 14px;
+}
+.install-card {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+  padding: 24px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  overflow: hidden;
+  background: var(--control-bg-soft);
 }
-.flow-strip article { padding: 24px; background: var(--control-bg-soft); }
-.flow-strip article + article { border-left: 1px solid var(--border); }
-.flow-strip span { color: var(--accent); font-family: "SF Mono", Consolas, ui-monospace, monospace; font-weight: 850; }
-.flow-strip h3,
+.install-card-primary { border-color: rgba(46, 231, 101, 0.34); background: var(--accent-soft); }
+.install-card span { color: var(--accent); font-size: 12px; font-weight: 820; letter-spacing: 0.08em; text-transform: uppercase; }
+.install-card code {
+  display: block;
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--command-bg);
+  color: var(--accent);
+  font-family: "SF Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.install-card h3,
 .task-bento h3,
 .concept-grid h3 { margin-top: 12px; color: var(--text); font-size: 22px; line-height: 1.2; }
-.flow-strip p,
+.install-card p,
 .task-bento p,
 .concept-grid p { margin-top: 8px; color: var(--text-muted); }
 .marketplace-showcase {
@@ -732,7 +760,8 @@ button.metric:hover { color: var(--text); }
   .nav-actions .chip[data-user] { display: none; }
   .hero { grid-template-columns: 1fr; padding-top: 54px; }
   .product-hero { grid-template-columns: 1fr; gap: 28px; min-height: auto; padding: 54px 0 28px; }
-  .product-hero h1 { font-size: 56px; }
+  .product-pixel-logo { width: min(420px, 100%); }
+  .hero-claim { font-size: 30px !important; }
   .marketplace-showcase { grid-template-columns: 1fr; }
   .market-copy .btn { justify-self: stretch; }
   .task-bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -746,7 +775,8 @@ button.metric:hover { color: var(--text); }
   .hero-logo { font-size: 9px; }
   .hero-subtitle { font-size: 14px; }
   .product-hero { gap: 18px; padding: 26px 0 20px; }
-  .product-hero h1 { font-size: 36px; line-height: 1.04; }
+  .product-pixel-logo { width: min(280px, 100%); }
+  .hero-claim { font-size: 24px !important; }
   .product-hero p { font-size: 15px; line-height: 1.6; }
   .product-hero .hero-actions { align-items: stretch; flex-direction: column; }
   .product-hero .btn { width: 100%; }
@@ -757,10 +787,9 @@ button.metric:hover { color: var(--text); }
   .section-head h2,
   .market-copy h2,
   .product-cta h2 { font-size: 30px; }
-  .flow-strip,
+  .install-grid,
   .task-bento,
   .concept-grid { grid-template-columns: 1fr; }
-  .flow-strip article + article { border-left: 0; border-top: 1px solid var(--border); }
   .task-bento .wide { grid-column: auto; }
   .market-visual { padding: 6px; }
   .market-visual img { aspect-ratio: 16 / 7; }

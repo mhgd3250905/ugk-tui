@@ -15,7 +15,14 @@ process.env.PI_CODING_AGENT = "true";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { buildUgkCliArgs } from "./ugk-cli-args.js";
-import { isTaskInstallCommand, runTaskInstallCli } from "./task-install.js";
+import {
+	isTaskInstallCommand,
+	runTaskInstallCli,
+	isTaskRemoveCommand,
+	runTaskRemoveCli,
+	isTaskUpdateCommand,
+	runTaskUpdateCli,
+} from "./task-install.js";
 import { installUgkExtensionOverlayPatch } from "./ugk-extension-overlay-patch.js";
 import { installUgkPackageUpdatePatch } from "./ugk-package-update-patch.js";
 import { applyUgkRuntimePolicy, installUgkEditorBorderGlyphPatch } from "./ugk-runtime-policy.js";
@@ -33,6 +40,12 @@ const userArgs = process.argv.slice(2);
 
 if (isTaskInstallCommand(userArgs)) {
 	process.exit(await runTaskInstallCli(userArgs, { stdout: process.stdout, stderr: process.stderr }));
+}
+if (isTaskRemoveCommand(userArgs)) {
+	process.exit(await runTaskRemoveCli(userArgs, { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin }));
+}
+if (isTaskUpdateCommand(userArgs)) {
+	process.exit(await runTaskUpdateCli(userArgs, { stdout: process.stdout, stderr: process.stderr }));
 }
 
 const update = await runUgkUpdatePreflight({

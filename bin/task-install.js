@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import * as readline from "node:readline/promises";
 import { defaultAgentDir } from "./paths.js";
 
 export const OFFICIAL_MANIFEST_URL = "https://ugk-task-share.pages.dev/api/manifest";
@@ -151,7 +152,9 @@ export async function runTaskInstall(name, deps = {}) {
 	const manifest = parseJson(await fetchText(fetchFn, manifestUrl), "manifest.json");
 	const task = findManifestTask(manifest, name);
 	const targetDir = path.join(agentDir, "tasks", name);
-	if (existsSync(targetDir)) throw new Error(`taskbook "${name}" already exists: ${targetDir}`);
+	// ponytail: force 只给 runTaskUpdate 内部用,绕过"已装拒绝"以实现覆盖;
+	// 对外 CLI install 不暴露此 flag,避免用户误覆盖。
+	if (!deps.force && existsSync(targetDir)) throw new Error(`taskbook "${name}" already exists: ${targetDir}`);
 
 	const texts = {};
 	for (const file of Object.keys(task.files)) {
@@ -166,6 +169,10 @@ export async function runTaskInstall(name, deps = {}) {
 		for (const file of Object.keys(task.files)) {
 			await mkdir(path.dirname(path.join(tempDir, file)), { recursive: true });
 			await writeFile(path.join(tempDir, file), texts[file], "utf8");
+		}
+		// force 覆盖:rename 不覆盖已存在目录,先删旧目标(仅 force 路径,update 内部用)
+		if (deps.force && existsSync(targetDir)) {
+			await rm(targetDir, { recursive: true, force: true });
 		}
 		await rename(tempDir, targetDir);
 	} catch (error) {
@@ -184,6 +191,84 @@ export async function runTaskInstallCli(argv, deps = {}) {
 	try {
 		const result = await runTaskInstall(name, deps);
 		deps.stdout?.write?.(`已安装 taskbook "${result.name}"\n下一步: /task run ${result.name} <你的输入>\n`);
+		return 0;
+	} catch (error) {
+		deps.stderr?.write?.(`${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	}
+}
+
+export function isTaskRemoveCommand(argv) {
+	return argv[0] === "task" && argv[1] === "remove";
+}
+
+export async function runTaskRemove(name, deps = {}) {
+	assertValidName(name);
+	const agentDir = deps.agentDir ?? defaultAgentDir();
+	const targetDir = path.join(agentDir, "tasks", name);
+	if (!existsSync(targetDir)) throw new Error(`taskbook "${name}" is not installed: ${targetDir}`);
+	await rm(targetDir, { recursive: true, force: true });
+	return { name, dir: targetDir };
+}
+
+async function defaultConfirm(name, deps) {
+	// 生产:readline 读一行。bin/ugk.js dispatch 在 TUI 启动前,stdin 可同步交互。
+	const stdin = deps.stdin ?? process.stdin;
+	const stdout = deps.stdout ?? process.stdout;
+	stdout.write(`即将删除 taskbook "${name}"(位于 user tasks 目录)。继续?[y/N] `);
+	const rl = readline.createInterface({ input: stdin, output: stdout });
+	try {
+		const answer = (await rl.question("")).trim().toLowerCase();
+		return answer === "y" || answer === "yes";
+	} finally {
+		rl.close();
+	}
+}
+
+export async function runTaskRemoveCli(argv, deps = {}) {
+	const name = argv[2];
+	if (!name) {
+		deps.stderr?.write?.("Usage: ugk task remove <name> [-y|--yes]\n");
+		return 1;
+	}
+	const yes = argv.includes("-y") || argv.includes("--yes");
+	const confirm = deps.confirm ?? defaultConfirm;
+	try {
+		if (!yes) {
+			const ok = await confirm(name, deps);
+			if (!ok) {
+				deps.stdout?.write?.("未删除。\n");
+				return 1;
+			}
+		}
+		const result = await runTaskRemove(name, deps);
+		deps.stdout?.write?.(`已删除 taskbook "${result.name}"\n`);
+		return 0;
+	} catch (error) {
+		deps.stderr?.write?.(`${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	}
+}
+
+export function isTaskUpdateCommand(argv) {
+	return argv[0] === "task" && argv[1] === "update";
+}
+
+export async function runTaskUpdate(name, deps = {}) {
+	assertValidName(name);
+	// update = install(force)。force 路径自带"删旧目标再 rename",未装时直接装。
+	return runTaskInstall(name, { ...deps, force: true });
+}
+
+export async function runTaskUpdateCli(argv, deps = {}) {
+	const name = argv[2];
+	if (!name) {
+		deps.stderr?.write?.("Usage: ugk task update <name>\n");
+		return 1;
+	}
+	try {
+		const result = await runTaskUpdate(name, deps);
+		deps.stdout?.write?.(`已更新 taskbook "${result.name}"\n下一步: /task run ${result.name} <你的输入>\n`);
 		return 0;
 	} catch (error) {
 		deps.stderr?.write?.(`${error instanceof Error ? error.message : String(error)}\n`);

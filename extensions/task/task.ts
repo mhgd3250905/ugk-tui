@@ -569,11 +569,15 @@ function formatMissingEnvMessage(names: string[]): string {
 // 只列常见渠道作参考;但明确告诉 agent"装完重新调用 run_task",让 main agent 能自主补装后重试。
 // 这是 task 可移植 + agent 自治的闭环:校验失败 → 结构化反馈 → agent 装 → 重试。
 function formatMissingBinariesMessage(names: string[]): string {
+	// ponytail: 提示要让 agent 能识别"这就是失败原因"并采取正确行动(装依赖),
+	// 而不是猜测 cookie/CDP/重试等其他绕过。三个要点:
+	//   1. 明确"这是本次失败的根因,别尝试绕过"——建立因果
+	//   2. 安装渠道标注适用性(避免 pip 装 deno 这种非 python 包的误导)
+	//   3. 装完要验证(--version)再重试——PATH 未刷新会继续失败
 	return [
-		`缺少必需外部命令: ${names.join(", ")}`,
-		"请安装后重新调用 run_task(装完即可重试,无需改 task)。",
-		...names.map((name) => `常见安装渠道(按你的环境选): ${name} — pip install / winget install / brew install / npm i -g / 官网下载`),
-		"task 本身不负责安装,环境配置由你或 agent 决定。",
+		`task 失败的根因:缺少必需外部命令 ${names.map((n) => `"${n}"`).join(", ")}(它们不在 PATH 里)。这不是 task 逻辑问题,也不是 cookie/网络/权限问题——就是环境缺命令。不要尝试 cookie、CDP、换号、重试等其他绕过,装上依赖即可解决。`,
+		...names.map((name) => `安装 ${name}: Windows 用 \`winget install\` 或官网下载安装包;macOS 用 \`brew install\`;Linux 用包管理器。注意:不是所有命令都能用 pip/npm 装(如 deno/ffmpeg 是系统程序,不是 python/node 包),拿不准就查官网。装完在【新终端】里跑 \`${name} --version\` 验证有输出,再重试 task。`),
+		"装完依赖后重新调用 run_task 即可,task 本身不用改。",
 	].join("\n");
 }
 

@@ -318,33 +318,24 @@ body[data-signed-in="true"] [data-auth-link] { display: none !important; }
   border-radius: 7px;
   background: var(--control-bg);
 }
-.agent-board {
-  display: grid;
-  gap: 14px;
+.product-app-shot {
   min-width: 0;
-  padding: 18px;
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background:
     linear-gradient(180deg, rgba(46, 231, 101, 0.08), transparent 34%),
     var(--bg-elev);
 }
-.agent-board span,
+.product-app-shot img {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  object-position: left top;
+}
 .concept-grid span { color: var(--accent); font-size: 12px; font-weight: 820; letter-spacing: 0.08em; text-transform: uppercase; }
-.agent-prompt,
-.agent-result {
-  padding: 18px;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-}
-.agent-prompt strong { display: block; margin-top: 8px; color: var(--text); font-size: 24px; line-height: 1.25; }
-.agent-flow {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-.agent-flow div,
 .task-bento article,
 .concept-grid article {
   min-width: 0;
@@ -353,8 +344,6 @@ body[data-signed-in="true"] [data-auth-link] { display: none !important; }
   border-radius: var(--radius-sm);
   background: var(--control-bg-soft);
 }
-.agent-flow b { display: block; margin-top: 7px; color: var(--text); font-size: 15px; line-height: 1.35; }
-.agent-result ul { margin-top: 10px; padding-left: 18px; color: var(--text-muted); }
 .product-section { padding: 58px 0; }
 .section-head { display: grid; gap: 10px; max-width: 760px; margin-bottom: 24px; }
 .section-head h2,
@@ -762,9 +751,8 @@ button.metric:hover { color: var(--text); }
   .product-hero .hero-actions { align-items: stretch; flex-direction: column; }
   .product-hero .btn { width: 100%; }
   .product-proof { display: none; }
-  .agent-board { padding: 12px; }
-  .agent-flow { grid-template-columns: 1fr; }
-  .agent-prompt strong { font-size: 18px; }
+  .product-app-shot { padding: 6px; }
+  .product-app-shot img { aspect-ratio: 16 / 10; }
   .product-section { padding: 38px 0; }
   .section-head h2,
   .market-copy h2,

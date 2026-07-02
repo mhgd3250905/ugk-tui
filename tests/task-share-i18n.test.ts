@@ -87,6 +87,22 @@ test("task-share nav pages expose a theme switcher slot", () => {
 	}
 });
 
+test("cli auth page uses the marketplace shell and localized copy", () => {
+	const html = readFileSync("docs/task-share/cli-auth/index.html", "utf8");
+	assert.match(html, /<body class="marketplace-page">/);
+	assert.match(html, /class="page-head"/);
+	assert.match(html, /class="panel"/);
+	assert.doesNotMatch(html, /style="/);
+	assert.match(html, /data-i18n="cli.kicker"/);
+	assert.match(html, /data-i18n="cli.initial.title"/);
+	assert.match(html, /data-i18n="cli.initial.message"/);
+	assert.match(html, /removeAttribute\("data-i18n"\)/);
+
+	const { window } = loadI18n("?lang=zh-CN");
+	assert.equal(window.UGKI18N.t("cli.done.title"), "授权完成");
+	assert.equal(window.UGKI18N.t("cli.confirm.action"), "授权");
+});
+
 test("task-share mobile nav keeps theme and auth actions inside the menu", () => {
 	for (const file of [
 		"docs/task-share/index.html",

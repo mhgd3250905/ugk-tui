@@ -311,23 +311,32 @@ select.search option:checked { background: var(--bg-elev2); color: var(--accent)
 }
 .task-card h2 { font-size: 27px; font-weight: 640; letter-spacing: 0; line-height: 1.12; overflow-wrap: anywhere; }
 .desc { color: var(--text-muted); font-size: 14px; line-height: 1.7; min-height: 2lh; overflow-wrap: anywhere; }
-.metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding-top: 18px; border-top: 1px solid var(--border); }
+.card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.metric-row { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .metric {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 9px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #111110;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
 }
 button.metric { color: inherit; cursor: pointer; font: inherit; }
-button.metric:hover { border-color: var(--border-light); background: rgba(255, 255, 255, 0.045); }
-.metric[data-active="true"] { border-color: rgba(46, 231, 101, 0.42); background: var(--accent-soft); }
+button.metric:hover { color: var(--text); }
+.metric[data-active="true"] { color: var(--accent); }
 .metric-icon {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
   stroke: currentColor;
   stroke-width: 2.3;
@@ -338,7 +347,7 @@ button.metric:hover { border-color: var(--border-light); background: rgba(255, 2
 .metric-download .metric-icon { color: var(--accent); }
 .metric-like .metric-icon { color: #ff6f9f; }
 .metric-save .metric-icon { color: #ffd166; }
-.metric b { display: block; color: var(--text); font-size: 20px; font-weight: 680; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.metric b { display: block; color: currentColor; font-size: 13px; font-weight: 720; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 .install-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
 .install-row .command {
   min-width: 0;
@@ -352,8 +361,7 @@ button.metric:hover { border-color: var(--border-light); background: rgba(255, 2
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.card-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.card-actions .btn-download { margin-right: auto; }
+.btn-download { min-height: 34px; padding: 0 12px; font-size: 12px; }
 
 .page-head { padding: 76px 0 28px; }
 .page-head h1 { margin: 12px 0 10px; font-family: "Cascadia Mono", "SF Mono", Consolas, ui-monospace, monospace; font-size: 62px; font-weight: 900; letter-spacing: 0; line-height: 1; text-wrap: balance; }
@@ -526,9 +534,9 @@ button.metric:hover { border-color: var(--border-light); background: rgba(255, 2
   .catalog { grid-template-columns: 1fr; gap: 14px; }
   .task-card { padding: 18px; gap: 12px; }
   .task-card h2 { font-size: 24px; }
-  .metric-row { gap: 6px; }
-  .metric { justify-content: center; gap: 8px; padding: 9px 7px; }
-  .metric b { font-size: 18px; }
+  .metric-row { gap: 12px; }
+  .metric { justify-content: flex-start; gap: 6px; padding: 0; }
+  .metric b { font-size: 13px; }
   .split, .form-grid { grid-template-columns: 1fr; }
   .panel { padding: 22px; }
   .page-head { padding-top: 52px; }
@@ -541,8 +549,7 @@ button.metric:hover { border-color: var(--border-light); background: rgba(255, 2
   .toast { right: 16px; bottom: 16px; }
   .install-row { grid-template-columns: 1fr; }
   .install-row .btn { width: 100%; }
-  .metric-row { grid-template-columns: 1fr; }
-  .metric { padding: 9px; }
-  .card-actions .btn-download { width: 100%; margin-right: 0; }
+  .card-foot { align-items: flex-start; flex-direction: column; }
+  .btn-download { width: 100%; }
   .file-drop { align-items: stretch; flex-direction: column; }
 }

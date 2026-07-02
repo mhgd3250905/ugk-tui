@@ -2233,7 +2233,7 @@ export function registerTask(pi: ExtensionAPI): void {
 				ctx.ui.notify("Task disabled.", "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /task list|show|new|run|edit|save|delete|publish|toggle|exit", "warning");
+			ctx.ui.notify("Usage: /task list|show|new|run|edit|rename|save|delete|publish|toggle|exit", "warning");
 	}
 
 	pi.registerCommand("task", {

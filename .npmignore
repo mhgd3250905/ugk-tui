@@ -26,3 +26,7 @@ skills/xiaoyuzhou-dl/
 skills/jianying-tts-concat/
 skills/mimo-tts/
 .flow/
+functions/
+migrations/
+wrangler.toml
+scripts/

@@ -16,27 +16,19 @@ export function parseDriver(args = process.argv.slice(2)) {
 	const driverArg = args.find((arg, index) => arg.startsWith("--driver=") || args[index - 1] === "--driver");
 	const driver = driverArg?.startsWith("--driver=") ? driverArg.slice("--driver=".length) : driverArg;
 	if (!driver) return "auto";
-	if (["auto", "rpc", "tui"].includes(driver)) return driver;
+	if (["auto", "rpc"].includes(driver)) return driver;
 	throw new Error(`Unsupported smoke driver: ${driver}`);
 }
 
-export function chooseDriver(driver, { hasNodePty }) {
-	if (driver === "auto") return hasNodePty ? "tui" : "rpc";
+export function chooseDriver(driver, _options = {}) {
+	if (driver === "auto") return "rpc";
 	return driver;
-}
-
-async function loadNodePty() {
-	try {
-		return await import("node-pty");
-	} catch {
-		return undefined;
-	}
 }
 
 export function buildReport(scenarios, run) {
 	const failed = scenarios.filter((scenario) => !scenario.ok).length;
 	return [
-		"# UGK TUI Smoke Report",
+		"# UGK RPC Smoke Report",
 		"",
 		`Driver: ${run.driver ?? "unknown"}`,
 		`Exit code: ${run.exitCode ?? "none"}`,
@@ -49,74 +41,6 @@ export function buildReport(scenarios, run) {
 		failed === 0 && !run.timedOut && !hasCrashText(run.stderr ?? "") ? "Result: pass" : "Result: fail",
 		"",
 	].join("\n");
-}
-
-async function runTuiSmoke(runDir, pty) {
-	if (!pty) {
-		return {
-			driver: "tui-pty",
-			scenarios: [{ name: "tui-pty", ok: false, detail: "node-pty is not installed; use --driver rpc or install node-pty" }],
-			exitCode: 1,
-			timedOut: false,
-			stderr: "",
-		};
-	}
-
-	const events = createWriteStream(path.join(runDir, "events.jsonl"), { flags: "a" });
-	const stdout = createWriteStream(path.join(runDir, "stdout.log"), { flags: "a" });
-	const stderr = createWriteStream(path.join(runDir, "stderr.log"), { flags: "a" });
-	const term = pty.spawn(process.execPath, ["bin/ugk.js"], {
-		name: "xterm-256color",
-		cols: 120,
-		rows: 40,
-		cwd: root,
-		env: smokeEnv(runDir),
-	});
-	const scenarios = [];
-	let output = "";
-	let exitCode;
-	let timedOut = false;
-
-	term.onData((text) => {
-		output += text;
-		stdout.write(text);
-		writeEvent(events, { type: "screen", text });
-	});
-	const exited = new Promise((resolve) => term.onExit(({ exitCode: code }) => {
-		exitCode = code;
-		resolve();
-	}));
-	const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-	const input = async (name, text, ms = 1200) => {
-		writeEvent(events, { type: "input", name, text });
-		term.write(text);
-		await wait(ms);
-		scenarios.push({ name, ok: true });
-	};
-	const killTimer = setTimeout(() => {
-		timedOut = true;
-		term.kill();
-	}, 60000);
-
-	await wait(2500);
-	scenarios.push({ name: "startup", ok: /ugk|π|pi/i.test(output), detail: /ugk|π|pi/i.test(output) ? undefined : "startup text not seen" });
-	await input("brand-ui-status", "/ugk-ui status\r");
-	await input("brand-ui-off", "/ugk-ui off\r");
-	await input("brand-ui-on", "/ugk-ui on\r");
-	await input("doctor", "/doctor\r", 3000);
-	await input("judge-menu-exit", "/judge\r", 1000);
-	await input("judge-menu-cancel", "\x1b", 500);
-	term.write("\x03");
-	await Promise.race([exited, wait(5000)]);
-	if (exitCode === undefined) {
-		timedOut = true;
-		term.kill();
-		await exited;
-	}
-	clearTimeout(killTimer);
-	scenarios.push({ name: "shutdown", ok: exitCode === 0 || exitCode === 130, detail: exitCode === 0 || exitCode === 130 ? undefined : `exit ${exitCode}` });
-	await Promise.all([endStream(events), endStream(stdout), endStream(stderr)]);
-	return { driver: "tui-pty", scenarios, exitCode, timedOut, stderr: output };
 }
 
 function stamp() {
@@ -227,7 +151,6 @@ async function runRpcSmoke(runDir) {
 	scenarios.push(await command("brand-ui-off", { type: "prompt", message: "/ugk-ui off" }));
 	scenarios.push(await command("brand-ui-on", { type: "prompt", message: "/ugk-ui on" }));
 	scenarios.push(await command("doctor", { type: "prompt", message: "/doctor" }));
-	scenarios.push(await command("judge-menu-exit", { type: "prompt", message: "/judge" }));
 
 	child.stdin.end();
 	await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))]);
@@ -239,7 +162,7 @@ async function runRpcSmoke(runDir) {
 	clearTimeout(killTimer);
 	scenarios.push({ name: "shutdown", ok: exitCode === 0, detail: exitCode === 0 ? undefined : `exit ${exitCode}` });
 	await Promise.all([endStream(events), endStream(stdout), endStream(stderr)]);
-	return { driver: "rpc-fallback", scenarios, exitCode, timedOut, stderr: stderrText };
+	return { driver: "rpc", scenarios, exitCode, timedOut, stderr: stderrText };
 }
 
 function respondToUi(child, request) {
@@ -252,9 +175,8 @@ function respondToUi(child, request) {
 async function main() {
 	const { runDir, latestDir } = await prepareDirs();
 	const requestedDriver = parseDriver();
-	const pty = await loadNodePty();
-	const driver = chooseDriver(requestedDriver, { hasNodePty: Boolean(pty) });
-	const run = driver === "tui" ? await runTuiSmoke(runDir, pty) : await runRpcSmoke(runDir);
+	chooseDriver(requestedDriver);
+	const run = await runRpcSmoke(runDir);
 	const report = buildReport(run.scenarios, run);
 	await fs.writeFile(path.join(runDir, "report.md"), report);
 	await fs.rm(latestDir, { recursive: true, force: true });

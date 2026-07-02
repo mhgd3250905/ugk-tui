@@ -1481,14 +1481,25 @@ function formatSubtaskToolText(mode: "single" | "parallel", results: SubtaskResu
 	const header = mode === "parallel" ? `${passed}/${results.length} succeeded` : `run_task ${results[0]?.status.toUpperCase() ?? "FAIL"}`;
 	return [
 		header,
-		// workerSummary 不进 LLM context —— 它可能很长(产物摘要表格等),白占 token
-		// 还会触发主 agent 进入后续总结轮(那轮若 provider 卡住,Esc 也救不回来)。
-		// 完整 workerSummary 仍在 details.results[].workerSummary,UI/调试照常可取。
+		// ponytail: workerSummary 的取舍按 status 分流。
+		// PASS —— 产物摘要可能很长(表格/路径清单),白占 token 还可能触发主 agent
+		// 多一轮总结(那轮若 provider 卡住,Esc 也救不回来),所以 PASS 不带 summary,
+		// 完整内容仍在 details.results[].workerSummary,UI/调试照常可取。
+		// FAIL —— 失败原因正是 agent 此刻最需要的信息(缺命令/越界/质量打回/解析失败)。
+		// 若 FAIL 也不带 summary,agent 收到的就是个光秃秃 "FAIL + outputDir(可能不存在)",
+		// 无从判断根因 → 只能瞎猜绕过(去查 cookie、自己手跑 yt-dlp 等),违背 taskbook 闭环。
+		// 实测(2026-07-02):FAIL summary 不进文本时,即使文案明确写"缺 deno、别绕过",
+		// agent 仍全程未读 deno 一词,直接绕过 taskbook 自己 bash 跑 yt-dlp。
+		// 因此 FAIL 把 workerSummary 带进文本,让 agent 看到诊断、按提示行动。
 		...results.map((result) => [
 			`- ${result.name}: ${result.status.toUpperCase()}`,
 			`  outputDir: ${result.outputDir}`,
 			result.artifacts.length > 0 ? `  artifacts: ${result.artifacts.join(", ")}` : "",
 			result.verifyFailures.length > 0 ? `  verifyFailures: ${JSON.stringify(result.verifyFailures)}` : "",
+			// FAIL 时附上诊断。trim 防空/纯空白。多行 summary 整体缩进对齐。
+			result.status === "fail" && result.workerSummary && result.workerSummary.trim()
+				? `  reason: ${result.workerSummary.trim().replace(/\n/g, "\n  ")}`
+				: "",
 		].filter(Boolean).join("\n")),
 	].join("\n");
 }

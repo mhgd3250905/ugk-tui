@@ -102,14 +102,13 @@ function taskCardHTML(t){
     '<button class="metric metric-like" type="button" data-action="like" data-active="false" aria-pressed="false" aria-label="'+tr('card.like')+': '+Number(t.likes??0)+'" title="'+tr('card.like')+'" data-task="'+name+'" data-api="/api/tasks/'+name+'/like"><svg class="metric-icon" focusable="false" aria-hidden="true"><use href="#icon-heart"></use></svg><b data-count="'+name+':likes">'+Number(t.likes??0)+'</b></button>',
     '<button class="metric metric-save" type="button" data-action="favorite" data-active="false" aria-pressed="false" aria-label="'+tr('card.save')+': '+Number(t.favorites??0)+'" title="'+tr('card.save')+'" data-task="'+name+'" data-api="/api/tasks/'+name+'/favorite"><svg class="metric-icon" focusable="false" aria-hidden="true"><use href="#icon-bookmark"></use></svg><b data-count="'+name+':favorites">'+Number(t.favorites??0)+'</b></button>'
   ].join('');
-  const actions=t.downloadUrl?'<div class="card-actions"><a class="btn btn-secondary btn-download" href="'+safeHref(t.downloadUrl)+'" data-download-api="/api/tasks/'+name+'/download" data-task="'+name+'" download aria-label="'+tr('card.downloadZip')+'" title="'+tr('card.downloadZip')+'"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-download"></use></svg>'+tr('card.downloadZip')+'</a></div>':'';
+  const actions=t.downloadUrl?'<a class="btn btn-secondary btn-download" href="'+safeHref(t.downloadUrl)+'" data-download-api="/api/tasks/'+name+'/download" data-task="'+name+'" download aria-label="'+tr('card.downloadZip')+'" title="'+tr('card.downloadZip')+'"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-download"></use></svg>'+tr('card.downloadZip')+'</a>':'';
   return '<article class="task-card" data-task-card data-task="'+name+'" data-category="'+esc(cat)+'" data-downloads="'+Number(t.downloads??0)+'" data-likes="'+Number(t.likes??0)+'" data-favorites="'+Number(t.favorites??0)+'" data-newest="'+Number(t.newest??0)+'" data-search="'+esc((t.name+' '+(t.title||'')+' '+(t.description||'')+' '+((t.tags||[]).join(' '))).toLowerCase())+'">'
     +'<div class="card-head"><div class="chips"><span class="chip">'+esc(cat)+'</span><span class="chip">@'+author+'</span></div><span class="task-glyph"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-task"></use></svg></span></div>'
     +'<h2>'+title+'</h2>'
     +'<p class="desc">'+desc+'</p>'
-    +'<div class="metric-row">'+metrics+'</div>'
     +'<div class="install-row"><code class="command">'+esc(install)+'</code><button class="btn btn-primary" type="button" data-copy="'+esc(install)+'" aria-label="'+tr('card.copyInstall')+'" title="'+tr('card.copyInstall')+'"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-copy"></use></svg>'+tr('card.copy')+'</button></div>'
-    +actions+'</article>';
+    +'<div class="card-foot"><div class="metric-row">'+metrics+'</div>'+actions+'</div></article>';
 }
 function renderCatalogTasks(root,catFilter,tasks){
   const cats=[...new Set(tasks.map(t=>t.category||t.tags?.[0]||'task'))].sort();

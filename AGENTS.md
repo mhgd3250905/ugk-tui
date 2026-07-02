@@ -57,7 +57,7 @@
 
 ### task 固定任务委托系统
 
-- `/task` 打开菜单(中文,零命令记忆);`/task list|show|new|run|edit|rename|save|delete|toggle|exit`
+- `/task` 打开菜单(中文,零命令记忆);`/task list|show|new|run|edit|rename|save|delete|publish|toggle|exit`
 - 四阶段创造:`planning`(对齐需求)→ `executing`(亲手做一遍)→ `reviewing`(产 skill+verify+contract)→ `landed`(taskbook 就绪)
 - 复用:`/task run <name> <自然语言>` → 翻译 input → worker 执行 → 机器验收 → PASS/FAIL
 - taskbook 存 user scope(`~/.pi/agent/tasks/`)或 project scope(`<cwd>/.tasks/`)
@@ -73,11 +73,13 @@
 
 - `/ugk` — 看 agent 状态
 - `/welcome` — 欢迎模板
+- `/subagent` — 子代理委派(single/parallel/chain)
 - `/update` — 手动检查 GitHub main 并提示更新
 - `/cdp` — 管理 Chrome CDP
 - `/mcp` — 管理 MCP server
 - `/task` — 固定任务委托
 - `/plan` — 只读计划模式
+- `/todos` — 待办清单(plan-mode 进度)
 - `/ugk-ui` — 开关品牌 UI
 - `/ui-language` — UGK 菜单/UI 语言(跨会话持久,支持常见语言)
 - `/ugk-autopilot` — 工具确认总开关菜单(自动放行可逆确认,危险动作仍归人)

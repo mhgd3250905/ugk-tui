@@ -2,7 +2,7 @@
 
 **ugk** — 一个开箱即用的终端编码 agent。一条命令安装,打 `ugk` 即用。
 
-> 基于 [pi](https://github.com/earendil-works/pi) 构建,但用户无需关心 pi——`npm i -g ugk-agent` 装完就拥有全部能力(投屏、子代理、定时任务、plan 模式、MCP tools 接入等)。
+> 基于 [pi](https://github.com/earendil-works/pi) 构建,但用户无需关心 pi——`npm i -g ugk-agent` 装完就拥有全部能力(子代理、定时任务、plan 模式、MCP tools 接入等)。
 
 ---
 

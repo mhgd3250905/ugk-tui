@@ -119,6 +119,31 @@ test("task-share marketplace moved under marketplace route", () => {
 	assert.match(html, /\.\.\/assets\/empty-taskbook\.png/);
 });
 
+test("task-share marketplace cards show version and bottom author", () => {
+	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
+	const css = readFileSync("docs/task-share/styles.css", "utf8");
+	assert.match(html, /card-version/);
+	assert.match(html, /t\.version/);
+	assert.match(html, /card-author/);
+	assert.doesNotMatch(html, /<span class="chip">@'\+author/);
+	assert.match(css, /\.card-author \{[^}]*max-width:/);
+	assert.match(css, /\.card-author \{[^}]*text-overflow: ellipsis/);
+});
+
+test("task-share copy feedback keeps label and swaps icon", () => {
+	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
+	assert.match(html, /<symbol id="icon-check"/);
+	assert.match(html, /data-copy-icon/);
+	assert.match(html, /setAttribute\('href','#icon-check'\)/);
+	assert.doesNotMatch(html, /textContent=tr\('card\.copied'\)/);
+});
+
+test("task-share admin submissions show version", () => {
+	const html = readFileSync("docs/task-share/admin/index.html", "utf8");
+	assert.match(html, /t\.version/);
+	assert.match(html, /card-version/);
+});
+
 test("cli auth page uses the marketplace shell and localized copy", () => {
 	const html = readFileSync("docs/task-share/cli-auth/index.html", "utf8");
 	assert.match(html, /<body class="marketplace-page">/);

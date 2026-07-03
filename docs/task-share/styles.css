@@ -614,6 +614,7 @@ select.search option:checked { background: var(--bg-elev2); color: var(--accent)
 .task-card:hover { border-color: var(--border-light); transform: translateY(-1px); box-shadow: var(--shadow); }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .task-card .chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.card-version { color: var(--accent); border-color: rgba(46, 231, 101, 0.28); background: var(--accent-soft); }
 .task-glyph {
   width: 34px;
   height: 34px;
@@ -637,6 +638,8 @@ select.search option:checked { background: var(--bg-elev2); color: var(--accent)
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+.card-meta { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; margin-left: auto; }
+.card-author { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metric-row { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .metric {
   min-width: 0;

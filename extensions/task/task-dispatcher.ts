@@ -301,6 +301,10 @@ export async function resolveRuntimeInputFromText(ctx: any, skill: string, contr
 	// 它吐出 required 字段但值是残片(如 timeWindow:"{mode:" 这种合法 JSON 但无意义字符串残片)
 	// 视为解析失败,走"未能解析必填字段"分支(headless 抛错)。这把无效值的拦截点从 verify
 	// (产物层)前移到 dispatcher(输入层),worker 拿不到残片就没机会现编默认值。
+	// ponytail 边界:required 为空(全可选 contract)时 every() 返回 true,{} 会被判
+	// coversRequired=true,走成功分支返回 {...defaults} —— 这是期望行为(全可选时 {}
+	// 合法,等价全走 default)。若未来要区分"用户显式啥都没说"与"dispatcher 失败",
+	// 需在 contract 层加语义标记,不能靠 coversRequired(它只管 required 字段是否齐全有效)。
 	const coversRequired = (input: unknown): boolean =>
 		!!input && typeof input === "object" && !Array.isArray(input) &&
 		required.every((field) =>

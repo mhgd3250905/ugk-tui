@@ -1,6 +1,6 @@
 # task-extension-followup-9 — dispatcher 翻译质量 eval 框架 + 空对象门禁修复
 
-> **状态:已完成(2026-07-03)。** 新增通用 dispatcher eval 框架(补上翻译质量的测试盲区),并修复一个 dispatcher 在 required 全缺失时返回空对象绕过门禁的缺陷。eval 框架实测把 6 个 taskbook 的 dispatcher 准确率从 91% 提到 100%。`npm test` 603/603 pass。
+> **状态:已完成(2026-07-03)。** 新增通用 dispatcher eval 框架(补上翻译质量的测试盲区),并修复一个 dispatcher 在 required 全缺失时返回空对象绕过门禁的缺陷。eval 框架实测把 6 个 taskbook 的 dispatcher 准确率从 93% (62/67) 提到 100% (67/67)。`npm test` 603/603 pass。
 >
 > **更新时间**:2026-07-03
 
@@ -94,7 +94,12 @@ eval **不重写**翻译逻辑,直接调用生产代码:
 
 ## eval 实测结果(6 个 taskbook)
 
-首轮 eval 发现:5 个配音 task 各有 1 条 FAIL,全是同一根因(required 缺失返回 `{}`)。修复 prompt 后重跑:
+首轮 eval 发现两类 FAIL,根因不同:
+
+- **5 个配音 task(whisper/cleaner/translator/to-speech/composer)各有 1 条 required 缺失 FAIL**:用户没给必填字段时 dispatcher 返回 `{}` 而非解析失败。这是 dispatcher prompt 缺陷,修复后转 PASS。
+- **video-downloader 4 条 FAIL**:其中 2 条是 eval 框架自身的 `in:omitted` 原语 bug 误判(可选字段省略被判 FAIL),另 2 条是 `path-equals` 缺失导致路径斜杠差异误判。这是 evaluator 缺陷,修原语后转 PASS,与 dispatcher 无关。
+
+两类修复后重跑结果:
 
 | task | 修复前 | 修复后 |
 |---|---|---|
@@ -104,6 +109,9 @@ eval **不重写**翻译逻辑,直接调用生产代码:
 | subtitle-fluent-translator | 13/14 (93%) | 14/14 (100%) |
 | subtitle-to-speech | 10/11 (91%) | 11/11 (100%) |
 | video-zh-composer | 9/10 (90%) | 10/10 (100%) |
+| **合计** | **62/67 (93%)** | **67/67 (100%)** |
+
+> 用例数说明:judged 用例共 67 条(另有 5 条 `expected:"open"` 不计通过率:translator 1 + to-speech 3 + video-downloader 1)。首轮 eval 时部分 task 的 open 用例和边界用例仍在补充,数字以最终 cases.json 为准。
 
 修复前后的差异主要来自两个修:(1) dispatcher prompt 空对象修复;(2) eval 框架自身的 `in:omitted`/`path-equals` 原语修正(首轮有误判)。
 

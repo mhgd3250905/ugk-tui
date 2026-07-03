@@ -601,9 +601,11 @@ test("buildTaskDispatcherPrompt tells dispatcher not to emit empty object when a
 });
 
 test("dispatcher returns undefined (no JSON output) → headless reports no valid output", async () => {
-	// ponytail: 配合上面的 prompt 修复 —— dispatcher 在全 required 缺失时不输出 JSON,
+	// ponytail: dispatcher 在全 required 缺失时不输出 JSON(prompt 修复后的目标行为),
 	// extractRuntimeInputFromText 返回 undefined,机制层 dispatched=undefined,
 	// headless 走 line 335 的"无有效输出"分支。钉住这条路径的报错措辞,防止退化。
+	// 注意:这条测的是"目标行为"(dispatcher 听话不输出 JSON),不是原始 bug 场景 ——
+	// 原始 bug 是 dispatcher 输出 {} 经解析得到 {} 对象,见下一条对照测试。
 	setTaskDispatcherForTests(async () => undefined);
 	try {
 		await assert.rejects(
@@ -612,6 +614,27 @@ test("dispatcher returns undefined (no JSON output) → headless reports no vali
 				runtimeInputMeta: { file_path: { required: true } },
 			}, "转写个视频", undefined, true),
 			/dispatcher 无有效输出/,
+		);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
+test("dispatcher returns empty object {} → headless reports missing required, not 'no valid output'", async () => {
+	// ponytail: 原始 bug 场景的回归保护。dispatcher 输出 {} 经 extractRuntimeInputFromText
+	// 解析得到 {} 对象(不是 undefined!parseCandidate 把 {} 当合法对象返回)。
+	// {} 对有 required 的 contract 会被 coversRequired 兜住(required 缺失 → false),
+	// 进入 headless 报错分支,但 detail 走"缺失字段: file_path"而非"无有效输出"
+	// (后者只在 dispatched===undefined 时触发,line 335 的 !dispatched 判断)。
+	// 这条和上一条形成对照:两个路径报错措辞不同,不能混淆。
+	setTaskDispatcherForTests(async () => ({}));  // 返回 {} 而非 undefined
+	try {
+		await assert.rejects(
+			() => resolveRuntimeInputFromText({}, "# Skill", {
+				runtimeInput: ["file_path"],
+				runtimeInputMeta: { file_path: { required: true } },
+			}, "转写个视频", undefined, true),
+			/缺失字段: file_path/,
 		);
 	} finally {
 		setTaskDispatcherForTests(undefined);

@@ -1663,13 +1663,22 @@ test("/task run uses absolute contract outputDir as the final output directory",
 		} as any;
 	});
 	setTaskDispatcherForTests(async () => ({ url: "https://x", expectedOutputDir: finalOutputDir }));
+	setTaskCheckerRunnerForTests(async () => ({
+		agent: "checker",
+		agentSource: "user",
+		task: "task",
+		exitCode: 0,
+		messages: [{ role: "assistant", content: [{ type: "text", text: "```json\n{\"verdict\":\"abort\",\"reason\":\"test verify failed\"}\n```" }] }],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+	}) as any);
 	try {
 		await saveTaskbook("project", cwd, "custom-output", {
 			description: "custom output",
 			spec,
 			skill: "# Skill",
 			verify: "import {writeFile} from 'node:fs/promises'; if (process.env.TASK_OUTPUT_DIR !== JSON.parse(process.env.TASK_INPUT).expectedOutputDir) process.exit(1); await writeFile(`${process.env.TASK_OUTPUT_DIR}/ok.txt`, 'ok', 'utf8'); process.exit(0);\n",
-			contract: { outputDir: finalOutputDir, runtimeInput: ["url"], artifacts: [{ name: "ok.txt", type: "file" }] },
+			contract: { outputDir: finalOutputDir, runtimeInput: ["url", "expectedOutputDir"], artifacts: [{ name: "ok.txt", type: "file" }] },
 		});
 
 		await commands.get("task").handler("run custom-output https://x", ctx);
@@ -1681,6 +1690,7 @@ test("/task run uses absolute contract outputDir as the final output directory",
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
+		setTaskCheckerRunnerForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });

@@ -43,6 +43,12 @@ function taskZip(name: string): Uint8Array {
 	return zipSync(encoded);
 }
 
+function taskZipWithFiles(name: string, files: Record<string, string>): Uint8Array {
+	const encoded: Record<string, Uint8Array> = {};
+	for (const [file, text] of Object.entries({ ...SAMPLE_FILES, ...files })) encoded[file] = new TextEncoder().encode(file === "taskbook.json" ? JSON.stringify({ ...JSON.parse(text), name }) : text);
+	return zipSync(encoded);
+}
+
 // zip with a wrapper directory (creators naturally run `zip -r foo.zip foo/`)
 function taskZipWithWrapper(name: string): Uint8Array {
 	const encoded: Record<string, Uint8Array> = {};
@@ -343,6 +349,21 @@ test("githubCallback rejects mismatched state", async () => {
 	assert.match(await response.text(), /state/i);
 });
 
+test("githubCallback crash response does not mention debug_log", async () => {
+	const response = await githubCallback(
+		new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=state-1", {
+			headers: { cookie: "ugk_oauth_state=state-1" },
+		}),
+		env(),
+		{ fetch: async () => { throw new Error("boom"); } },
+	);
+	const text = await response.text();
+
+	assert.equal(response.status, 500);
+	assert.match(text, /callback crashed/i);
+	assert.doesNotMatch(text, /debug_log/i);
+});
+
 test("session endpoint returns the signed-in user", async () => {
 	const testEnv = env();
 	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
@@ -517,6 +538,33 @@ test("task submissions reject a package whose taskbook name mismatches", async (
 
 	assert.equal(response.status, 400);
 	assert.equal(body.error, "invalid_package");
+});
+
+test("task submissions reject malformed dependency contract fields", async () => {
+	const cases = [
+		["requiredEnv", "UGK_TOKEN"],
+		["requiredTools", ["read", 1]],
+		["requiredBinaries", "node"],
+	] as const;
+	for (const [field, value] of cases) {
+		const testEnv = env();
+		await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+		const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+		const form = new FormData();
+		form.set("name", "pkg-task");
+		form.set("version", "1.0.0");
+		form.set("title", "Bad Contract");
+		form.set("description", `contract.${field} is malformed`);
+		form.set("artifact", new File([taskZipWithFiles("pkg-task", { "contract.json": JSON.stringify({ [field]: value }) }) as BlobPart], "bad-contract.zip", { type: "application/zip" }));
+
+		const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+		const body = await response.json();
+
+		assert.equal(response.status, 400);
+		assert.equal(body.error, "invalid_package");
+		assert.match(body.detail, new RegExp(`Invalid contract\\.${field}`));
+		assert.equal(testEnv.TASK_UPLOADS.objects.size, 0);
+	}
 });
 
 test("task submissions reject a package that references a missing scripts file", async () => {
@@ -992,4 +1040,3 @@ test("createCliToken atomic claim refuses a second signing for an already-claime
 	assert.equal(poll.status, "ok");
 	assert.match(poll.token, /^[0-9a-f]{32}$/);
 });
-

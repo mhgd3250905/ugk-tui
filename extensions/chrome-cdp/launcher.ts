@@ -85,7 +85,7 @@ export function getChromeLaunchCommand(options: {
 	return {
 		command,
 		profilePath,
-		args: [`--remote-debugging-port=${options.port}`, `--user-data-dir=${profilePath}`],
+		args: [`--remote-debugging-port=${options.port}`, "--remote-debugging-address=127.0.0.1", `--user-data-dir=${profilePath}`],
 	};
 }
 

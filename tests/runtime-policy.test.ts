@@ -44,6 +44,7 @@ test("default test script excludes slow MCP stdio integration tests", () => {
 	assert.equal(fs.existsSync("tests/integration/mcp-exit-timing.test.ts"), true);
 	assert.equal(pkg.scripts.test, 'node --test "tests/*.test.ts"');
 	assert.equal(pkg.scripts["test:integration"], 'node --test "tests/integration/*.test.ts"');
+	assert.equal(pkg.scripts["test:all"], "npm test && npm run test:integration");
 });
 
 test("applyUgkRuntimePolicy disables pi-owned update surfaces", () => {

@@ -319,14 +319,14 @@ test("run_task parallel confirms protected tools once for the batch", async () =
 			spec,
 			skill: "Use chrome_cdp.",
 			verify: "process.exit(0);\n",
-			contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+			contract: { requiredTools: ["chrome_cdp"], runtimeInput: ["text"], artifacts: [] },
 		});
 		await saveTaskbook("project", cwd, "protected-b", {
 			description: "protected b",
 			spec,
 			skill: "Use chrome_cdp.",
 			verify: "process.exit(0);\n",
-			contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+			contract: { requiredTools: ["chrome_cdp"], runtimeInput: ["text"], artifacts: [] },
 		});
 		const tool = tools.find((item) => item.name === "run_task");
 
@@ -369,14 +369,14 @@ test("run_task parallel hydrates requiredEnv once for the batch (dedup)", async 
 			spec,
 			skill: "# Skill",
 			verify: "process.exit(0);\n",
-			contract: { runtimeInput: [], artifacts: [], requiredEnv: [envName] },
+			contract: { runtimeInput: ["text"], artifacts: [], requiredEnv: [envName] },
 		});
 		await saveTaskbook("project", cwd, "needs-env-b", {
 			description: "needs env b",
 			spec,
 			skill: "# Skill",
 			verify: "process.exit(0);\n",
-			contract: { runtimeInput: [], artifacts: [], requiredEnv: [envName] },
+			contract: { runtimeInput: ["text"], artifacts: [], requiredEnv: [envName] },
 		});
 		const tool = tools.find((item) => item.name === "run_task");
 
@@ -423,7 +423,7 @@ test("run_task parallel FAILs the missing-binary task without breaking the batch
 			spec,
 			skill: "# Skill",
 			verify: "process.exit(0);\n",
-			contract: { runtimeInput: [], artifacts: [], requiredBinaries: ["node"] },
+			contract: { runtimeInput: ["text"], artifacts: [], requiredBinaries: ["node"] },
 		});
 		const tool = tools.find((item) => item.name === "run_task");
 
@@ -615,14 +615,14 @@ test("run_task skips protected-tool confirm when autopilot is on", async () => {
 				spec,
 				skill: "Use chrome_cdp.",
 				verify: "process.exit(0);\n",
-				contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+				contract: { requiredTools: ["chrome_cdp"], runtimeInput: ["text"], artifacts: [] },
 			});
 			await saveTaskbook("project", cwd, "protected-b", {
 				description: "protected b",
 				spec,
 				skill: "Use chrome_cdp.",
 				verify: "process.exit(0);\n",
-				contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+				contract: { requiredTools: ["chrome_cdp"], runtimeInput: ["text"], artifacts: [] },
 			});
 			const tool = tools.find((item) => item.name === "run_task");
 

@@ -342,6 +342,34 @@ test("runTaskInstall rejects malformed specs before writing files", async () => 
 	}
 });
 
+test("runTaskInstall rejects malformed dependency contract fields before writing files", async () => {
+	const agentDir = tempDir();
+	try {
+		const cases = [
+			["requiredEnv", "UGK_TOKEN"],
+			["requiredTools", ["read", 1]],
+			["requiredBinaries", "node"],
+		] as const;
+		for (const [field, value] of cases) {
+			const badContract = JSON.stringify({ ...contract, [field]: value });
+			const fetch = fakeFetch({
+				"https://example.test/manifest.json": manifestFor("grapheme-count"),
+				...Object.fromEntries(Object.entries({ ...files, "contract.json": badContract }).map(([file, text]) => [`https://example.test/${file}`, text])),
+			});
+
+			await assert.rejects(() => runTaskInstall("grapheme-count", {
+				agentDir,
+				fetch,
+				manifestUrl: "https://example.test/manifest.json",
+			}), new RegExp(`Invalid contract\\.${field}`));
+		}
+
+		assert.equal(existsSync(path.join(agentDir, "tasks", "grapheme-count")), false);
+	} finally {
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
 test("runTaskInstall installs every safe file listed by the manifest", async () => {
 	const agentDir = tempDir();
 	try {

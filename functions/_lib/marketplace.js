@@ -124,9 +124,17 @@ function isRequirementsSpec(value) {
 function assertValidContract(contract) {
 	if (!contract || typeof contract !== "object" || Array.isArray(contract)) throw new Error("Invalid contract.json");
 	if (contract.runtimeInput !== undefined && !isStringArray(contract.runtimeInput)) throw new Error("Invalid contract.runtimeInput");
+	if (contract.requiredEnv !== undefined && !isStringArray(contract.requiredEnv)) throw new Error("Invalid contract.requiredEnv");
+	if (contract.requiredTools !== undefined && !isStringArray(contract.requiredTools)) throw new Error("Invalid contract.requiredTools");
+	if (contract.requiredBinaries !== undefined && !isStringArray(contract.requiredBinaries)) throw new Error("Invalid contract.requiredBinaries");
 	if (contract.runtimeInputMeta === undefined) return;
 	if (!contract.runtimeInputMeta || typeof contract.runtimeInputMeta !== "object" || Array.isArray(contract.runtimeInputMeta)) {
 		throw new Error("Invalid contract.runtimeInputMeta");
+	}
+	const fields = new Set(isStringArray(contract.runtimeInput) ? contract.runtimeInput : []);
+	for (const [field, meta] of Object.entries(contract.runtimeInputMeta)) {
+		if (!fields.has(field)) throw new Error(`Invalid contract.runtimeInputMeta: "${field}" is not declared in runtimeInput`);
+		if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new Error(`Invalid contract.runtimeInputMeta.${field}`);
 	}
 }
 

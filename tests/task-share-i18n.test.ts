@@ -138,6 +138,21 @@ test("task-share copy feedback keeps label and swaps icon", () => {
 	assert.doesNotMatch(html, /textContent=tr\('card\.copied'\)/);
 });
 
+test("task-share marketplace uses cache and optimistic metric feedback", () => {
+	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
+	const css = readFileSync("docs/task-share/styles.css", "utf8");
+	assert.match(html, /sessionStorage\.getItem\(catalogCacheKey\)/);
+	assert.match(html, /function optimisticTaskAction/);
+	assert.match(html, /function rollbackTaskAction/);
+	assert.match(html, /statsRefreshPromise/);
+	assert.match(html, /if\(!renderCatalogFromCache\(\)\)refreshCatalog\(\)/);
+	assert.match(html, /if\(session\.user\)refreshStats\(\)/);
+	assert.match(css, /--metric-like-text:/);
+	assert.match(css, /--metric-save-text:/);
+	assert.match(css, /\.metric-like \{ --metric-color: var\(--metric-like\); --metric-text: var\(--metric-like-text\); \}/);
+	assert.match(css, /\.metric\[data-busy="true"\]/);
+});
+
 test("task-share admin submissions show version", () => {
 	const html = readFileSync("docs/task-share/admin/index.html", "utf8");
 	assert.match(html, /t\.version/);

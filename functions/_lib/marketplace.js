@@ -808,7 +808,7 @@ export async function recordDownload(request, env, name) {
 
 export async function buildManifest(request, env) {
 	const rows = await env.DB.prepare(
-		`SELECT name, title, description, author_name, latest_version
+		`SELECT name, title, description, author_name, latest_version, download_count, like_count, favorite_count
 		FROM tasks
 		WHERE latest_version IS NOT NULL
 		ORDER BY name`,
@@ -823,7 +823,7 @@ export async function buildManifest(request, env) {
 			file,
 			`${origin}/api/tasks/${encodeURIComponent(task.name)}/files?f=${encodeURIComponent(file)}`,
 		]));
-		return { name: task.name, title: task.title, description: task.description, author: task.author_name, version: task.latest_version, files };
+		return { name: task.name, title: task.title, description: task.description, author: task.author_name, version: task.latest_version, downloads: task.download_count ?? 0, likes: task.like_count ?? 0, favorites: task.favorite_count ?? 0, files };
 	}));
 	return json({ version: 1, generatedAt: new Date().toISOString(), tasks });
 }

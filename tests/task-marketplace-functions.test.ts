@@ -778,6 +778,9 @@ test("buildManifest lists published tasks with loose-file URLs and serveTaskFile
 	assert.equal(manifest.tasks.length, 1);
 	assert.equal(manifest.tasks[0].name, "manifest-task");
 	assert.equal(manifest.tasks[0].version, "1.0.0");
+	assert.equal(manifest.tasks[0].downloads, 0);
+	assert.equal(manifest.tasks[0].likes, 0);
+	assert.equal(manifest.tasks[0].favorites, 0);
 	// 5 required files, each mapped to a fetchable URL
 	assert.equal(Object.keys(manifest.tasks[0].files).length, 5);
 	assert.match(manifest.tasks[0].files["taskbook.json"], /\/api\/tasks\/manifest-task\/files\?f=taskbook\.json$/);

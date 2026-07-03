@@ -349,6 +349,21 @@ test("githubCallback rejects mismatched state", async () => {
 	assert.match(await response.text(), /state/i);
 });
 
+test("githubCallback crash response does not mention debug_log", async () => {
+	const response = await githubCallback(
+		new Request("https://ugk-task-share.pages.dev/api/auth/callback?code=abc&state=state-1", {
+			headers: { cookie: "ugk_oauth_state=state-1" },
+		}),
+		env(),
+		{ fetch: async () => { throw new Error("boom"); } },
+	);
+	const text = await response.text();
+
+	assert.equal(response.status, 500);
+	assert.match(text, /callback crashed/i);
+	assert.doesNotMatch(text, /debug_log/i);
+});
+
 test("session endpoint returns the signed-in user", async () => {
 	const testEnv = env();
 	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();

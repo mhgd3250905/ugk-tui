@@ -57,26 +57,6 @@ function json(data, init = {}) {
 	});
 }
 
-// DEV-ONLY structured logging to D1. Covers the CLI auth chain (start/poll/
-// callback/createCliToken) so real-device failures — which mock tests can't
-// reproduce — leave a trail. Keep while the publish flow stabilizes; drop the
-// table + call sites once it's proven in production.
-const DEBUG_LOG_MAX_ROWS = 500;
-async function debugLog(env, fn, step, detail) {
-	try {
-		const text = typeof detail === "string" ? detail : JSON.stringify(detail);
-		await env.DB.prepare("INSERT INTO debug_log (ts, fn, step, detail) VALUES (?, ?, ?, ?)")
-			.bind(new Date().toISOString(), fn, step, text.slice(0, 4000)).run();
-		// ponytail: cap growth cheaply. Counting every write wastes a D1 read;
-		// rowid is monotonic, so "id <= max - N" trims to the newest N rows.
-		// The DELETE is a no-op until the table exceeds the cap.
-		await env.DB.prepare("DELETE FROM debug_log WHERE id <= (SELECT MAX(id) FROM debug_log) - ?")
-			.bind(DEBUG_LOG_MAX_ROWS).run();
-	} catch {
-		// logging must never break the request
-	}
-}
-
 function htmlError(message, status = 400) {
 	return new Response(message, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 }
@@ -292,7 +272,6 @@ export async function githubCallback(request, env, deps = {}) {
 	const state = url.searchParams.get("state");
 	const code = url.searchParams.get("code");
 	const cookieState = parseCookies(request)[OAUTH_STATE_COOKIE];
-	await debugLog(env, "callback", "enter", { stateOk: state === cookieState, hasCode: Boolean(code), origin: url.origin });
 	if (!state || !cookieState || state !== cookieState) return htmlError("Invalid OAuth state", 400);
 	// P0 C1+C2: reverse-look-up the CLI challenge from the now-trusted state.
 	// No row = normal web login (state wasn't bound to a challenge). This replaces
@@ -318,9 +297,6 @@ export async function githubCallback(request, env, deps = {}) {
 		}),
 	});
 	const token = await tokenResponse.json();
-	// SECURITY: never log the access_token or full token response (review C-REZ-1).
-	// Only record status + GitHub's error code on failure (no secret material).
-	await debugLog(env, "callback", "token_exchange", { status: tokenResponse.status, hasAccessToken: Boolean(token && token.access_token), error: token?.error ?? null });
 	if (!token.access_token) return htmlError("GitHub token exchange failed", 502);
 
 	const userResponse = await fetchFn("https://api.github.com/user", {
@@ -331,9 +307,6 @@ export async function githubCallback(request, env, deps = {}) {
 		},
 	});
 	const githubUser = await userResponse.json();
-	// SECURITY: never log the full GitHub user object (review H-REZ-2: contains
-	// email/private fields). Only status + id + login (non-secret identifiers).
-	await debugLog(env, "callback", "user_fetch", { status: userResponse.status, hasId: Boolean(githubUser && githubUser.id), login: githubUser?.login ?? null });
 	if (!githubUser.id || !githubUser.login) return htmlError("GitHub user fetch failed", 502);
 
 	const now = new Date().toISOString();
@@ -349,7 +322,6 @@ export async function githubCallback(request, env, deps = {}) {
 	// confirms via POST /api/cli/auth/confirm (authenticated by their session
 	// cookie, not the OAuth state). cliChallenge null = normal web login.
 	if (cliChallenge) {
-		await debugLog(env, "callback", "cli_confirm_redirect", { login: githubUser.login });
 		headers.set("location", `/cli-auth?cli=confirm&state=${encodeURIComponent(state)}`);
 	} else {
 		headers.set("location", "/");
@@ -358,8 +330,7 @@ export async function githubCallback(request, env, deps = {}) {
 	headers.append("set-cookie", `${OAUTH_STATE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
 	return new Response(null, { status: 302, headers });
  } catch (e) {
-	await debugLog(env, "callback", "exception", String(e && e.stack ? e.stack : e));
-	return htmlError("callback crashed (see debug_log)", 500);
+	return htmlError("callback crashed", 500);
  }
 }
 
@@ -454,7 +425,6 @@ export async function startCliAuth(request, env, deps = {}) {
 		"INSERT OR REPLACE INTO cli_auth_pending (challenge, created_at) VALUES (?, ?)",
 	).bind(challenge, now).run();
 	const origin = env.SITE_URL ?? new URL(request.url).origin;
-	await debugLog(env, "startCliAuth", "pending_inserted", { challenge, origin });
 	return json({ url: `${origin}/cli-auth?c=${encodeURIComponent(challenge)}` });
 }
 
@@ -475,12 +445,10 @@ export async function pollCliAuth(request, env) {
 		// a TUI retry, and only the 32-byte-random challenge holder can poll it.
 		await env.DB.prepare("DELETE FROM cli_auth_pending WHERE challenge = ?").bind(challenge).run();
 		await env.DB.prepare("DELETE FROM cli_tokens WHERE challenge = ? AND created_at < ?").bind(challenge, tokenRow.created_at ?? "").run();
-		await debugLog(env, "pollCliAuth", "ok", { challenge, login: user?.login ?? null });
 		return json({ status: "ok", token: tokenRow.token, login: user?.login ?? null, avatarUrl: user?.avatar_url ?? null });
 	}
 	const pending = await env.DB.prepare("SELECT 1 FROM cli_auth_pending WHERE challenge = ?").bind(challenge).first();
 	if (pending) return json({ status: "pending" });
-	await debugLog(env, "pollCliAuth", "not_found", { challenge });
 	return json({ status: "error", error: "challenge_expired_or_unknown" }, { status: 410 });
 }
 
@@ -525,7 +493,6 @@ export async function confirmCliAuth(request, env) {
 	const pending = await env.DB.prepare("SELECT challenge FROM cli_auth_pending WHERE state = ?").bind(state).first();
 	if (!pending?.challenge) return json({ error: "challenge_not_pending" }, { status: 410 });
 	const token = await createCliToken(auth.user, pending.challenge, env);
-	await debugLog(env, "confirmCliAuth", "signed", { login: auth.user.login, ok: Boolean(token) });
 	if (!token) return json({ error: "already_claimed" }, { status: 409 });
 	return json({ status: "ok", token, login: auth.user.login, avatarUrl: auth.user.avatar_url ?? null });
 }

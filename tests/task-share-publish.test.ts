@@ -169,6 +169,27 @@ test("fetchLatestTaskSubmission reads own submissions with Bearer and selects th
 	assert.equal(nextPatchVersion(latest?.version), "1.0.3");
 });
 
+test("fetchLatestTaskSubmission picks max semver regardless of server order (regression: not first-match)", async () => {
+	// ponytail: submitTask 每次新增一行 task_submissions(非 upsert),同名 task 会有多条
+	// 记录。服务端 ORDER BY created_at DESC 不保证"最新版本在最前"——用户可能提交过
+	// 降级版本(如 1.0.1 在 1.0.2 之后插入)。客户端必须按 semver 自己取 max,否则
+	// nextPatchVersion 会基于旧版本号递增,可能与已存在版本冲突被服务端静默吞掉。
+	// 这条测试把旧版本放在数组最前(模拟降级提交的最新 created_at),钉死"取 semver max
+	// 而非第一条匹配"的行为。旧 .find() 实现在此会返回 1.0.1(错),新实现返回 1.0.2(对)。
+	const fetchFn = async () => new Response(JSON.stringify({
+		submissions: [
+			{ name: "demo-task", version: "1.0.1", title: "Newest created but older version", description: "降级提交" },
+			{ name: "demo-task", version: "1.0.2", title: "Higher version, older created_at", description: "应取这条" },
+		],
+	}), { headers: { "content-type": "application/json" } });
+
+	const latest = await fetchLatestTaskSubmission("demo-task", "TOKEN", "https://m.test", { fetchFn });
+
+	assert.equal(latest?.version, "1.0.2", "必须取 semver 最大的版本,而非数组第一条");
+	assert.equal(latest?.title, "Higher version, older created_at");
+	assert.equal(nextPatchVersion(latest?.version), "1.0.3");
+});
+
 test("publishTask sends multipart with name/version/artifact and Bearer token", async () => {
 	let captured: { url: string; headers: Headers; form: FormData } | null = null;
 	const fetchFn = async (url: string, init: any) => {

@@ -1750,6 +1750,20 @@ async function handleTaskPublish(ctx: any, name: string | undefined): Promise<vo
 		}
 	}
 
+	// ponytail: token 失效时的统一重授权流程 —— fetch 上次提交 和 publishTask 两处都会遇到
+	// invalid_token(token 过期/被撤销),处理动作完全相同(清本地凭证 → 走 OAuth 拿新 token)。
+	// 抽成闭包复用,消除两处重复的 writeTaskShareConfig + ensureCliAuth 模板。
+	const reauth = async (): Promise<boolean> => {
+		writeTaskShareConfig({ ...config, token: null, challenge: null });
+		try {
+			const auth = await (taskShareAuthForTests ?? ensureCliAuth)((message, level) => ctx.ui?.notify?.(message, level));
+			config = auth.config;
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
 	// 2. 问市场展示文案。taskbook.description 是给 agent 的运行指令(常很长),
 	// 不适合市场卡片给人看的标题/描述。这里让用户确认/改写,默认值取 taskbook
 	// 字段但鼓励改短。已上传过的同名 task 优先沿用上次市场文案。
@@ -1761,14 +1775,15 @@ async function handleTaskPublish(ctx: any, name: string | undefined): Promise<vo
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		if (message.includes("invalid_token")) {
-			writeTaskShareConfig({ ...config, token: null, challenge: null });
 			ctx.ui.notify("读取上次提交的授权已失效,正在重新授权...", "warning");
-			try {
-				const auth = await (taskShareAuthForTests ?? ensureCliAuth)((msg, level) => ctx.ui?.notify?.(msg, level));
-				config = auth.config;
-				latestSubmission = await fetchLatestTaskSubmission(finalName, config.token!, config.marketplaceUrl);
-			} catch (reauthError) {
-				ctx.ui.notify(`无法读取上次提交:${reauthError instanceof Error ? reauthError.message : String(reauthError)}。将使用首次上传默认值。`, "warning");
+			if (await reauth()) {
+				try {
+					latestSubmission = await fetchLatestTaskSubmission(finalName, config.token!, config.marketplaceUrl);
+				} catch (retryError) {
+					ctx.ui.notify(`无法读取上次提交:${retryError instanceof Error ? retryError.message : String(retryError)}。将使用首次上传默认值。`, "warning");
+				}
+			} else {
+				ctx.ui.notify("无法读取上次提交:重新授权失败。将使用首次上传默认值。", "warning");
 			}
 		} else if (message.includes("login_required")) {
 			ctx.ui.notify("无法读取上次提交:当前市场接口还未接受 TUI token(login_required),请先部署最新 Functions。将使用首次上传默认值。", "warning");
@@ -1808,15 +1823,16 @@ async function handleTaskPublish(ctx: any, name: string | undefined): Promise<vo
 		// review: a 401/invalid_token means the stored cli_token expired (90d) or
 		// was revoked. Clear it, re-auth once, then retry this upload.
 		if (msg.includes("invalid_token")) {
-			writeTaskShareConfig({ ...config, token: null, challenge: null });
 			ctx.ui.notify(`上传授权已失效,正在重新授权...`, "warning");
-			try {
-				const auth = await (taskShareAuthForTests ?? ensureCliAuth)((message, level) => ctx.ui?.notify?.(message, level));
-				config = auth.config;
-				const result = await publishTask(loaded, version, config.token!, config.marketplaceUrl, title, description);
-				ctx.ui.notify(`✅ 已提交 "${result.name}" v${result.version},等待管理员审核。`, "info");
-			} catch (reauthError) {
-				ctx.ui.notify(`上传失败: ${reauthError instanceof Error ? reauthError.message : String(reauthError)}`, "error");
+			if (await reauth()) {
+				try {
+					const result = await publishTask(loaded, version, config.token!, config.marketplaceUrl, title, description);
+					ctx.ui.notify(`✅ 已提交 "${result.name}" v${result.version},等待管理员审核。`, "info");
+				} catch (retryError) {
+					ctx.ui.notify(`上传失败: ${retryError instanceof Error ? retryError.message : String(retryError)}`, "error");
+				}
+			} else {
+				ctx.ui.notify(`上传失败: 重新授权失败`, "error");
 			}
 			return;
 		}

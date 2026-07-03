@@ -149,6 +149,22 @@ export function nextPatchVersion(version: string | undefined): string | undefine
 	return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
 }
 
+// ponytail: 把 "1.2.3" 映射成 [1,2,3] 用于比较;非 semver 返回 null(不参与比较)。
+// 服务端 ORDER BY created_at DESC 不保证"最新版本在最前"(submitTask 每次新增一行,
+// 用户可能提交降级版本),所以客户端必须按 semver 自己取 max,而非依赖服务端顺序。
+function parseSemver(version: string): [number, number, number] | null {
+	const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/);
+	if (!match) return null;
+	return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function compareSemver(a: [number, number, number], b: [number, number, number]): number {
+	for (let i = 0; i < 3; i += 1) {
+		if (a[i] !== b[i]) return a[i] - b[i];
+	}
+	return 0;
+}
+
 export async function fetchLatestTaskSubmission(
 	name: string,
 	token: string,
@@ -165,14 +181,29 @@ export async function fetchLatestTaskSubmission(
 		throw new Error(detail);
 	}
 	const submissions = Array.isArray(body.submissions) ? body.submissions : [];
-	const found = submissions.find((item: any) => item?.name === name);
-	if (!found) return null;
+	// 同名 task 可能有多条 submission 记录(submitTask 每次新增一行,非 upsert)。
+	// 按 semver 取最大版本,而非依赖服务端的 created_at 排序 —— 这样即使用户曾
+	// 提交过降级版本,nextPatchVersion 也基于真正的最新版本号递增,不会被旧提交误导。
+	let best: any = null;
+	let bestSemver: [number, number, number] | null = null;
+	for (const item of submissions) {
+		if (item?.name !== name) continue;
+		const version = typeof item.version === "string" ? item.version : "";
+		const semver = parseSemver(version);
+		// 无效 semver 仍可能是用户唯一的提交(非标准版本号),保留作为 fallback。
+		if (!best) { best = item; bestSemver = semver; continue; }
+		if (semver && bestSemver && compareSemver(semver, bestSemver) > 0) {
+			best = item;
+			bestSemver = semver;
+		}
+	}
+	if (!best) return null;
 	const field = (value: unknown) => typeof value === "string" ? value : undefined;
 	return {
 		name,
-		version: field(found.version),
-		title: field(found.title),
-		description: field(found.description),
+		version: field(best.version),
+		title: field(best.title),
+		description: field(best.description),
 	};
 }
 

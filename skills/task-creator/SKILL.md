@@ -535,3 +535,112 @@ npm run eval:dispatcher -- --task=<你的task>
 - [ ] dispatcher eval 用例集（baseline/ambiguous/boundary）→ 看 `video-downloader.cases.json`
 
 **没全打勾别发布**。每一项缺失都是未来 dogfood 时会踩的坑——而这些范本已经替你踩过了。
+
+---
+
+## 验证已有 task（不是创建新的，是体检已有的）
+
+用户说「帮我测/审/体检 xxx task」时，走这个流程。它和「测试迭代循环」用的是同一套方法论（4a-4d），区别只是入口：创建时产物来自 execute 阶段，验证已有 task 时要自己 `/task run` 拿产物。
+
+### 什么时候用
+
+- 一个 taskbook 已经 landed、在用，但你担心它有隐藏问题（之前没测边界）
+- 改完一个 taskbook 的脚本/verify，想确认改对了没把别的弄坏
+- 准备把 taskbook 发布到市场前，做一次发布前体检
+
+### 流程（测试迭代循环的已有 task 版）
+
+**第 0 步：读 taskbook，理解它干什么**
+
+```bash
+ls ~/.pi/agent/tasks/<task-name>/   # 或 <cwd>/.tasks/<task-name>/
+cat <task-name>/contract.json       # 输入输出契约
+cat <task-name>/verify.mjs          # 验收逻辑（重点：它查了什么、漏了什么）
+ls <task-name>/scripts/             # 有没有纯函数 + 单测
+```
+
+先搞懂三件事：① 它的 runtimeInput 有哪些字段（尤其 required / allowedValues / default）；② verify 查了什么（深度够不够）；③ 有没有 scripts/*.test.mjs（决策逻辑有没有单测覆盖）。
+
+**第 1 步：真跑一遍拿产物（对应 4a）**
+
+已有 task 没有 execute 阶段的现成产物，要自己跑一次：
+
+```bash
+/task run <task-name> <一个典型的自然语言输入>
+```
+
+跑完记下产物目录（run 结果会告诉你 outputDir）。这是 happy path 的真实产物，后续用它当试金石。
+
+**如果 task 依赖外部资源（API key、登录态、模型文件）跑不起来**：跳过真跑，直接进第 2 步用构造产物刁难 verify——边界测试不依赖真实 happy path，构造的产物就够。
+
+**第 2 步：边界刁难（对应 4b，核心）**
+
+这是体检的重头戏。主动构造 3 类产物，喂给 verify 看它判得对不对：
+
+```bash
+# 拿到 verify 路径
+VERIFY=~/.pi/agent/tasks/<task-name>/verify.mjs   # 或 <cwd>/.tasks/...
+
+# ① 空产物：在临时目录放一个"合法空"的产物（如 results:[] 的 JSON、空 SRT）
+TMP=$(mktemp -d)
+echo '{"results":[],"benchmark":{"filteredRows":0}}' > "$TMP/<artifact 名>"
+TASK_OUTPUT_DIR="$TMP" TASK_INPUT='<runtimeInput>' node "$VERIFY"; echo "exit=$?"
+# 判断：这个 task 的"空"是合法的还是异常的？verify 判定和你想的一致吗？
+
+# ② 坏产物：文件存在但内容坏（缺字段、0 字节、编码错）
+echo '{"results":[]}' > "$TMP/<artifact 名>"   # 故意缺 benchmark 字段
+TASK_OUTPUT_DIR="$TMP" TASK_INPUT='<runtimeInput>' node "$VERIFY"; echo "exit=$?"
+# 期望：FAIL 且指出缺什么。如果 PASS = 假通过温床，记下来要修。
+
+# ③ 截断产物：部分对部分错（数量不符、值类型错）
+# 按这个 task 的 artifact 结构构造一个"接近正确但有错"的产物
+```
+
+**每跑一类，记录 verify 的判定**：它判对了吗？判错的就是体检发现的问题。
+
+**第 3 步：跑纯函数单测（如果有 scripts/）**
+
+```bash
+for f in ~/.pi/agent/tasks/<task-name>/scripts/*.test.mjs; do
+  [ -f "$f" ] && node --test "$f" 2>&1 | tail -5
+done
+```
+
+如果有单测，确认全过。**如果没有单测但有 scripts/*.mjs 的决策逻辑**——这本身就是体检发现的问题（决策逻辑没单测覆盖，记下来）。
+
+**第 4 步：dispatcher eval（可选，测翻译质量）**
+
+如果担心 dispatcher 翻译不准（用户自然语言 → runtimeInput 翻错），跑 dispatcher eval。需要先准备 cases fixture（参照自验 4），花 token：
+
+```bash
+# 先在仓库 tests/fixtures/ 放好 taskbook + cases，然后
+npm run eval:dispatcher -- --task=<task-name>
+```
+
+**第 5 步：出体检报告 + 优化建议**
+
+把 1-4 步发现的问题整理成报告交给用户，**按严重度排序**：
+
+- **🔴 假通过（verify 放行了坏产物）**：最严重，用户会拿到错误结果还以为对了。必须加深度校验。
+- **🟡 静默成功（脚本该 throw 没 throw）**：错误延迟到下游、归因错位。加 preflight fail-loud。
+- **🟡 决策逻辑无单测**：改不动、边界钉不死。建议抽纯函数 + 配 test.mjs。
+- **🟢 可改进（verify 太浅、错误信息不清）**：体验问题，不致命。
+
+每条问题都配**具体改法 + 范本指向**（看「标准范本指引」的表）。用户决定要不要修，你按指示改。
+
+### 体检完的交付物
+
+- **体检报告**：哪些过了、哪些有问题、严重度、改法
+- **（如用户同意）优化后的 taskbook**：verify 加深、脚本加 throw、抽纯函数配单测
+- **（可选）dispatcher eval 报告**：翻译准确率 + FAIL 用例
+
+### 和「创建时测试迭代循环」的区别（别搞混）
+
+| | 创建时（测试迭代循环） | 验证已有（本节） |
+|---|---|---|
+| 触发 | `/task new` 创建新 task | 用户说"帮我测 xxx task" |
+| 产物来源 | execute 阶段现成的 | 自己 `/task run` 拿，或构造 |
+| 目标 | 让新 task 创建时就达标 | 发现已有 task 的隐藏问题 |
+| 收敛 | 三条满足才落盘 | 出报告，用户决定改不改 |
+
+**别在创建新 task 时跑这个流程**（那是测试迭代循环的活）；也别在验证已有 task 时去走创建流程。两者方法论相同（4a-4d），入口和目标不同。

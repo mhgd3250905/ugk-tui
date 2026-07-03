@@ -344,6 +344,12 @@ node ~/.pi/agent/tasks/<你的task>/verify.mjs; echo "exit=$?"  # 应该是 0
 
 **empty path 必测**——很多 task 在"外部返回空"时 worker 写不出正确 JSON，verify 又没容错，导致永远 FAIL。你的 task 如果涉及外部数据源（X/API/DB），empty path 必须是合法 PASS。
 
+**深度校验，别只查文件存在**。三路径只验"有/没有"，还要验"内容对不对"。自验时问自己：如果 worker 产出了一个**文件存在但内容错误**的产物（空 mp4、字段全 null 的 json、编码播放器不认的视频），verify 能抓住吗？抓不住就是假通过温床。深度校验清单：
+
+- 产物是媒体（mp4/wav）→ ffprobe 能解析 + 有预期的流类型（video/audio/subtitle）+ duration > 0 + 编码可播放（如视频是 h264 不是 vp9-in-mp4）。范本：`video-zh-composer/verify.mjs` 查 codec + stream + 音视频时长一致性。
+- 产物是 JSON → 关键字段非空且类型对（不只 `existsSync`，要 parse 后逐字段查）。范本：`subtitle-cleaner/verify.mjs` 查 cue 数、dur≥500ms、无重叠、`overlapCount==0`。
+- 产物是文本（srt/vtt）→ 含期望结构（时间码、cue 数 > 0、文本非空）。范本：`whisper-audio-to-text/verify.mjs` 查 SRT 含时间码正则 + VTT 含 WEBVTT。
+
 ### 自验 3：契约一致性自查
 
 对照 contract.json 和 verify.mjs，自查这几个高频不一致：
@@ -379,6 +385,22 @@ npm run eval:dispatcher -- --task=<你的task>
 
 详见仓库根 `tests/fixtures/dispatcher-evals/video-downloader.cases.json` 作为完整用例集范本。
 
+### 自验 5：preflight fail-loud + 边界归一（防静默成功）
+
+自验 1-4 验的是"正常路径跑得对"和"翻译准不准"。但有一类 bug 它们都抓不到：**前置条件不满足时脚本静默成功**。静音视频 whisper 转出空 SRT 却不报错、VP9 视频进 MP4 容器被 ffmpeg 拒、非 Windows 系统没中文字体——这些都会"跑完但产物是垃圾"，verify 可能还放行。
+
+逐项自查你的脚本有没有这些"静默成功"陷阱：
+
+1. **空输入/空结果检测**：脚本把空内容 filter 掉后，有没有检查"清洗后是否还有实质内容"？如果转写/抓取/清洗后结果是空的，必须 throw（"produced empty result, 输入可能..."），不能写个空文件就 exit 0。范本：`whisper-audio-to-text` 的 `hasMeaningfulTranscript`——清洗后 segments 全空就 throw，错误指向 whisper 而非让下游 cleaner 报错。
+
+2. **外部依赖可用性检测**：模型文件、字体、特定编码支持——脚本启动前检测，缺失就 throw，错误信息说"缺什么、装哪"。范本：`whisper-audio-to-text` 模型不存在 throw + `video-zh-composer` 的 `resolveAssFont`（无中文字体 throw 而非产出豆腐块）。
+
+3. **输入归一化**：用户/dispenser 给的值可能大小写不一、格式不标准。语言代码（`EN`→`en`）、路径斜杠、颜色名——在入口归一，别让下游工具因大小写报错。范本：`whisper-audio-to-text` 的 `normalizeLanguage`、`video-zh-composer` 的 `normalizeSubtitleColor`。
+
+4. **CLI 参数校验**：taskbook 自带脚本如果接受 CLI flag，未知 flag 必须 throw（与 subtitle-cleaner 一致），别静默忽略——用户拼错 `--langauge` 会被忽略然后走默认，看似成功实则没用上用户指定的值。
+
+**自验动作**：刻意构造"前置条件缺失"的输入跑脚本（空文件、不存在的模型路径、大写语言码），确认每个都明确 throw 且错误信息指向根因。**任何一个静默成功 = 这条自验没过。**
+
 **自验全过，再 `/task run`。** 这套动作把"多轮试错"压成"一轮自验 + 一次真跑"。
 
 ## 铁律
@@ -388,6 +410,10 @@ npm run eval:dispatcher -- --task=<你的task>
 - **verify 是机器验收，不是人**。它只能看文件内容/格式，不能看"做得好不好看"。验收项要可机器判定。
 - **`/task run` 的输入是自然语言**，dispatcher agent 会把它翻译成 `runtimeInput` 的值。contract.json 的 `runtimeInputMeta.description` 要写得让翻译不会出错。
 - **需求驱动匹配**：别为了"凑 taskbook"而封装。只有这个能力会被**多次、参数化地**复用时，才值得做成 task。
+- **决策逻辑抽纯函数 + 配单测**。`scripts/` 里的选择/计算/校验逻辑必须抽成 `export function`（纯函数，无 IO），配 `scripts/*.test.mjs` 单测。`main()` 只做编排（读输入→调纯函数→写产物）。这条是从实战血泪来的：whisper 的空转写、composer 的 VP9 失败，根因都是决策逻辑藏在 main 里没法测、改不动。抽出来才能钉死边界。范本：`video-downloader/scripts/download-video.mjs` 的 `selectTargetHeight`/`resolveSubtitlePlan`。
+- **preflight fail-loud，绝不静默成功**。前置条件缺失（模型不存在、视频编码不兼容、字体缺失、输入质量太差）必须在脚本里**明确 throw**，错误信息指向真正根因。绝不能"静默成功"把错误延迟到下游——下游报错会归因错位（whisper 空转写静默成功，跑到 cleaner 才报"No subtitle cues"，用户去查 cleaner，实际根因在 whisper）。范本：`whisper-audio-to-text` 的 `hasMeaningfulTranscript` + 模型缺失 throw、`video-zh-composer` 的 VP9 预判转码 + 字体检测。
+- **verify 别只查文件存在，查产物事实深度**。文件存在 ≠ 内容正确。verify 要校验产物的**事实**：ffprobe 能解析且有 video/audio/subtitle 流、duration 合理、关键字段非空、编码可播放。只查 `existsSync` 的 verify 是假通过温床——硬字幕字体缺失产出豆腐块、VP9 进 MP4 播放器不认，verify 只查存在都放行。范本：`video-zh-composer/verify.mjs` 查 codec + stream 类型 + 音视频时长一致性。
+- **错误在源头抛，带清晰归因**。错误信息要让用户/agent 能定位根因，不要让下游背锅。"whisper produced an empty transcript, 输入可能是静音"比"No subtitle cues found"好——后者让用户查 cleaner。preflight 校验失败时 throw，错误信息说明缺什么、怎么修。
 
 ## 反模式（别这么干）
 
@@ -402,3 +428,48 @@ npm run eval:dispatcher -- --task=<你的task>
 - ❌ 写完五件套直接 `/task run` 真跑当代调试 —— 应先做"写完自验清单"（JSON 解析 + verify 三路径模拟 + 契约一致性自查）。自验过的 task 真跑基本一次过，省 token 和时间。
 - ❌ 在 worker 内调 subagent 去"分块摘要/读 CDP 数据" —— subagent 是独立 pi 进程，`buildSubagentChildEnv` 主动删 CDP 授权、不传 tab id，读不到 worker 的 tab 缓存。worker 自己分块 evaluate 即可，不需要 subagent。
 - ❌ 遇到"用户输入需要解析/转换/计算"（如各种时间表达、模糊量词、跨语言），在 worker 里写穷举正则/多语言映射脚本 —— 这是**重新发明 dispatcher 已有的能力**。dispatcher 是会推理的 LLM，能算日期、能懂跨语言、能输出结构化计算值。正确做法：加一个 runtimeInput 字段，description 教 dispatcher 算，worker 只吃结构化结果。见上方"dispatcher 能力真相"。
+- ❌ 决策逻辑写死在 `main()` 里、靠 console.log 调试 —— 抽成 `export function` 纯函数 + 配单测。main 里塞决策=改不动、测不了、边界钉不死。范本：`video-downloader/scripts/download-video.mjs` 的 `selectTargetHeight`（分辨率档位选择是纯函数，可单测区间匹配）。
+- ❌ 前置条件缺失时静默成功（空转写写空文件 exit 0、缺字体产出豆腐块、编码不兼容靠 catch 兜底）—— preflight 必须检测 + 明确 throw。静默成功让错误延迟到下游且归因错位。范本：`whisper-audio-to-text` 的 `hasMeaningfulTranscript`。
+- ❌ verify 只查 `existsSync` + `JSON.parse` —— 文件存在 ≠ 内容正确。深度校验产物的流/编码/时长/字段非空。范本：`video-zh-composer/verify.mjs`。
+
+---
+
+## 标准范本指引（做之前看，做完对照）
+
+上面的标准和铁律，**别抽象地理解**——UGK 自带的 taskbook 已经有达标的真实样本。做 taskbook 前后，对照这些范本看"标准长什么样"。
+
+范本都在 `~/.pi/agent/tasks/`（或 `<cwd>/.tasks/`），可直接 `cat` / `ls` 实际参照。
+
+### 主范本：`video-downloader`（纯函数 + verify 深度的典范）
+
+最完整的"达标"样本，适合做任何 taskbook 时对照：
+
+- **纯函数抽取**：`scripts/download-video.mjs` 把分辨率选择（`selectTargetHeight`）、字幕策略（`resolveSubtitlePlan`）、format 串构建（`buildFormatSelector`）全抽成 `export function`，`main()` 只编排。每个纯函数配单测（`scripts/download-video.test.mjs`）。
+- **verify 深度**：`verify.mjs` 不只查 mp4 存在，用 ffprobe 查 duration>0 + 有视频流，按 `summary.subtitleSelection` 判断"该不该有字幕"。
+- **dispatcher eval 用例**：`tests/fixtures/dispatcher-evals/video-downloader.cases.json` 是最全的用例集（15 条：baseline/ambiguous/alias/boundary/open），写 dispatcher eval 时直接参照它的结构。
+
+### 专项范本
+
+| 你要学什么 | 看哪个 taskbook 的哪里 |
+|---|---|
+| preflight fail-loud（空结果/缺依赖 throw） | `whisper-audio-to-text` 的 `hasMeaningfulTranscript` + 模型缺失 throw |
+| 输入归一化（大小写/格式） | `whisper-audio-to-text` 的 `normalizeLanguage`、`video-zh-composer` 的 `normalizeSubtitleColor` |
+| verify 查编码/流/时长一致性 | `video-zh-composer/verify.mjs`（查 codec + audio/video sync） |
+| preflight 多检测（编码+字体+时长） | `video-zh-composer/scripts/compose-video-zh.mjs` 的 `videoCodecName`/`needsTranscode`/`resolveAssFont`/`audioVideoDurationStatus` |
+| CLI 未知 flag throw | `subtitle-cleaner/scripts/clean-subtitle.mjs` 的 `parseCliArgs` |
+| 纯函数最多 + 单测最全 | `subtitle-cleaner/scripts/clean-subtitle.mjs`（28 个测试） |
+| LLM 翻译质量无校验时的防幻觉 tripwire | `subtitle-fluent-translator/scripts/make-fluent-subtitle.mjs` 的 `validateUnits`（稀疏源禁长输出） |
+
+### 自检：你的 taskbook 达标了吗？
+
+做完五件套，对照这个清单逐项打勾。每一项都有范本可参照：
+
+- [ ] 决策逻辑抽成 `export function` 纯函数，不在 `main()` 里 → 看 `video-downloader`
+- [ ] 纯函数配了 `scripts/*.test.mjs` → 看 `video-downloader` / `subtitle-cleaner`
+- [ ] 前置条件缺失明确 throw（不静默成功）→ 看 `whisper-audio-to-text`
+- [ ] 输入值归一化（大小写/格式）→ 看 `whisper-audio-to-text`
+- [ ] verify 查产物事实深度（不只 existsSync）→ 看 `video-zh-composer`
+- [ ] 错误信息指向根因（不让下游背锅）→ 看 `whisper-audio-to-text`
+- [ ] dispatcher eval 用例集（baseline/ambiguous/boundary）→ 看 `video-downloader.cases.json`
+
+**没全打勾别发布**。每一项缺失都是未来 dogfood 时会踩的坑——而这些范本已经替你踩过了。

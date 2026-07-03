@@ -18,6 +18,7 @@ test("getChromeLaunchCommand builds macOS Chrome command with local debugging po
 	assert.equal(command.command, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
 	assert.deepEqual(command.args, [
 		"--remote-debugging-port=9222",
+		"--remote-debugging-address=127.0.0.1",
 		`--user-data-dir=${path.join("/Users", "demo", ".ugk", "chrome-cdp-profile")}`,
 	]);
 });
@@ -28,6 +29,7 @@ test("getChromeLaunchCommand falls back to google-chrome on linux", () => {
 	assert.equal(command.command, "google-chrome");
 	assert.deepEqual(command.args, [
 		"--remote-debugging-port=9333",
+		"--remote-debugging-address=127.0.0.1",
 		`--user-data-dir=${path.join("/home", "demo", ".ugk", "chrome-cdp-profile")}`,
 	]);
 });
@@ -46,7 +48,7 @@ test("getChromeLaunchCommand resolves Windows chrome.exe when present", () => {
 		assert.equal(command.command, chromeExe);
 		assert.deepEqual(
 			command.args,
-			[`--remote-debugging-port=9444`, `--user-data-dir=${path.join(os.tmpdir(), ".ugk", "chrome-cdp-profile")}`],
+			[`--remote-debugging-port=9444`, "--remote-debugging-address=127.0.0.1", `--user-data-dir=${path.join(os.tmpdir(), ".ugk", "chrome-cdp-profile")}`],
 		);
 	} finally {
 		delete process.env.PROGRAMFILES;

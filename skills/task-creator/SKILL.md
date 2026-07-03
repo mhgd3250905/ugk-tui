@@ -307,12 +307,74 @@ if (failures.length > 0) {
 1. **读源能力** — 读要封装的 skill/脚本本体，搞懂它接受什么、产出什么。只读这一个目录，别扩散。**如果源是现成脚本（.py/.mjs/.sh），记下它——稍后复制进 taskbook 的 `scripts/` 子目录让 worker 直接调用，别让 worker 现写一份。**
 2. **定参数** — 哪些值每次运行会变？把它们定为 `contract.json` 的 `runtimeInput`。固定值写进脚本/spec，别参数化。
 3. **照样本写五件套** — `ls ~/.pi/agent/tasks/` 找一个**真实样本**对照，按上面格式填五个文件。**有现成脚本就一并建 `scripts/` 子目录把脚本放进去，skill.md 里用 `$TASK_DIR/scripts/xxx` 引用**（见上方"自带脚本"段）。
-4. **手验 verify.mjs** — 自己设 `TASK_INPUT` / `TASK_OUTPUT_DIR` 环境变量跑一遍 verify，确认它真能判对错。这步省不得，验收脚本错了 task 永远过不了或假通过。详见下方"写完自验清单"——**这一步做扎实，第 5 步才能一次 PASS，不用反复试错。**
-5. **落盘 + 试跑** — 五件套（+ scripts/）写到 scope 目录，`/task run <name> <自然语言输入>` 试一次，看 PASS。**前提是第 4 步自验过了**；自验没过就 `/task run` 是拿真跑当调试，浪费 token 和时间。
+4. **测试迭代循环（核心，别跳过）** — 写完五件套**不要直接落盘**，先跑一轮"真跑→边界刁难→优化→再跑"的迭代循环。这一步是把你过去"实际使用才暴露"的问题提前到创建期抓出来。详见下方「测试迭代循环」章节——**这步做透了，第 5 步一次 PASS，不用反复试错**。
+5. **落盘 + 试跑** — 迭代收敛后（真跑 PASS + 边界全覆盖），五件套（+ scripts/）写到 scope 目录，`/task run <name> <自然语言输入>` 试一次确认 PASS。
 
-## 写完自验清单（不扔给 /task run 真跑试错的底气）
+## 测试迭代循环（创建流程第 4 步的展开，核心 SOP）
 
-这是"一次做好"的核心工程化动作。写完五件套**先在本地自验，再 `/task run`**。自验通过的 task，真跑基本一次过。三轮自验，按顺序做：
+**为什么有这一节**：很多 task 问题（whisper 空转写静默成功、VP9 进 MP4 失败、硬字幕豆腐块）都是"实际使用了才暴露"。根因是创建时只跑了 happy path——agent 亲手做了一遍任务（execute 阶段）、产物看起来对，就交付了。但 happy path 过 ≠ 边界也过。这一节是把"实际使用才暴露"提前到创建期：**让 agent 主动刁难自己的 taskbook，而不是等用户 dogfood 踩坑**。
+
+reviewing 阶段你有 `bash` 工具（工具集 = read/bash/grep/find/ls/questionnaire），能直接跑 verify.mjs、构造边界产物、抽纯函数写单测。**别只读不跑**——跑起来才知道哪里有问题。
+
+### 4a. 真跑自证（happy path 必须过）
+
+execute 阶段你亲手做了一遍任务，产物在 task state 的 executeRunDir 里。拿它当试金石：
+
+```bash
+# 把 execute 产物目录喂给 verify,确认 happy path 通过
+TASK_OUTPUT_DIR=<execute 的产物目录> \
+TASK_INPUT='<execute 用的 runtimeInput JSON>' \
+node <你的 verify.mjs 路径>; echo "exit=$?"
+# 期望:exit=0 (PASS)
+```
+
+连 happy path 都不过，说明 verify 写错了或 skill 指令有歧义——先修这个，别往下走。这一步等价于 saveCurrentTask 的"正例自证"，你提前做能省一次被打回。
+
+### 4b. 边界刁难（主动构造 3 类产物，别等用户踩坑）
+
+happy path 过了≠ task 安全。主动构造三类"刁难产物"，喂给 verify 看它判得对不对。**每一类都要构造**，缺一类就是留坑给用户：
+
+**① 空产物（合法空 vs 不该空）**：
+- 如果你的 task 涉及外部数据源（X/API/DB/转写），构造一个"外部返回空"的产物（如 `results:[]`、空 SRT、空 JSON）。verify 应该 PASS（合法空，不是失败）。
+- 如果你的 task 的产物**不该为空**（如视频合成必产 mp4），构造一个空 outputDir，verify 必须 FAIL。
+- 判断标准：空是"合法的"还是"异常的"，由 task 语义决定。verify 必须和你想的一致。
+
+**② 坏产物（格式错/字段缺/编码不对）**：
+- 构造一个"文件存在但内容坏"的产物：JSON 缺关键字段、mp4 是 0 字节、SRT 没有时间码、视频编码播放器不认。
+- verify **必须 FAIL 且指出具体问题**（不是笼统的"verify failed"）。如果 verify 放行了坏产物 = 假通过温床，必须立刻加深度校验（见自验 2 的深度清单）。
+
+**③ 截断产物（数量不对/值错）**：
+- 构造一个"部分正确部分错"的产物：results 数量比 summary 少、字段值类型错、时间码倒置。
+- verify 必须 FAIL 并指出哪个字段/哪条不对。
+
+**每构造一类，跑一次 verify**。verify 判错了（该 PASS 的 FAIL、该 FAIL 的 PASS）= 这一轮迭代没结束，进 4c 优化。
+
+### 4c. 问题优化（把暴露的问题修进 taskbook）
+
+4a/4b 跑出的每个问题，按「标准范本指引」优化：
+
+- verify 放行了坏产物 → 加深度校验（ffprobe 查流/编码、字段逐个查、内容结构查）。看 `video-zh-composer/verify.mjs`。
+- 决策逻辑藏在 main 里改不动 → 抽 `export function` 纯函数 + 配 test.mjs。看 `video-downloader/scripts/download-video.mjs`。
+- 脚本静默成功（空结果 exit 0）→ 加 throw。看 `whisper-audio-to-text` 的 `hasMeaningfulTranscript`。
+- 错误信息不指向根因 → 改 throw 的措辞，指向真正出问题的环节。
+
+**每改一处，重跑 4a + 4b 确认修好了**（不是改完就走）。这是迭代——改→跑→看→再改，直到所有边界都判对。
+
+### 4d. 收敛判定（三条全满足才能落盘）
+
+完成 4a-4c 后，确认三条**全满足**，才能进第 5 步落盘：
+
+1. **真跑 PASS**：execute 真实产物跑 verify，exit=0。
+2. **边界全覆盖**：空/坏/截断三类产物，verify 判得全对（该 PASS 的 PASS、该 FAIL 的 FAIL 且指出问题）。
+3. **暴露的问题已优化**：4b 发现的每个假通过/漏判，都已修进 verify 或脚本，且重跑确认修好。
+
+**任何一条没满足，别 /task save**。saveCurrentTask 会跑 verify 自证（正例+负例），但你提前做完边界测试能一次过；没做就直接 save，大概率被打回重做，浪费轮次。
+
+> 自验清单（自验 1-5）是 4a-4b 的**技术细节手册**——迭代循环是流程，自验清单告诉你每一步具体怎么操作（JSON 解析、verify 三路径、契约一致性、dispatcher eval、preflight 边界）。两者配合：迭代循环管"跑几轮、跑到什么程度"，自验清单管"每一轮具体验什么"。
+
+## 写完自验清单（测试迭代循环的技术细节手册）
+
+这是「测试迭代循环」(4a-4b)的具体操作手段——迭代循环管"跑几轮、收敛标准是什么"，自验清单管"每一轮具体验什么"。按顺序做：
 
 ### 自验 1：JSON 可解析 + 脚本语法
 

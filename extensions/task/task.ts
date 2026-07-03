@@ -50,7 +50,7 @@ import {
 } from "./task-state.ts";
 import { appendRunToTaskbook, assertValidContract, deleteTaskbook, listTaskbooks, loadTaskbook, renameTaskbook, saveTaskbook, type LoadedTaskbook } from "./task-book.ts";
 import { ensureCliAuth, readTaskShareConfig, writeTaskShareConfig } from "./task-share-auth.ts";
-import { publishTask } from "./task-share-publish.ts";
+import { fetchLatestTaskSubmission, nextPatchVersion, publishTask } from "./task-share-publish.ts";
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
@@ -132,6 +132,7 @@ type TaskProgressDetails = {
 let activeTaskRun: ActiveTaskRun | undefined;
 let lastTaskRunReview: LastTaskRunReview | undefined;
 let taskRunPromiseForTests: Promise<void> = Promise.resolve();
+let taskShareAuthForTests: typeof ensureCliAuth | undefined;
 // ponytail: 会话级受保护工具授权缓存。用户在本次会话授权过某 taskbook 用受保护工具
 // (chrome_cdp/mcp),后续 run_task / /task run 不再弹 confirm。报告场景:下 40 个视频时
 // main 反复 run_task bilibili-downloader,每次都弹"允许受保护工具"打断用户。
@@ -149,6 +150,10 @@ export function waitForTaskRunForTests(): Promise<void> {
 // ponytail: 测试 spy hook —— 验证 parallel 入口集中 hydrate 去重(批次级 reader 只调用去重后的次数)。
 export function setWindowsUserEnvReaderForTests(reader: ((name: string) => Promise<string | undefined>) | undefined): void {
 	readWindowsUserEnvImpl = reader ?? defaultReadWindowsUserEnvImpl;
+}
+
+export function setTaskShareAuthForTests(runner: typeof ensureCliAuth | undefined): void {
+	taskShareAuthForTests = runner;
 }
 
 const taskCompleteTool = defineTool({
@@ -239,6 +244,10 @@ export async function resolveTaskCommandArgs(args: string, ctx: any, state: Task
 
 function cwdOf(ctx: any): string {
 	return ctx.cwd ?? process.cwd();
+}
+
+function defaultPrompt(label: string, value: string): string {
+	return `${label} (默认: ${value})`;
 }
 
 function isAssistantMessage(message: any): boolean {
@@ -1733,7 +1742,7 @@ async function handleTaskPublish(ctx: any, name: string | undefined): Promise<vo
 	let config = readTaskShareConfig();
 	if (!config.token) {
 		try {
-			const auth = await ensureCliAuth((message, level) => ctx.ui?.notify?.(message, level));
+			const auth = await (taskShareAuthForTests ?? ensureCliAuth)((message, level) => ctx.ui?.notify?.(message, level));
 			config = auth.config;
 		} catch (error) {
 			ctx.ui.notify(`授权失败: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -1741,36 +1750,74 @@ async function handleTaskPublish(ctx: any, name: string | undefined): Promise<vo
 		}
 	}
 
-	// 2. 问版本号(默认 1.0.0;重复发布需升版本,由服务端 version 唯一约束兜底)。
-	const version = await ctx.ui?.input?.(`上传版本号`, "1.0.0");
-	if (!version?.trim()) {
+	// 2. 问市场展示文案。taskbook.description 是给 agent 的运行指令(常很长),
+	// 不适合市场卡片给人看的标题/描述。这里让用户确认/改写,默认值取 taskbook
+	// 字段但鼓励改短。已上传过的同名 task 优先沿用上次市场文案。
+	const rawDesc = loaded.taskbook.description ?? "";
+	const descDefault = rawDesc.length > 100 ? rawDesc.slice(0, 97) + "…" : rawDesc;
+	let latestSubmission: Awaited<ReturnType<typeof fetchLatestTaskSubmission>> = null;
+	try {
+		latestSubmission = await fetchLatestTaskSubmission(finalName, config.token!, config.marketplaceUrl);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (message.includes("invalid_token")) {
+			writeTaskShareConfig({ ...config, token: null, challenge: null });
+			ctx.ui.notify("读取上次提交的授权已失效,正在重新授权...", "warning");
+			try {
+				const auth = await (taskShareAuthForTests ?? ensureCliAuth)((msg, level) => ctx.ui?.notify?.(msg, level));
+				config = auth.config;
+				latestSubmission = await fetchLatestTaskSubmission(finalName, config.token!, config.marketplaceUrl);
+			} catch (reauthError) {
+				ctx.ui.notify(`无法读取上次提交:${reauthError instanceof Error ? reauthError.message : String(reauthError)}。将使用首次上传默认值。`, "warning");
+			}
+		} else if (message.includes("login_required")) {
+			ctx.ui.notify("无法读取上次提交:当前市场接口还未接受 TUI token(login_required),请先部署最新 Functions。将使用首次上传默认值。", "warning");
+		} else {
+			ctx.ui.notify(`无法读取上次提交:${message}。将使用首次上传默认值。`, "warning");
+		}
+	}
+	if (latestSubmission) {
+		ctx.ui.notify(`找到上次提交 "${finalName}" v${latestSubmission.version ?? "?"},已预填标题/描述。`, "info");
+	}
+
+	// 3. 问版本号(首次默认 1.0.0;重复发布默认 patch + 1,由服务端 version 唯一约束兜底)。
+	const versionDefault = nextPatchVersion(latestSubmission?.version) ?? "1.0.0";
+	const versionInput = await ctx.ui?.input?.(defaultPrompt(`上传版本号`, versionDefault), versionDefault);
+	if (versionInput === undefined) {
 		ctx.ui.notify("已取消上传。", "info");
 		return;
 	}
+	const version = versionInput.trim() || versionDefault;
 
-	// 3. 问市场展示文案。taskbook.description 是给 agent 的运行指令(常很长),
-	// 不适合市场卡片给人看的标题/描述。这里让用户确认/改写,默认值取 taskbook
-	// 字段但鼓励改短。title 默认用 name,description 默认截断取首句。
-	const rawDesc = loaded.taskbook.description ?? "";
-	const descDefault = rawDesc.length > 100 ? rawDesc.slice(0, 97) + "…" : rawDesc;
-	const title = await ctx.ui?.input?.(`市场展示标题(简短)`, finalName);
-	if (title === undefined) { ctx.ui.notify("已取消上传。", "info"); return; }
-	const description = await ctx.ui?.input?.(`一句话描述(市场卡片用)`, descDefault);
-	if (description === undefined) { ctx.ui.notify("已取消上传。", "info"); return; }
+	const titleDefault = latestSubmission?.title || finalName;
+	const titleInput = await ctx.ui?.input?.(defaultPrompt(`市场展示标题(简短)`, titleDefault), titleDefault);
+	if (titleInput === undefined) { ctx.ui.notify("已取消上传。", "info"); return; }
+	const title = titleInput.trim() || titleDefault;
+	const descriptionDefault = latestSubmission?.description || descDefault;
+	const descriptionInput = await ctx.ui?.input?.(defaultPrompt(`一句话描述(市场卡片用)`, descriptionDefault), descriptionDefault);
+	if (descriptionInput === undefined) { ctx.ui.notify("已取消上传。", "info"); return; }
+	const description = descriptionInput.trim() || descriptionDefault;
 
 	// 4. 打包上传(内部清空 runs 历史,只传 5 核心文件)。
-	ctx.ui.notify(`正在上传 "${finalName}" v${version.trim()}...`, "info");
+	ctx.ui.notify(`正在上传 "${finalName}" v${version}...`, "info");
 	try {
-		const result = await publishTask(loaded, version.trim(), config.token!, config.marketplaceUrl, title.trim() || undefined, description.trim() || undefined);
+		const result = await publishTask(loaded, version, config.token!, config.marketplaceUrl, title, description);
 		ctx.ui.notify(`✅ 已提交 "${result.name}" v${result.version},等待管理员审核。`, "info");
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		// review: a 401/invalid_token means the stored cli_token expired (90d) or
-		// was revoked. Clear it so the next /task publish re-runs OAuth instead of
-		// reusing a dead token and failing the same opaque way.
+		// was revoked. Clear it, re-auth once, then retry this upload.
 		if (msg.includes("invalid_token")) {
 			writeTaskShareConfig({ ...config, token: null, challenge: null });
-			ctx.ui.notify(`授权已过期或失效,已清除本地凭证。请重新执行 /task publish 完成授权。`, "warning");
+			ctx.ui.notify(`上传授权已失效,正在重新授权...`, "warning");
+			try {
+				const auth = await (taskShareAuthForTests ?? ensureCliAuth)((message, level) => ctx.ui?.notify?.(message, level));
+				config = auth.config;
+				const result = await publishTask(loaded, version, config.token!, config.marketplaceUrl, title, description);
+				ctx.ui.notify(`✅ 已提交 "${result.name}" v${result.version},等待管理员审核。`, "info");
+			} catch (reauthError) {
+				ctx.ui.notify(`上传失败: ${reauthError instanceof Error ? reauthError.message : String(reauthError)}`, "error");
+			}
 			return;
 		}
 		ctx.ui.notify(`上传失败: ${msg}`, "error");

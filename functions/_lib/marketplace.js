@@ -374,7 +374,7 @@ export function logout() {
 // CLI publish flow: Bearer token (random, stored in cli_tokens) lets the TUI
 // authenticate without a cookie. Isolated from requireUser on purpose — Bearer
 // must NOT silently widen every cookie-authed write endpoint (like/favorite/
-// report/...), so only submitTask opts into it. ponytail: design doc proposed
+// report/...), so endpoints opt in explicitly. ponytail: design doc proposed
 // HMAC-signed user_id, but that can't be revoked without a denylist; a random
 // token validated by table lookup is natively revocable (DELETE FROM cli_tokens).
 async function requireBearerUser(request, env) {
@@ -499,8 +499,8 @@ export async function confirmCliAuth(request, env) {
 
 export async function submitTask(request, env) {
 	// Submit is the only endpoint that accepts BOTH a cookie session (web upload
-	// page) and a Bearer cli_token (TUI publish). Bearer is preferred when the
-	// Authorization header is present; otherwise fall back to the cookie session.
+	// page) and a Bearer cli_token for writes (TUI publish). Bearer is preferred
+	// when the Authorization header is present; otherwise fall back to the cookie session.
 	const hasBearer = request.headers.get("authorization")?.startsWith("Bearer ");
 	const auth = hasBearer ? await requireBearerUser(request, env) : await requireUser(request, env);
 	if (auth.response) return auth.response;
@@ -581,14 +581,15 @@ export async function submitTask(request, env) {
 }
 
 export async function accountSubmissions(request, env) {
-	const auth = await requireUser(request, env);
+	const hasBearer = request.headers.get("authorization")?.startsWith("Bearer ");
+	const auth = hasBearer ? await requireBearerUser(request, env) : await requireUser(request, env);
 	if (auth.response) return auth.response;
 	const rows = await env.DB.prepare(
 		`SELECT task_submissions.*, users.login AS author_login
 		FROM task_submissions
 		JOIN users ON users.id = task_submissions.user_id
 		WHERE task_submissions.user_id = ?
-		ORDER BY task_submissions.created_at DESC`,
+		ORDER BY task_submissions.created_at DESC, task_submissions.id DESC`,
 	).bind(auth.user.id).all();
 	return json({ submissions: rows.results ?? [] });
 }

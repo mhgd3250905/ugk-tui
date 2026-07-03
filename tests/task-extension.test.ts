@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs, waitForTaskRunForTests, looksLikeMissingArtifact } from "../extensions/task/task.ts";
+import { registerTask, getTaskCommandMenuOptions, resolveTaskCommandArgs, waitForTaskRunForTests, looksLikeMissingArtifact, setTaskShareAuthForTests } from "../extensions/task/task.ts";
 import { createTaskState, enterPlanning, enterReviewing, markPlanQuestionnaireUsed, markReviewQuestionnaireUsed, setTaskReviewResult, setTaskSpec, startExecuting } from "../extensions/task/task-state.ts";
 import { appendRunToTaskbook, assertValidContract, loadTaskbook, saveTaskbook } from "../extensions/task/task-book.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
@@ -203,6 +203,198 @@ test("registerTask registers /task list and show", async () => {
 		setTaskGuideRunnerForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
 	}
+});
+
+test("/task publish uses shown defaults when the user submits blank inputs", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+	await writeFile(path.join(testAgentDir, "task-share.json"), JSON.stringify({
+		token: "TOKEN",
+		login: "octo",
+		marketplaceUrl: "https://m.test",
+		challenge: null,
+	}), "utf8");
+	await saveTaskbook("project", cwd, "demo-task", {
+		description: "local long agent description",
+		spec,
+		skill: "# Demo\n",
+		verify: "process.exit(0);\n",
+		contract: {},
+		tags: [],
+	});
+	const originalFetch = globalThis.fetch;
+	let submitted: FormData | null = null;
+	const prompts: string[] = [];
+	ctx.ui.input = (title: string) => {
+		prompts.push(title);
+		return "";
+	};
+	globalThis.fetch = (async (url: string, init?: any) => {
+		if (url.endsWith("/api/account/submissions")) {
+			return new Response(JSON.stringify({ submissions: [{ name: "demo-task", version: "1.0.2", title: "Old Title", description: "Old desc" }] }), { headers: { "content-type": "application/json" } });
+		}
+		if (url.endsWith("/api/tasks/submit")) {
+			submitted = init.body as FormData;
+			return new Response(JSON.stringify({ name: "demo-task", version: submitted.get("version") }), { headers: { "content-type": "application/json" } });
+		}
+		throw new Error(`unexpected fetch ${url}`);
+	}) as any;
+
+	try {
+		await commands.get("task").handler("publish demo-task", ctx);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+
+	assert.match(prompts[0], /默认: 1\.0\.3/);
+	assert.equal(submitted?.get("version"), "1.0.3");
+	assert.equal(submitted?.get("title"), "Old Title");
+	assert.equal(submitted?.get("description"), "Old desc");
+	assert.match(notifications.at(-1)?.message ?? "", /已提交/);
+});
+
+test("/task publish explains login_required during previous submission lookup", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+	await writeFile(path.join(testAgentDir, "task-share.json"), JSON.stringify({
+		token: "TOKEN",
+		login: "octo",
+		marketplaceUrl: "https://m.test",
+		challenge: null,
+	}), "utf8");
+	await saveTaskbook("project", cwd, "demo-task", {
+		description: "local description",
+		spec,
+		skill: "# Demo\n",
+		verify: "process.exit(0);\n",
+		contract: {},
+		tags: [],
+	});
+	const originalFetch = globalThis.fetch;
+	ctx.ui.input = () => "";
+	globalThis.fetch = (async (url: string, init?: any) => {
+		if (url.endsWith("/api/account/submissions")) {
+			return new Response(JSON.stringify({ error: "login_required" }), { status: 401, headers: { "content-type": "application/json" } });
+		}
+		if (url.endsWith("/api/tasks/submit")) {
+			const form = init.body as FormData;
+			return new Response(JSON.stringify({ name: "demo-task", version: form.get("version") }), { headers: { "content-type": "application/json" } });
+		}
+		throw new Error(`unexpected fetch ${url}`);
+	}) as any;
+
+	try {
+		await commands.get("task").handler("publish demo-task", ctx);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+
+	assert.match(notifications.map((item) => item.message).join("\n"), /无法读取上次提交.*市场接口.*TUI token/);
+});
+
+test("/task publish reauthorizes when previous submission lookup reports invalid_token", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+	await writeFile(path.join(testAgentDir, "task-share.json"), JSON.stringify({
+		token: "OLDTOKEN",
+		login: "octo",
+		marketplaceUrl: "https://m.test",
+		challenge: null,
+	}), "utf8");
+	await saveTaskbook("project", cwd, "demo-task", {
+		description: "local description",
+		spec,
+		skill: "# Demo\n",
+		verify: "process.exit(0);\n",
+		contract: {},
+		tags: [],
+	});
+	const originalFetch = globalThis.fetch;
+	const prompts: string[] = [];
+	let accountCalls = 0;
+	ctx.ui.input = (title: string) => {
+		prompts.push(title);
+		return "";
+	};
+	setTaskShareAuthForTests(async () => ({
+		ok: true,
+		config: { token: "a".repeat(32), login: "octo", marketplaceUrl: "https://m.test", challenge: null },
+	}));
+	globalThis.fetch = (async (url: string, init?: any) => {
+		if (url.endsWith("/api/account/submissions")) {
+			accountCalls++;
+			if (accountCalls === 1) return new Response(JSON.stringify({ error: "invalid_token" }), { status: 401, headers: { "content-type": "application/json" } });
+			return new Response(JSON.stringify({ submissions: [{ name: "demo-task", version: "1.0.4", title: "Reauth Title", description: "Reauth desc" }] }), { headers: { "content-type": "application/json" } });
+		}
+		if (url.endsWith("/api/tasks/submit")) {
+			const form = init.body as FormData;
+			return new Response(JSON.stringify({ name: "demo-task", version: form.get("version") }), { headers: { "content-type": "application/json" } });
+		}
+		throw new Error(`unexpected fetch ${url}`);
+	}) as any;
+
+	try {
+		await commands.get("task").handler("publish demo-task", ctx);
+	} finally {
+		globalThis.fetch = originalFetch;
+		setTaskShareAuthForTests(undefined);
+	}
+
+	assert.equal(accountCalls, 2);
+	assert.match(notifications.map((item) => item.message).join("\n"), /授权.*失效.*重新授权/);
+	assert.match(prompts[0], /默认: 1\.0\.5/);
+});
+
+test("/task publish reauthorizes and retries when upload reports invalid_token", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, notifications } = makeCtx();
+	registerTask(pi as any);
+	await writeFile(path.join(testAgentDir, "task-share.json"), JSON.stringify({
+		token: "OLDTOKEN",
+		login: "octo",
+		marketplaceUrl: "https://m.test",
+		challenge: null,
+	}), "utf8");
+	await saveTaskbook("project", cwd, "demo-task", {
+		description: "local description",
+		spec,
+		skill: "# Demo\n",
+		verify: "process.exit(0);\n",
+		contract: {},
+		tags: [],
+	});
+	const originalFetch = globalThis.fetch;
+	let submitCalls = 0;
+	ctx.ui.input = () => "";
+	setTaskShareAuthForTests(async () => ({
+		ok: true,
+		config: { token: "a".repeat(32), login: "octo", marketplaceUrl: "https://m.test", challenge: null },
+	}));
+	globalThis.fetch = (async (url: string) => {
+		if (url.endsWith("/api/account/submissions")) {
+			return new Response(JSON.stringify({ submissions: [] }), { headers: { "content-type": "application/json" } });
+		}
+		if (url.endsWith("/api/tasks/submit")) {
+			submitCalls++;
+			if (submitCalls === 1) return new Response(JSON.stringify({ error: "invalid_token" }), { status: 401, headers: { "content-type": "application/json" } });
+			return new Response(JSON.stringify({ name: "demo-task", version: "1.0.0" }), { headers: { "content-type": "application/json" } });
+		}
+		throw new Error(`unexpected fetch ${url}`);
+	}) as any;
+
+	try {
+		await commands.get("task").handler("publish demo-task", ctx);
+	} finally {
+		globalThis.fetch = originalFetch;
+		setTaskShareAuthForTests(undefined);
+	}
+
+	assert.equal(submitCalls, 2);
+	assert.match(notifications.map((item) => item.message).join("\n"), /上传授权.*失效.*重新授权/);
+	assert.match(notifications.at(-1)?.message ?? "", /已提交/);
 });
 
 test("task session restore and questionnaire flags persist state", async () => {

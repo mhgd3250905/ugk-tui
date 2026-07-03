@@ -7,6 +7,8 @@ import { unzipSync } from "fflate";
 import {
 	buildTaskZip,
 	publishTask,
+	fetchLatestTaskSubmission,
+	nextPatchVersion,
 	collectExtraFiles,
 	extractScriptReferences,
 	assertReferencedFilesExist,
@@ -142,6 +144,29 @@ test("assertReferencedFilesExist throws when a referenced file is missing", () =
 		() => assertReferencedFilesExist(skill, verify, ["skill.md"]),
 		/scripts\/missing\.mjs/,
 	);
+});
+
+test("fetchLatestTaskSubmission reads own submissions with Bearer and selects the newest matching task", async () => {
+	let captured: { url: string; headers: Headers } | null = null;
+	const fetchFn = async (url: string, init: any) => {
+		captured = { url, headers: new Headers(init.headers) };
+		return new Response(JSON.stringify({
+			submissions: [
+				{ name: "other-task", version: "9.0.0", title: "Other", description: "Other desc" },
+				{ name: "demo-task", version: "1.0.2", title: "Demo Title", description: "Demo desc" },
+				{ name: "demo-task", version: "1.0.1", title: "Old Title", description: "Old desc" },
+			],
+		}), { headers: { "content-type": "application/json" } });
+	};
+
+	const latest = await fetchLatestTaskSubmission("demo-task", "TOKEN", "https://m.test", { fetchFn });
+
+	assert.equal(captured!.url, "https://m.test/api/account/submissions");
+	assert.equal(captured!.headers.get("authorization"), "Bearer TOKEN");
+	assert.equal(latest?.version, "1.0.2");
+	assert.equal(latest?.title, "Demo Title");
+	assert.equal(latest?.description, "Demo desc");
+	assert.equal(nextPatchVersion(latest?.version), "1.0.3");
 });
 
 test("publishTask sends multipart with name/version/artifact and Bearer token", async () => {

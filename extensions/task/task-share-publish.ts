@@ -25,6 +25,13 @@ export interface PublishResult {
 	version: string;
 }
 
+export interface TaskSubmissionSummary {
+	name: string;
+	version?: string;
+	title?: string;
+	description?: string;
+}
+
 const CORE_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"] as const;
 
 // 排除规则:打包时跳过这些。核心 5 文件由 buildTaskZip 单独构造(sanitized),不靠目录扫描。
@@ -134,6 +141,39 @@ export function assertReferencedFilesExist(skill: string, verify: string, packag
 			}
 		}
 	}
+}
+
+export function nextPatchVersion(version: string | undefined): string | undefined {
+	const match = version?.match(/^(\d+)\.(\d+)\.(\d+)$/);
+	if (!match) return undefined;
+	return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
+}
+
+export async function fetchLatestTaskSubmission(
+	name: string,
+	token: string,
+	marketplaceUrl: string,
+	deps: TaskSharePublishDeps = {},
+): Promise<TaskSubmissionSummary | null> {
+	const fetchFn = deps.fetchFn ?? fetch;
+	const res = await fetchFn(`${marketplaceUrl}/api/account/submissions`, {
+		headers: { authorization: `Bearer ${token}` },
+	});
+	const body = await res.json().catch(() => ({}));
+	if (!res.ok) {
+		const detail = typeof body.error === "string" ? body.error : `HTTP ${res.status}`;
+		throw new Error(detail);
+	}
+	const submissions = Array.isArray(body.submissions) ? body.submissions : [];
+	const found = submissions.find((item: any) => item?.name === name);
+	if (!found) return null;
+	const field = (value: unknown) => typeof value === "string" ? value : undefined;
+	return {
+		name,
+		version: field(found.version),
+		title: field(found.title),
+		description: field(found.description),
+	};
 }
 
 /**

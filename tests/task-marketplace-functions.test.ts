@@ -128,7 +128,14 @@ function createDb() {
 					throw new Error(`Unhandled first SQL: ${sql}`);
 				},
 				async all() {
-					if (sql.includes("FROM task_submissions") && sql.includes("WHERE task_submissions.user_id")) return { results: submissions.filter((item) => item.user_id === this.values[0]) };
+					if (sql.includes("FROM task_submissions") && sql.includes("WHERE task_submissions.user_id")) {
+						assert.match(sql, /ORDER BY task_submissions\.created_at DESC, task_submissions\.id DESC/);
+						return {
+							results: submissions
+								.filter((item) => item.user_id === this.values[0])
+								.sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id),
+						};
+					}
 					if (sql.includes("FROM task_submissions") && sql.includes("WHERE task_submissions.status = 'pending'")) return { results: submissions.filter((item) => item.status === "pending") };
 					if (sql.includes("FROM task_submissions") && sql.includes("WHERE task_submissions.status = 'published'")) return { results: submissions.filter((item) => item.status === "published") };
 					if (sql.includes("FROM download_events") && sql.includes("WHERE download_events.user_id")) {
@@ -445,6 +452,28 @@ test("signed-in users submit task packages and see pending submissions", async (
 	assert.equal(account.submissions.length, 1);
 	// 5 required files stored as loose objects in R2
 	assert.equal(testEnv.TASK_UPLOADS.objects.size, 5);
+});
+
+test("cli token users can read their own pending submissions", async () => {
+	const testEnv = env();
+	const now = new Date().toISOString();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", now).run();
+	await testEnv.DB.prepare("INSERT INTO cli_tokens (token, user_id, challenge, created_at) VALUES (?, ?, ?, ?)").bind("TOKEN", 1, "challenge", now).run();
+	const form = new FormData();
+	form.set("name", "cli-task");
+	form.set("version", "1.0.0");
+	form.set("title", "CLI Task");
+	form.set("description", "Uploaded from TUI");
+	form.set("artifact", new File([taskZip("cli-task") as BlobPart], "cli-task.zip", { type: "application/zip" }));
+
+	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { authorization: "Bearer TOKEN" }, body: form }), testEnv);
+	const response = await accountSubmissions(new Request("https://ugk-task-share.pages.dev/api/account/submissions", { headers: { authorization: "Bearer TOKEN" } }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 200);
+	assert.equal(body.submissions.length, 1);
+	assert.equal(body.submissions[0].name, "cli-task");
+	assert.equal(body.submissions[0].title, "CLI Task");
 });
 
 test("task submissions reject missing artifact", async () => {

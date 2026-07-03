@@ -353,6 +353,32 @@ node ~/.pi/agent/tasks/<你的task>/verify.mjs; echo "exit=$?"  # 应该是 0
 - verify 校验的字段，skill.md 都让 worker 写了？（verify 要 worker 没写的字段 = 永远 FAIL）
 - `requiredTools` 声明的工具，skill.md 用到了？（声明了不用是噪音；用了没声明是 worker 拿不到授权）
 
+### 自验 4：dispatcher 翻译质量 eval（可选，强烈推荐）
+
+自验 1-3 验的是 verify 产物层和契约一致性，但**没验 dispatcher 把自然语言翻译成 runtimeInput 翻得准不准**。这是自验 1-3 覆盖不到的盲区——worker 跑得再对，dispatcher 翻错了（如把"高清"擅自映射成 1080、把 4k 显式传成 2160 触发错误的选档策略），用户拿到的结果就是错的。
+
+UGK 自带一个通用 dispatcher eval 框架（`scripts/eval-dispatcher.mjs`），用真实 LLM 跑一组真实用户表述，量化翻译准确率。用法：
+
+1. 准备两个 fixture（放在仓库 `tests/fixtures/` 下，随 taskbook 一起演进）：
+   - `taskbooks/<你的task>/contract.json` + `skill.md`（从你的 taskbook 目录拷过来）
+   - `dispatcher-evals/<你的task>.cases.json`（用例集：每条是"自然语言输入 → 期望字段值/断言"）
+2. 写用例。至少覆盖三类：**明确表述**（基线，应 100%）、**模糊表述**（测"该不该省略可选字段"——这是最易错的，省略=走自动策略，显式输出=走用户指定，下游行为不同）、**边界**（allowedValues 枚举、required 缺失、超档位值）。
+3. 跑：
+
+```bash
+npm run eval:dispatcher -- --task=<你的task>
+```
+
+4. 看产出的 `.report.md`：每条 FAIL 会标出"失败字段 + 期望 vs 实际 + 原因"。基线组应 100% 通过，整体通过率 ≥ 80% 为健康。低于 80% 说明要么 `runtimeInputMeta.description` 写得不够清楚（dispatcher 猜错），要么用例期望本身需要调整。
+
+**关键原语 `omitted`**：用例的 `assert` 里 `"字段": "omitted"` 表示"这个字段在 dispatcher 输出里**不该存在**"。对可选字段，"省略（让脚本自动选）"和"显式输出某个值（用户指定）"往往触发完全不同的下游策略，所以 eval 必须能断言"该不该省略"。这是现有所有 mock 单测测不到的。
+
+**`expected: "open"` 用例**：遇到当前 contract 表达不了的语义（如"明确不要字幕"但字段没有 `none` 值），标 `expected: "open"`，eval 跑完单独观察 dispatcher 实际行为、不计入通过率——这往往暴露的是 contract 设计缺口，不是 dispatcher 翻译问题。
+
+**不进 `npm test`/CI**：eval 调真实 LLM 会花 token，只手动跑。离线机制单测（评判器正确性、prompt 注入）在 `tests/task-dispatcher-eval.test.ts`，进 `npm test`。
+
+详见仓库根 `tests/fixtures/dispatcher-evals/video-downloader.cases.json` 作为完整用例集范本。
+
 **自验全过，再 `/task run`。** 这套动作把"多轮试错"压成"一轮自验 + 一次真跑"。
 
 ## 铁律

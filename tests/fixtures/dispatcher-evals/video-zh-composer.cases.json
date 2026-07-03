@@ -1,0 +1,118 @@
+{
+	"task": "video-zh-composer",
+	"description": "video-zh-composer dispatcher eval。3 必填(video/audio/subtitle)+ subtitleColor 枚举(白/黄/粉)。核心难点:从自然语言里区分三个路径、subtitleColor 颜色映射、必填缺失检测。",
+	"cases": [
+		{
+			"id": "comp-01",
+			"group": "baseline",
+			"input": "合成 E:/video.mp4 + E:/dub.zh.wav + E:/subs.zh.srt",
+			"assert": {
+				"videoPath": "path-equals:E:/video.mp4",
+				"audioPath": "path-equals:E:/dub.zh.wav",
+				"subtitlePath": "path-equals:E:/subs.zh.srt"
+			},
+			"note": "基线:三个路径都给。subtitleColor 默认 white,观察 dispatcher 是否补默认或省略(等价)。"
+		},
+		{
+			"id": "comp-02",
+			"group": "baseline",
+			"input": "把 E:/final.mp4、E:/audio.wav 和 E:/cn.srt 合成中文配音版",
+			"assert": {
+				"videoPath": "path-equals:E:/final.mp4",
+				"audioPath": "path-equals:E:/audio.wav",
+				"subtitlePath": "path-equals:E:/cn.srt"
+			},
+			"note": "基线:自然语言分隔('和')。测三个路径的正确归属。"
+		},
+		{
+			"id": "comp-03",
+			"group": "color",
+			"input": "合成 E:/v.mp4 E:/a.wav E:/s.srt,字幕要黄色",
+			"assert": {
+				"videoPath": "path-equals:E:/v.mp4",
+				"audioPath": "path-equals:E:/a.wav",
+				"subtitlePath": "path-equals:E:/s.srt",
+				"subtitleColor": "equals:yellow"
+			},
+			"note": "subtitleColor 映射:'黄色' → yellow"
+		},
+		{
+			"id": "comp-04",
+			"group": "color",
+			"input": "E:/v.mp4 + E:/a.wav + E:/s.srt 合成,硬字幕用粉色",
+			"assert": {
+				"videoPath": "path-equals:E:/v.mp4",
+				"audioPath": "path-equals:E:/a.wav",
+				"subtitlePath": "path-equals:E:/s.srt",
+				"subtitleColor": "equals:pink"
+			},
+			"note": "subtitleColor 映射:'粉色' → pink。测'硬字幕'上下文里的颜色提取。"
+		},
+		{
+			"id": "comp-05",
+			"group": "color",
+			"input": "E:/v.mp4 E:/a.wav E:/s.srt 合成,白色字幕",
+			"assert": {
+				"videoPath": "path-equals:E:/v.mp4",
+				"audioPath": "path-equals:E:/a.wav",
+				"subtitlePath": "path-equals:E:/s.srt",
+				"subtitleColor": "in:white|omitted"
+			},
+			"note": "subtitleColor:'白色' → white,或省略(默认就是 white)。两者等价。"
+		},
+		{
+			"id": "comp-06",
+			"group": "alias",
+			"input": "compose E:/v.mp4 with audio E:/a.wav and subs E:/s.srt",
+			"assert": {
+				"videoPath": "path-equals:E:/v.mp4",
+				"audioPath": "path-equals:E:/a.wav",
+				"subtitlePath": "path-equals:E:/s.srt"
+			},
+			"note": "别名(英文):三个路径从英文介词结构里提取"
+		},
+		{
+			"id": "comp-07",
+			"group": "alias",
+			"input": "E:/v.mp4 配上 E:/dub.wav 配音和 E:/sub.srt 字幕做成成片",
+			"assert": {
+				"videoPath": "path-equals:E:/v.mp4",
+				"audioPath": "path-equals:E:/dub.wav",
+				"subtitlePath": "path-equals:E:/sub.srt"
+			},
+			"note": "别名:'配音'修饰 → audioPath;'字幕'修饰 → subtitlePath;无修饰的 → videoPath。测语义归属。"
+		},
+		{
+			"id": "comp-08",
+			"group": "boundary",
+			"input": "合成 E:/v.mp4 和 E:/a.wav",
+			"assert": {
+				"__outcome": "fails-required-gate"
+			},
+			"note": "边界:缺 subtitlePath(必填),应解析失败。3 个必填只给 2 个。"
+		},
+		{
+			"id": "comp-09",
+			"group": "boundary",
+			"input": "合成 E:/v.mp4 + E:/a.wav + E:/s.srt,字幕要蓝色",
+			"assert": {
+				"videoPath": "path-equals:E:/v.mp4",
+				"audioPath": "path-equals:E:/a.wav",
+				"subtitlePath": "path-equals:E:/s.srt"
+			},
+			"note": "边界:'蓝色'不在 allowedValues(white/yellow/pink)。contract 应拒绝或走默认。3 个必填字段仍要正确提取——重点测 dispatcher 在'部分输入非法'时是否仍正确提取合法部分。"
+		},
+		{
+			"id": "comp-10",
+			"group": "boundary",
+			"input": "E:/v.mp4 + E:/a.wav + E:/s.srt 合成成片",
+			"assert": {
+				"videoPath": "path-equals:E:/v.mp4",
+				"audioPath": "path-equals:E:/a.wav",
+				"subtitlePath": "path-equals:E:/s.srt",
+				"subtitleColor": "in:white|omitted"
+			},
+			"note": "边界:没提颜色 → subtitleColor 省略或 white(默认)。dispatcher 不该编造颜色。"
+		}
+	]
+}

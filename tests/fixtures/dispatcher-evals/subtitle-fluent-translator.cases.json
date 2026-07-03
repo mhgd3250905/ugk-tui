@@ -1,0 +1,152 @@
+{
+	"task": "subtitle-fluent-translator",
+	"description": "subtitle-fluent-translator dispatcher eval。9 字段最复杂。核心难点:verbosity 枚举、stylePrompt 自由文本抽取、glossary 术语抽取(分号分隔)、verbosity=talkative 不放宽 maxUnitChars、referenceSubtitlePath 用途边界。",
+	"cases": [
+		{
+			"id": "trans-01",
+			"group": "baseline",
+			"input": "翻译 E:/subs/en.srt 成中文字幕",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/en.srt"
+			},
+			"note": "基线:只给路径。targetLanguage 默认 zh-CN,verbosity 默认 normal,其余可选省略。只断言必填字段,可选字段观察 dispatcher 行为(可能补 default 也可能省略,二者等价)。"
+		},
+		{
+			"id": "trans-02",
+			"group": "baseline",
+			"input": "把 E:/subs/raw.vtt 翻成中文,话痨模式",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/raw.vtt",
+				"verbosity": "equals:talkative"
+			},
+			"note": "基线:'话痨模式' → verbosity=talkative"
+		},
+		{
+			"id": "trans-03",
+			"group": "baseline",
+			"input": "E:/subs/x.srt 翻译成流畅中文字幕",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/x.srt",
+				"verbosity": "in:omitted|normal"
+			},
+			"note": "基线:没提话痨 → verbosity 省略或 normal(默认)。"
+		},
+		{
+			"id": "trans-04",
+			"group": "glossary",
+			"input": "翻译 E:/subs/breaking.srt,里面提到 bboy lunatic、breaking、toprock、freeze 这些术语",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/breaking.srt",
+				"glossary": "present"
+			},
+			"note": "glossary 抽取:用户明确提到术语 → dispatcher 应抽进 glossary(分号分隔)。只断言 present(具体分号格式有弹性)。这条测 dispatcher 能否从自然语言识别'这是术语参考'并抽取。"
+		},
+		{
+			"id": "trans-05",
+			"group": "glossary",
+			"input": "E:/subs/interview.srt 翻成中文,人名 Elon Musk 和 SpaceX 请统一译名",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/interview.srt",
+				"glossary": "present"
+			},
+			"note": "glossary 抽取:'人名...请统一译名' → glossary 非空。测人名类术语抽取。"
+		},
+		{
+			"id": "trans-06",
+			"group": "glossary",
+			"input": "翻译 E:/subs/normal.srt",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/normal.srt",
+				"glossary": "in:omitted|"
+			},
+			"note": "glossary 边界:没提任何术语 → glossary 省略或空串(都表示无术语)。dispatcher 不该编造术语。"
+		},
+		{
+			"id": "trans-07",
+			"group": "style",
+			"input": "E:/subs/doc.srt 翻译,要专业严肃的纪录片风格",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/doc.srt",
+				"stylePrompt": "present"
+			},
+			"note": "stylePrompt 抽取:'专业严肃的纪录片风格' → stylePrompt 非空。测自由文本风格抽取。"
+		},
+		{
+			"id": "trans-08",
+			"group": "style",
+			"input": "E:/subs/funny.srt 翻译成口语化、轻松活泼的",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/funny.srt",
+				"stylePrompt": "present"
+			},
+			"note": "stylePrompt 抽取:'口语化、轻松活泼' → stylePrompt。注意这与默认'自然口语化'不同,是显式风格要求。"
+		},
+		{
+			"id": "trans-09",
+			"group": "reference",
+			"input": "翻译 E:/subs/en.srt,参考 E:/refs/cn.srt 核对术语",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/en.srt",
+				"referenceSubtitlePath": "path-equals:E:/refs/cn.srt"
+			},
+			"note": "referenceSubtitlePath:'参考...核对术语' → referenceSubtitlePath。测参考字幕路径识别。关键:不能和主 subtitlePath 混淆。"
+		},
+		{
+			"id": "trans-10",
+			"group": "reference",
+			"input": "E:/subs/main.srt 翻译,这个视频是 E:/refs/official.srt 的官方版本可以对照",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/main.srt",
+				"referenceSubtitlePath": "path-equals:E:/refs/official.srt"
+			},
+			"note": "referenceSubtitlePath:更隐蔽的表述'对照'。测 dispatcher 能否区分主字幕和参考字幕。"
+		},
+		{
+			"id": "trans-11",
+			"group": "duration",
+			"input": "翻译 E:/subs/x.srt,原视频时长 600 秒",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/x.srt",
+				"videoDurationSeconds": "equals:600"
+			},
+			"note": "videoDurationSeconds:'时长 600 秒' → 600(数字)。测数字提取。"
+		},
+		{
+			"id": "trans-12",
+			"group": "duration",
+			"input": "E:/subs/y.srt 翻译,视频大概 10 分钟",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/y.srt",
+				"videoDurationSeconds": "equals:600"
+			},
+			"note": "videoDurationSeconds 换算:'10 分钟' → 600 秒。测单位换算(分钟→秒)。"
+		},
+		{
+			"id": "trans-13",
+			"group": "boundary",
+			"input": "E:/subs/long.srt 翻译,话痨模式,每条最多 100 字",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/long.srt",
+				"verbosity": "equals:talkative",
+				"maxUnitChars": "equals:100"
+			},
+			"note": "边界:话痨 + 显式字数。'每条最多 100 字' → maxUnitChars=100。关键:contract 说 talkative 不自动放宽长度,所以用户必须显式传才放宽。"
+		},
+		{
+			"id": "trans-14",
+			"group": "boundary",
+			"input": "翻译个字幕",
+			"assert": {
+				"__outcome": "fails-required-gate"
+			},
+			"note": "边界:无 subtitlePath(必填),应解析失败"
+		},
+		{
+			"id": "trans-15",
+			"group": "open",
+			"input": "E:/subs/x.srt 翻成英文字幕",
+			"expected": "open",
+			"note": "开放用例:用户要英文字幕,但 contract 的 targetLanguage allowedValues 只有 zh-CN(配音链路只支持中文)。这是 contract 设计缺口——当前会触发 allowedValues 失败。观察 dispatcher 实际行为:报错?还是强行填 zh-CN?据此决定是否扩展 targetLanguage 支持英文或其他语言。不计入通过率。"
+		}
+	]
+}

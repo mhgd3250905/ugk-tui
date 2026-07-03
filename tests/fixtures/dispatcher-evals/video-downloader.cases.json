@@ -1,0 +1,176 @@
+{
+	"task": "video-downloader",
+	"description": "video-downloader dispatcher 翻译质量 eval。覆盖明确表述、模糊表述(omitted 判断)、多语言别名、allowedValues/required 边界。open 用例不计入通过率,只观察。",
+	"cases": [
+		{
+			"id": "case-01",
+			"group": "baseline",
+			"input": "下载 https://youtu.be/UEah8gOhixg,720p,要英文字幕",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "equals:720",
+				"subLangs": "equals:en",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "基线:明确表述三要素,应 100% 通过"
+		},
+		{
+			"id": "case-02",
+			"group": "baseline",
+			"input": "https://youtu.be/UEah8gOhixg",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "omitted",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "裸 URL:只有 url,可选全 omitted(走脚本自动选择)"
+		},
+		{
+			"id": "case-03",
+			"group": "baseline",
+			"input": "下 https://youtu.be/UEah8gOhixg 用我 chrome 登录态",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "omitted",
+				"cookiesFromBrowser": "equals:chrome"
+			},
+			"note": "cookies 别名映射:chrome 登录态 → cookiesFromBrowser=chrome"
+		},
+		{
+			"id": "case-04",
+			"group": "ambiguous",
+			"input": "下个高清的 https://youtu.be/UEah8gOhixg",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "omitted",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "模糊:'高清'是模糊词,不该擅自映射数字。省略让脚本走 ladder-match 自动选 1080 档。若显式输出 1080 则走 specified-cap,行为相同但违背'未指定'语义。"
+		},
+		{
+			"id": "case-05",
+			"group": "ambiguous",
+			"input": "随便下个带字幕的 https://youtu.be/UEah8gOhixg",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "omitted",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "模糊:'带字幕的'没指定语种,省略让脚本走四级优先自动选。显式输出 en/zh 属过度推断。"
+		},
+		{
+			"id": "case-06",
+			"group": "ambiguous",
+			"input": "下这个 https://youtu.be/UEah8gOhixg",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "omitted",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "最简表述:用户什么都没指定,可选全 omitted。"
+		},
+		{
+			"id": "case-07",
+			"group": "ambiguous",
+			"input": "https://youtu.be/UEah8gOhixg 高画质",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "omitted",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "模糊:'高画质'同 case-04,模糊词不映射数字。"
+		},
+		{
+			"id": "case-08",
+			"group": "alias",
+			"input": "英文字幕下一下 https://youtu.be/UEah8gOhixg",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "equals:en",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "别名:'英文字幕' → subLangs=en"
+		},
+		{
+			"id": "case-09",
+			"group": "alias",
+			"input": "English subs please https://youtu.be/UEah8gOhixg",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "equals:en",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "别名(英文):'English subs' → subLangs=en"
+		},
+		{
+			"id": "case-10",
+			"group": "alias",
+			"input": "https://youtu.be/UEah8gOhixg 字幕要俄语的",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "equals:ru",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "别名:'俄语' → subLangs=ru"
+		},
+		{
+			"id": "case-11",
+			"group": "alias",
+			"input": "https://youtu.be/UEah8gOhixg 1080",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "equals:1080",
+				"subLangs": "omitted",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "数字提取:裸 '1080' → maxHeight=1080"
+		},
+		{
+			"id": "case-12",
+			"group": "boundary",
+			"input": "用 firefox 登录下 https://youtu.be/UEah8gOhixg",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"cookiesFromBrowser": "in:none|chrome"
+			},
+			"note": "边界:firefox 不在 allowedValues(none|chrome),dispatcher 应映射到 none 或触发 allowedValues 失败。'in:none|chrome' 允许两种结果,都算可接受处理。"
+		},
+		{
+			"id": "case-13",
+			"group": "boundary",
+			"input": "下个视频",
+			"assert": {
+				"__outcome": "fails-required-gate"
+			},
+			"note": "边界:无 url(required 缺失),dispatcher 应解析失败(resolveRuntimeInputFromText 抛错或无有效输出)。用 __outcome 断言整体结果而非字段。"
+		},
+		{
+			"id": "case-14",
+			"group": "open",
+			"input": "https://youtu.be/UEah8gOhixg 不用字幕",
+			"expected": "open",
+			"note": "开放用例:contract 的 subLangs 无法表达'明确不要字幕'——省略=自动选(可能下),没有 none 值。这是 contract 设计缺口。eval 跑完观察 dispatcher 实际怎么处理(省略?报错?编造 none?),据此决定是否给 subLangs 加 allowedValues 含 none。不计入通过率。"
+		},
+		{
+			"id": "case-15",
+			"group": "boundary",
+			"input": "https://youtu.be/UEah8gOhixg 要4k",
+			"assert": {
+				"url": "equals:https://youtu.be/UEah8gOhixg",
+				"maxHeight": "omitted",
+				"subLangs": "omitted",
+				"cookiesFromBrowser": "omitted"
+			},
+			"note": "边界:4k 超出档位链(1080→144),显式传 4k 会触发 specified-cap 取最小(违背'要高画质');省略才走 fallback-max 取可用最大。正确翻译应省略。"
+		}
+	]
+}

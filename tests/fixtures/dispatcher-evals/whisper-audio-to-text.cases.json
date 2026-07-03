@@ -1,0 +1,111 @@
+{
+	"task": "whisper-audio-to-text",
+	"description": "whisper-audio-to-text dispatcher 翻译质量 eval。核心难点:task 字段默认 transcribe 但配音链路必须 transcribe(用户说英文翻译字幕才 translate);language 不填=自动识别;model 有默认不该乱填。",
+	"cases": [
+		{
+			"id": "whisp-01",
+			"group": "baseline",
+			"input": "转写 E:/videos/interview.mp4",
+			"assert": {
+				"file_path": "path-equals:E:/videos/interview.mp4",
+				"task": "in:omitted|transcribe|translate",
+				"language": "omitted",
+				"model": "in:omitted|large-v3-turbo"
+			},
+			"note": "基线:只给路径,language 应 omitted(自动识别),task 有默认。model 省略或默认都行。"
+		},
+		{
+			"id": "whisp-02",
+			"group": "baseline",
+			"input": "帮我转写这个 D:/audio/lecture.wav,是俄语的",
+			"assert": {
+				"file_path": "path-equals:D:/audio/lecture.wav",
+				"language": "equals:ru"
+			},
+			"note": "基线:明确语种'俄语' → language=ru"
+		},
+		{
+			"id": "whisp-03",
+			"group": "baseline",
+			"input": "E:/media/podcast.mp3 这个英语的转成英文翻译字幕",
+			"assert": {
+				"file_path": "path-equals:E:/media/podcast.mp3",
+				"task": "equals:translate",
+				"language": "equals:en"
+			},
+			"note": "基线:'英文翻译字幕' 明确触发 task=translate(不是默认 transcribe)。这是配音链路的关键区分点。"
+		},
+		{
+			"id": "whisp-04",
+			"group": "ambiguous",
+			"input": "转写一下 E:/videos/show.mp4",
+			"assert": {
+				"file_path": "path-equals:E:/videos/show.mp4",
+				"task": "in:omitted|transcribe",
+				"language": "omitted"
+			},
+			"note": "模糊:没说语种、没说英文翻译 → task 省略或 transcribe(配音链路默认),language 省略(自动识别)。绝不能 translate(那是翻成英文,只用于英文翻译字幕)。"
+		},
+		{
+			"id": "whisp-05",
+			"group": "ambiguous",
+			"input": "E:/clips/japanese.mp4 这个日语视频转个字幕出来",
+			"assert": {
+				"file_path": "path-equals:E:/clips/japanese.mp4",
+				"language": "equals:ja",
+				"task": "in:omitted|transcribe"
+			},
+			"note": "模糊:'转个字幕出来'是转写(transcribe),不是翻译成英文(translate)。语言'日语' → ja。"
+		},
+		{
+			"id": "whisp-06",
+			"group": "alias",
+			"input": "whisper 一下 E:/a.mp4 顺便指定英文",
+			"assert": {
+				"file_path": "path-equals:E:/a.mp4",
+				"language": "equals:en",
+				"task": "in:omitted|transcribe"
+			},
+			"note": "别名:'英文' → language=en,但没说英文翻译字幕 → task 仍 transcribe。'指定英文'是语言提示不是翻译意图。"
+		},
+		{
+			"id": "whisp-07",
+			"group": "alias",
+			"input": "transcribe E:/b.wav, it's in French",
+			"assert": {
+				"file_path": "path-equals:E:/b.wav",
+				"task": "equals:transcribe",
+				"language": "equals:fr"
+			},
+			"note": "别名(英文):'French' → fr,显式 transcribe。"
+		},
+		{
+			"id": "whisp-08",
+			"group": "boundary",
+			"input": "E:/c.mp4 用 small 模型",
+			"assert": {
+				"file_path": "path-equals:E:/c.mp4"
+			},
+			"note": "边界:用户指定非默认 model(small)。contract 写默认 large-v3-turbo,用户显式要 small 应尊重。观察 dispatcher 是否传 model=small(无 allowedValues 约束,理论应透传)。"
+		},
+		{
+			"id": "whisp-09",
+			"group": "boundary",
+			"input": "转写个视频",
+			"assert": {
+				"__outcome": "fails-required-gate"
+			},
+			"note": "边界:无 file_path(必填),应解析失败。"
+		},
+		{
+			"id": "whisp-10",
+			"group": "boundary",
+			"input": "转写 E:/x.mp4,要翻译成中文字幕",
+			"assert": {
+				"file_path": "path-equals:E:/x.mp4",
+				"task": "in:omitted|transcribe"
+			},
+			"note": "边界(关键):用户说'翻译成中文字幕'。Whisper 的 translate 是翻成英文,不是中文!中文翻译是下游 subtitle-fluent-translator 的事。dispatcher 应理解为 transcribe(转写),中文翻译交给下游。误判成 translate 会产出英文字幕,违背用户'要中文'的意图。这条最易错。"
+		}
+	]
+}

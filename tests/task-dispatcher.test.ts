@@ -589,6 +589,35 @@ test("buildTaskDispatcherPrompt emphasizes LLM compute capability and complete o
 	assert.match(prompt, /截断|半成品/, "prompt 应禁止截断/半成品输出");
 });
 
+test("buildTaskDispatcherPrompt tells dispatcher not to emit empty object when all required missing", () => {
+	// ponytail: eval 实测发现的翻译问题 —— 用户说"转写个视频"(缺必填 file_path),
+	// dispatcher 返回 `{}` 而非让系统报"解析失败"。机制层 coversRequired 能兜住,但 `{}` 在
+	// extractRuntimeInputFromText 里被当"成功解析出 0 个字段",绕过了"解析失败"语义。
+	// 修复:prompt 明确告诉 dispatcher 全 required 缺失时不要输出 JSON/空对象。源头治理,
+	// 配合机制层门禁双层防御。5 个配音流水线 task 共享这一个修复点。
+	const prompt = buildTaskDispatcherPrompt("# Skill", { runtimeInput: ["file_path"] }, "转写个视频");
+	assert.match(prompt, /不要输出.*空对象/, "prompt 应禁止全 required 缺失时输出空对象");
+	assert.match(prompt, /所有 required 字段都无法确定/, "prompt 应说明触发条件是所有 required 都缺");
+});
+
+test("dispatcher returns undefined (no JSON output) → headless reports no valid output", async () => {
+	// ponytail: 配合上面的 prompt 修复 —— dispatcher 在全 required 缺失时不输出 JSON,
+	// extractRuntimeInputFromText 返回 undefined,机制层 dispatched=undefined,
+	// headless 走 line 335 的"无有效输出"分支。钉住这条路径的报错措辞,防止退化。
+	setTaskDispatcherForTests(async () => undefined);
+	try {
+		await assert.rejects(
+			() => resolveRuntimeInputFromText({}, "# Skill", {
+				runtimeInput: ["file_path"],
+				runtimeInputMeta: { file_path: { required: true } },
+			}, "转写个视频", undefined, true),
+			/dispatcher 无有效输出/,
+		);
+	} finally {
+		setTaskDispatcherForTests(undefined);
+	}
+});
+
 test("buildTaskDispatcherPrompt injects the real current date so dispatcher computes relative times correctly", () => {
 	// ponytail: 真实 bug —— dispatcher 算"上周"猜成 16 个月前(用训练数据日期)。
 	// 修复:prompt 注入当前 UTC ISO + 本地时间 + 星期几,让相对时间算得准。

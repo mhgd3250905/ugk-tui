@@ -1,0 +1,136 @@
+{
+	"task": "subtitle-to-speech",
+	"description": "subtitle-to-speech dispatcher eval。核心难点:voice 从自然语言(性别/气质/语言)映射到预置 ID;stylePrompt 自由文本抽取;maxChars 仅供校验不改行为。",
+	"cases": [
+		{
+			"id": "tts-01",
+			"group": "baseline",
+			"input": "给 E:/subs/zh.srt 配音",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/zh.srt"
+			},
+			"note": "基线:只给路径。voice 默认冰糖,stylePrompt 默认。只断言必填,可选字段观察。"
+		},
+		{
+			"id": "tts-02",
+			"group": "baseline",
+			"input": "E:/subs/cn.srt 用女声配音",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/cn.srt",
+				"voice": "in:omitted|冰糖|茉莉"
+			},
+			"note": "基线:'女声' → 中文女声 ID(冰糖或茉莉),或省略走默认冰糖(contract default=冰糖,三者等价)。新契约强调 voice 只看语言+性别,默认就是中文女声,省略合理。"
+		},
+		{
+			"id": "tts-03",
+			"group": "voice-mapping",
+			"input": "E:/subs/x.srt 用男声配音",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/x.srt",
+				"voice": "in:苏打|白桦"
+			},
+			"note": "voice 映射:'男声' → 中文男声(苏打=年轻活力 / 白桦=沉稳)。默认是女声冰糖,所以男声必须显式指定,不能省略。"
+		},
+		{
+			"id": "tts-04",
+			"group": "voice-mapping",
+			"input": "E:/subs/y.srt 配音,要年轻有活力的男声",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/y.srt",
+				"voice": "equals:苏打"
+			},
+			"note": "voice 精确映射:'年轻有活力的男声' → 苏打(contract 明确标注)。气质决定具体男声 ID。"
+		},
+		{
+			"id": "tts-05",
+			"group": "voice-mapping",
+			"input": "E:/subs/z.srt 配音,要沉稳一点的男声",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/z.srt",
+				"voice": "equals:白桦"
+			},
+			"note": "voice 精确映射:'沉稳' → 白桦。测气质关键词到 ID 的映射。"
+		},
+		{
+			"id": "tts-06",
+			"group": "voice-mapping",
+			"input": "配音 E:/subs/en.srt,要英文女声",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/en.srt",
+				"voice": "in:Mia|Chloe"
+			},
+			"note": "voice 跨语言:'英文女声' → Mia 或 Chloe。测 dispatcher 根据语言选 ID。"
+		},
+		{
+			"id": "tts-07",
+			"group": "voice-mapping",
+			"input": "E:/subs/eng.srt 配音,英文男声",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/eng.srt",
+				"voice": "in:Milo|Dean"
+			},
+			"note": "voice 跨语言:'英文男声' → Milo 或 Dean。"
+		},
+		{
+			"id": "tts-08",
+			"group": "voice-mapping",
+			"input": "E:/subs/a.srt 配音,声音活泼一点,年轻女生",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/a.srt",
+				"voice": "in:omitted|冰糖|茉莉",
+				"stylePrompt": "present"
+			},
+			"note": "voice + stylePrompt 分离:'活泼'是语气 → stylePrompt;'年轻女生'是声色 → voice(或省略走默认冰糖,默认即中文女声)。新契约下气质描述进 stylePrompt,voice 只管音色 ID。"
+		},
+		{
+			"id": "tts-09",
+			"group": "style",
+			"input": "E:/subs/b.srt 配音,语速慢一点,温柔解说风格",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/b.srt",
+				"stylePrompt": "present"
+			},
+			"note": "stylePrompt 抽取:'语速慢、温柔解说' → stylePrompt。这些是表达方式不是音色。"
+		},
+		{
+			"id": "tts-10",
+			"group": "alias",
+			"input": "E:/subs/c.srt voice over with Chloe",
+			"assert": {
+				"subtitlePath": "path-equals:E:/subs/c.srt",
+				"voice": "equals:Chloe"
+			},
+			"note": "别名(英文):用户直接说 Chloe → voice=Chloe。测精确 ID 提取。"
+		},
+		{
+			"id": "tts-11",
+			"group": "open",
+			"input": "配音 E:/subs/d.srt,用哈利波特的声音",
+			"expected": "open",
+			"note": "开放用例:'哈利波特的声音'不在 allowedValues 里(预置音色无人物维度)。contract 要求 voice 不在列表时停止不 fallback。观察 dispatcher 实际行为:省略 voice(走默认)?还是输出非法值触发 allowedValues gate?这测的是 contract 的 allowedValues 约束如何与'无法满足的用户需求'交互。不计入通过率。"
+		},
+		{
+			"id": "tts-12",
+			"group": "boundary",
+			"input": "配音",
+			"assert": {
+				"__outcome": "fails-required-gate"
+			},
+			"note": "边界:无 subtitlePath(必填),应解析失败"
+		},
+		{
+			"id": "tts-13",
+			"group": "open",
+			"input": "配音 E:/subs/e.srt,声音性感一点",
+			"expected": "open",
+			"note": "开放用例:'性感'不是预置音色的气质维度。观察 dispatcher 怎么处理:映射到某个 ID + stylePrompt 写'性感'?还是编造?预置音色没有'性感'标签,这是 contract 表达力缺口。不计入通过率。"
+		},
+		{
+			"id": "tts-14",
+			"group": "open",
+			"input": "E:/subs/f.srt 配音,声音像新闻联播主播",
+			"expected": "open",
+			"note": "开放用例:'新闻联播主播'是具体人物参照,预置音色没有这个维度。观察 dispatcher 映射:沉稳白桦?还是无法处理?测 contract 能否覆盖'像某类人'的表述。不计入通过率。"
+		}
+	]
+}

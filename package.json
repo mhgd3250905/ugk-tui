@@ -16,6 +16,7 @@
     "cron:start": "node cron/service.ts",
     "smoke:task": "node scripts/smoke-task.mjs",
     "smoke:rpc": "node scripts/smoke-rpc.mjs",
+    "eval:dispatcher": "node scripts/eval-dispatcher.mjs",
     "test": "node --test \"tests/*.test.ts\"",
     "test:integration": "node --test \"tests/integration/*.test.ts\"",
     "test:all": "npm test && npm run test:integration"

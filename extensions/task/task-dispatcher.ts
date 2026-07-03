@@ -49,6 +49,7 @@ export function buildTaskDispatcherPrompt(skill: string, contract: unknown, rawI
 		"- 每个字段值必须是完整、有效的最终值 —— 不要输出截断的、半成品的、占位的值。",
 		"- 只输出 contract.runtimeInput 里声明的字段,不要输出任何其他字段(未声明字段会导致解析失败)。",
 		"- 若某个 required 字段你无法从输入确定值,省略它(系统会判定为解析失败并报错,这比输出错误值好)。",
+		"- 如果用户输入完全缺少必要信息,导致所有 required 字段都无法确定,不要输出 JSON,也不要输出空对象,只输出一句简短的自然语言说明缺什么(例如:缺少必填的 file_path)。系统据此给出清晰的解析失败反馈;输出空对象会被误当成成功解析出 0 个字段而绕过门禁。",
 		"",
 		"## skill.md",
 		skill,

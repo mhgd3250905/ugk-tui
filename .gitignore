@@ -11,6 +11,12 @@ package-lock.json
 .wrangler/
 *.log
 
+# dispatcher eval 运行产物(手动跑产生,不进版本库)
+tests/fixtures/dispatcher-evals/*.report.json
+tests/fixtures/dispatcher-evals/*.report.md
+tests/fixtures/dispatcher-evals/_*.log
+tests/fixtures/dispatcher-evals/_*.md
+
 # Flow local artifacts (task runs, evidence, status — per-workspace, not shared)
 .flow/
 

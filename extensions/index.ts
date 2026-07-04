@@ -24,6 +24,7 @@ import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
 import registerTodoTool from "./todo-tool.ts";
+import registerCompaction from "./compaction/index.ts";
 import registerTask from "./task/task.ts";
 import registerQuestionnaire from "./questionnaire.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
@@ -142,6 +143,9 @@ export default function (pi: ExtensionAPI) {
 
 	// 1.3b.1) TodoWrite 工具:复杂任务 checklist,与 plan-mode 共用状态
 	registerTodoTool(pi);
+
+	// 1.3b.2) compaction:分档阈值 + 自选压缩模型 + 默认兜底
+	registerCompaction(pi);
 
 	// 1.3c) questionnaire:通用多选问卷工具(让 agent 向用户提问)。原属 judge 目录,
 	// judge 删除后独立出来 —— 它是通用能力,不只 judge 用。

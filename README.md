@@ -199,6 +199,8 @@ UGK_CLEAR_STARTUP=0 ugk
 | `/update` | 检查并更新 UGK |
 | `/cdp` | 管理本地 Chrome CDP 访问模式、端口、启动和标签页 |
 | `/mcp` | 管理 MCP server 状态、权限模式、reload、enable/disable |
+| `/compaction-model` | 选择上下文压缩用的模型 |
+| `/trigger-compact` | 立即触发上下文压缩,可附加保留重点 |
 | `/ugk-ui` | 开关 ugk 品牌 UI |
 | `/ui-language` | 用菜单切换 UGK 菜单/UI 语言 |
 | `/ugk-autopilot` | 工具确认总开关菜单,也支持 `on|off|status` |
@@ -213,6 +215,10 @@ UGK_CLEAR_STARTUP=0 ugk
 ### plan-mode 只读探索模式
 
 `/plan` 进入只读模式:工具限制为 read/bash/grep/find/ls,bash 命令过白名单(只放行只读命令,拦 rm/git commit/npm install,并阻止 `curl | sh`、`curl -o`、curl 上传/变更请求等非只读形态)。agent 产出 `Plan:` 编号计划后,可选择执行(恢复全部工具)/继续规划/精炼。执行阶段用 `[DONE:n]` 跟踪进度,状态栏显示 `📋 N/M`。
+
+### 智能上下文压缩
+
+长会话会按当前模型 `contextWindow` 分档自动触发压缩。用 `/compaction-model` 选择压缩模型(写入 `~/.pi/agent/settings.json` 的 `compactionModel` 字段);用 `/trigger-compact` 可手动触发,也可附一句保留重点。
 
 ### Chrome CDP 本地浏览器控制
 

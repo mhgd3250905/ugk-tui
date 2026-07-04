@@ -34,6 +34,11 @@
 - 计划提取:回复带 `Plan:` 段落自动抽编号步骤
 - 进度跟踪:`[DONE:n]` 标记 + widget ☐/☑ + 状态栏 `📋 N/M`
 
+### 智能上下文压缩
+
+- `/compaction-model` 打开菜单选择压缩模型,持久化到 settings.json
+- `/trigger-compact [指令]` 立即触发上下文压缩;长会话会按当前模型 contextWindow 分档自动触发
+
 ### Chrome CDP 本地浏览器控制
 
 - `/cdp status|ask|on|off|port|launch|tabs`
@@ -78,6 +83,8 @@
 - `/cdp` — 管理 Chrome CDP
 - `/mcp` — 管理 MCP server
 - `/task` — 固定任务委托
+- `/compaction-model` — 选择上下文压缩模型
+- `/trigger-compact` — 立即触发上下文压缩
 - `/plan` — 只读计划模式
 - `/todos` — 待办清单(plan-mode 进度)
 - `/ugk-ui` — 开关品牌 UI

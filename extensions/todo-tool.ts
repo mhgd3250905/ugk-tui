@@ -160,12 +160,13 @@ Rules:
 			if (details.todos.length === 0) return new Text(theme.fg("dim", "Todo list empty"), 0, 0);
 
 			const lines = details.todos.map((t) => {
+				// 单字符宽符号(与 todo-render.ts widget 保持一致):▢ pending / ▣ in_progress / ✓ completed
 				const mark =
 					t.status === "completed"
 						? theme.fg("success", "✓")
 						: t.status === "in_progress"
-							? theme.fg("warning", "►")
-							: theme.fg("dim", "○");
+							? theme.fg("warning", "▣")
+							: theme.fg("dim", "▢");
 				const text =
 					t.status === "completed"
 						? theme.fg("dim", t.content)

@@ -27,13 +27,15 @@ export function renderTodoWidget(ctx: ExtensionContext, items: readonly TodoItem
 
 	const lines = items.map((item, idx) => {
 		const num = ctx.ui.theme.fg("dim", `${idx + 1}.`);
+		// 单字符宽符号:▢ pending / ▣ in_progress / ✓ completed。
+		// ▢/▣ 同为方框(空心→实心,同一形状家族),✓ 跨到打钩语义(完成是质变)。
 		if (item.status === "completed") {
-			return `${ctx.ui.theme.fg("success", "☑")} ${num} ${ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.content))}`;
+			return `${ctx.ui.theme.fg("success", "✓")} ${num} ${ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.content))}`;
 		}
 		if (item.status === "in_progress") {
-			return `${ctx.ui.theme.fg("warning", "►")} ${num} ${ctx.ui.theme.fg("accent", item.content)}`;
+			return `${ctx.ui.theme.fg("warning", "▣")} ${num} ${ctx.ui.theme.fg("accent", item.content)}`;
 		}
-		return `${ctx.ui.theme.fg("muted", "☐")} ${num} ${item.content}`;
+		return `${ctx.ui.theme.fg("muted", "▢")} ${num} ${item.content}`;
 	});
 	ctx.ui.setWidget("plan-todos", lines);
 }

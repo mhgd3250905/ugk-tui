@@ -7,7 +7,9 @@ export function renderTodoStatus(
 	planModeEnabled: boolean,
 	executionMode: boolean,
 ): void {
-	if ((executionMode || items.length > 0) && items.length > 0) {
+	// ponytail: 条件简化 —— 原 (executionMode || items.length > 0) && items.length > 0
+	// 等价于 items.length > 0(&& 钳死了 executionMode 的作用)。没有 items 时无进度可显示。
+	if (items.length > 0) {
 		const completed = items.filter((t) => t.status === "completed").length;
 		ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("accent", `📋 ${completed}/${items.length}`));
 	} else if (planModeEnabled) {

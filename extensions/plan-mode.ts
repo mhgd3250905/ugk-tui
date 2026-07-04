@@ -127,7 +127,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 				ctx.ui.notify(uiText("暂无 todo。请先用 /plan 创建计划。", "No todos yet. Use /plan to create a plan first."), "info");
 				return;
 			}
-			const list = todos.map((item, i) => `${i + 1}. ${item.status === "completed" ? "✓" : "○"} ${item.content}`).join("\n");
+			const list = todos.map((item, i) => `${i + 1}. ${item.status === "completed" ? "✓" : item.status === "in_progress" ? "▣" : "▢"} ${item.content}`).join("\n");
 			ctx.ui.notify(uiText(`计划进度:\n${list}`, `Plan progress:\n${list}`), "info");
 		},
 	});

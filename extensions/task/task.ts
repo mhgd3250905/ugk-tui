@@ -1274,8 +1274,11 @@ async function runTaskWithRetry(
 			feedback,
 		}, {
 			cwd,
-			// ponytail: 注入 TASK_DIR,让 worker 能调用 taskbook 自带的 scripts/(python "$TASK_DIR/scripts/xxx.py")
-			env: { ...opts.env, TASK_DIR: loaded.dir },
+		// ponytail: 注入 TASK_DIR(自带脚本目录)+ TASK_OUTPUT_DIR(产物目录)。
+		// TASK_OUTPUT_DIR 之前只在 prompt 文本里告知,worker 的 bash 脚本读 process.env.TASK_OUTPUT_DIR
+		// 拿到 undefined → 中间文件路径拼成 "undefined/_xxx.json" → ENOENT 崩(实测 ins/tiktok/reddit 全中)。
+		// 这里补注入,与 TASK_DIR 对称。两条路径(菜单 /task run + 工具 run_task)都经此,一处全修。
+		env: { ...opts.env, TASK_DIR: loaded.dir, TASK_OUTPUT_DIR: outputDir },
 			signal: opts.signal,
 			onUpdate: wrappedOnWorkerUpdate,
 		});

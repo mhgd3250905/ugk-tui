@@ -78,9 +78,10 @@ function sendCdpCommand(
 	timeoutMs = 10000,
 	signal?: AbortSignal,
 ): Promise<any> {
-	// ponytail: 钳位 1s~5min。下限防 0/负数立即触发(等于没超时保护);上限防 LLM 乱传
-	// 天文数字让 evaluate 长时间挂起占用 CDP tab/worker 进程。5min 够任何滚动循环。
-	const clampedTimeoutMs = Math.min(Math.max(timeoutMs, 1000), 300000);
+	// ponytail: 钳位 1s~8min。下限防 0/负数立即触发(等于没超时保护);上限防 LLM 乱传
+	// 天文数字让 evaluate 长时间挂起占用 CDP tab/worker 进程。8min 给慢速滚动采集
+	// (linkedin past-month 内容多 + 反爬人味延迟,5min 偶尔卡边界被切,实测需 ~4.6min)。
+	const clampedTimeoutMs = Math.min(Math.max(timeoutMs, 1000), 480000);
 	// 已 abort 直接拒,不建 WebSocket(避免无谓连接)。
 	if (signal?.aborted) return Promise.reject(abortError());
 	return new Promise((resolve, reject) => {

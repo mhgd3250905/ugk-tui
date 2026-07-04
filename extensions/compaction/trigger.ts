@@ -2,6 +2,23 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { uiText } from "../shared/ui-language.ts";
 import { getThresholdTokens } from "./thresholds.ts";
 
+/**
+ * ponytail: 自动触发的纯判断逻辑,抽出来便于单测。无副作用,只决定"这一轮该不该压"。
+ *
+ * 触发条件:有上一轮记录(prev 非 undefined/null)、上一轮在阈值下(prev <= threshold)、
+ * 这一轮跨过阈值(curr > threshold)。即"从低位跨到高位"的边沿触发,持续超阈值不重复触发。
+ */
+export function shouldAutoCompact(
+	previousTokens: number | null | undefined,
+	currentTokens: number | null,
+	threshold: number,
+): boolean {
+	if (currentTokens === null) return false;
+	if (threshold <= 0) return false;
+	const crossedThreshold = previousTokens !== undefined && previousTokens !== null && previousTokens <= threshold;
+	return crossedThreshold && currentTokens > threshold;
+}
+
 function triggerCompaction(ctx: ExtensionContext, customInstructions?: string): void {
 	if (ctx.hasUI) ctx.ui.notify(uiText("开始压缩上下文", "Compaction started"), "info");
 	ctx.compact({
@@ -23,19 +40,15 @@ export default function registerTrigger(pi: ExtensionAPI): void {
 	pi.on("turn_end", (_event, ctx) => {
 		const usage = ctx.getContextUsage();
 		const currentTokens = usage?.tokens ?? null;
-		if (currentTokens === null) return;
-
-		const threshold = getThresholdTokens(usage?.contextWindow);
-		if (threshold <= 0) {
-			previousTokens = currentTokens;
-			return;
+		try {
+			const threshold = getThresholdTokens(usage?.contextWindow);
+			if (shouldAutoCompact(previousTokens, currentTokens, threshold)) {
+				triggerCompaction(ctx);
+			}
+		} finally {
+			// 无论是否触发,都更新 prev 供下一轮比较(空 currentTokens 时不更新,保留旧 prev)
+			if (currentTokens !== null) previousTokens = currentTokens;
 		}
-
-		const crossedThreshold = previousTokens !== undefined && previousTokens !== null && previousTokens <= threshold;
-		previousTokens = currentTokens;
-		if (!crossedThreshold || currentTokens <= threshold) return;
-
-		triggerCompaction(ctx);
 	});
 
 	pi.registerCommand("trigger-compact", {

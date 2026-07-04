@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { getThreshold, getThresholdTokens } from "../extensions/compaction/thresholds.ts";
 import registerCompaction from "../extensions/compaction/index.ts";
 import { clearCompactionModel, getCurrentCompactionModel, setCompactionModel } from "../extensions/compaction/model-picker.ts";
+import { shouldAutoCompact } from "../extensions/compaction/trigger.ts";
 
 test("small context windows use 75%", () => {
 	assert.equal(getThreshold(200_000).ratio, 0.75);
@@ -94,4 +95,30 @@ test("compaction extension registers commands and hooks", () => {
 
 	assert.deepEqual(commands.sort(), ["compaction-model", "trigger-compact"]);
 	assert.deepEqual(events.sort(), ["session_before_compact", "turn_end"]);
+});
+
+// ponytail: shouldAutoCompact 是自动触发的核心判断(边沿触发防重复),抽成纯函数后钉死边界。
+// 这些场景覆盖了审查时手动验证的全部 case,防回归(如误改成 >= 触发、或忘了 prev 检查)。
+test("shouldAutoCompact: edge-triggered, no repeat while above threshold", () => {
+	const T = 150_000;
+	// 首次 turn(无 prev):不触发,即使已超阈值
+	assert.equal(shouldAutoCompact(undefined, 160_000, T), false);
+	// prev=null(曾拿到过但某轮失败):不触发
+	assert.equal(shouldAutoCompact(null, 160_000, T), false);
+	// 从低位跨到高位:触发(核心场景)
+	assert.equal(shouldAutoCompact(140_000, 160_000, T), true);
+	// 持续在阈值上方(prev 也超):不重复触发(防压缩风暴)
+	assert.equal(shouldAutoCompact(160_000, 170_000, T), false);
+	// 恰好等于阈值:不触发(> 而非 >=,边界留给下一轮)
+	assert.equal(shouldAutoCompact(140_000, 150_000, T), false);
+	// 压缩后回落,再次跨过:重新触发
+	assert.equal(shouldAutoCompact(80_000, 160_000, T), true);
+	// curr=null(getContextUsage 拿不到):绝不触发
+	assert.equal(shouldAutoCompact(140_000, null, T), false);
+});
+
+test("shouldAutoCompact: invalid threshold never triggers", () => {
+	// threshold=0(无效 contextWindow → getThresholdTokens 返回 0):不触发
+	assert.equal(shouldAutoCompact(140_000, 160_000, 0), false);
+	assert.equal(shouldAutoCompact(140_000, 160_000, -1), false);
 });

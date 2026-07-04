@@ -34,10 +34,12 @@ export async function dumpWorkerLog(input: TaskWorkerInput, result: SingleResult
 		events.push("");
 
 		const messages = Array.isArray(result.messages) ? result.messages : [];
-		// 找最早 timestamp 作 t0
+		// 找最早 timestamp 作 t0。timestamp 可能是 epoch 毫秒数字(worker message)或 ISO 字符串(其它来源)。
 		const tsOf = (m: any): number => {
-			const t = m?.timestamp || m?.message?.timestamp;
-			return t ? Date.parse(t) : NaN;
+			const t = m?.timestamp ?? m?.message?.timestamp;
+			if (typeof t === "number") return Number.isFinite(t) ? t : NaN;
+			if (typeof t === "string") return Date.parse(t);
+			return NaN;
 		};
 		const t0 = messages.reduce((min, m) => {
 			const t = tsOf(m);

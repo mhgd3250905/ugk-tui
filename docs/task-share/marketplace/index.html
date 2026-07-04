@@ -6,6 +6,7 @@
 <meta name="description" content="UGK Task Marketplace shares installable automation taskbooks for the UGK agent.">
 <title data-i18n="title.home">UGK Task Marketplace</title>
 <link rel="icon" href="/favicon.ico">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem('ugk.taskShare.theme')==='light'?'light':'dark'}catch{document.documentElement.dataset.theme='dark'}</script>
 <link rel="stylesheet" href="../styles.css">
 </head>
 <body class="marketplace-page">
@@ -61,6 +62,7 @@
       <span class="search-status" data-search-status aria-live="polite"></span>
     </div>
     <div class="catalog" data-catalog><p class="empty" data-i18n="catalog.loading">Loading tasks...</p></div>
+    <button class="btn btn-secondary catalog-more" type="button" data-catalog-more hidden></button>
   </section>
 
   <section class="community" style="display:none"></section>
@@ -88,6 +90,8 @@ const previewTasks=[
 const catalogCacheKey='ugk.taskShare.marketplace.catalog.v2';
 const catalogCacheMs=5*60*1000;
 const statsCacheMs=30*1000;
+const catalogPageSize=12;
+let catalogVisibleLimit=catalogPageSize;
 let statsRefreshPromise=null,statsRefreshKey='',statsRefreshAt=0;
 function readCatalogCache(){try{return JSON.parse(sessionStorage.getItem(catalogCacheKey)||'{}')}catch{return{}}}
 function writeCatalogCache(patch){try{sessionStorage.setItem(catalogCacheKey,JSON.stringify({...readCatalogCache(),...patch}))}catch{}}
@@ -125,16 +129,17 @@ function taskCardHTML(t){
   ].join('');
   const actions=t.downloadUrl?'<a class="btn btn-secondary btn-download" href="'+safeHref(t.downloadUrl)+'" data-download-api="/api/tasks/'+name+'/download" data-task="'+name+'" download aria-label="'+tr('card.downloadZip')+'" title="'+tr('card.downloadZip')+'"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-download"></use></svg>'+tr('card.downloadZip')+'</a>':'';
   return '<article class="task-card" data-task-card data-task="'+name+'" data-category="'+esc(cat)+'" data-downloads="'+Number(t.downloads??0)+'" data-likes="'+Number(t.likes??0)+'" data-favorites="'+Number(t.favorites??0)+'" data-newest="'+Number(t.newest??0)+'" data-search="'+esc((t.name+' '+(t.title||'')+' '+(t.description||'')+' '+((t.tags||[]).join(' '))).toLowerCase())+'">'
-    +'<div class="card-head"><div class="chips"><span class="chip">'+esc(cat)+'</span>'+version+'</div><span class="task-glyph"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-task"></use></svg></span></div>'
+    +'<div class="card-head"><div class="chips"><span class="chip">'+esc(cat)+'</span>'+version+'</div><span class="task-glyph" aria-hidden="true"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-task"></use></svg></span></div>'
     +'<h2>'+title+'</h2>'
     +'<p class="desc">'+desc+'</p>'
-    +'<div class="install-row"><code class="command">'+esc(install)+'</code><button class="btn btn-primary" type="button" data-copy="'+esc(install)+'" aria-label="'+tr('card.copyInstall')+'" title="'+tr('card.copyInstall')+'"><svg class="icon" focusable="false" aria-hidden="true"><use data-copy-icon href="#icon-copy"></use></svg>'+tr('card.copy')+'</button></div>'
+    +'<div class="install-row"><code class="command">'+esc(install)+'</code><button class="btn btn-copy" type="button" data-copy="'+esc(install)+'" aria-label="'+tr('card.copyInstall')+'" title="'+tr('card.copyInstall')+'"><svg class="icon" focusable="false" aria-hidden="true"><use data-copy-icon href="#icon-copy"></use></svg>'+tr('card.copy')+'</button></div>'
     +'<div class="card-foot"><div class="metric-row">'+metrics+'</div><div class="card-meta"><span class="chip card-author" title="@'+author+'">@'+author+'</span>'+actions+'</div></div></article>';
 }
 function renderCatalogTasks(root,catFilter,tasks){
   const cats=[...new Set(tasks.map(t=>t.category||t.tags?.[0]||'task'))].sort();
   const cur=catFilter?.value||'';if(catFilter){catFilter.innerHTML='<option value="">'+tr('filters.all')+'</option>'+cats.map(c=>'<option value="'+esc(c)+'"'+(c===cur?' selected':'')+'>'+esc(c)+'</option>').join('');fitSelectWidths()}
   root.innerHTML=tasks.map((t,i)=>taskCardHTML({...t,newest:1000-i})).join('');
+  catalogVisibleLimit=catalogPageSize;
   bindCards();
 }
 function renderCatalogFromCache(){const root=document.querySelector('[data-catalog]');if(!root)return false;const tasks=cachedTasks();if(!tasks)return false;renderCatalogTasks(root,document.querySelector('[data-category-filter]'),withCachedStats(tasks));filterTasks();return true}
@@ -165,7 +170,11 @@ function bindCards(){
 }
 
 function matchesSearch(text,terms){const words=text.split(/[^a-z0-9]+/).filter(Boolean);return !terms.length||terms.every(term=>words.some(word=>word.startsWith(term)))}
-function filterTasks(){const terms=(document.querySelector('[data-search]')?.value||'').toLowerCase().trim().split(/\s+/).filter(Boolean);const category=document.querySelector('[data-category-filter]')?.value||'';const sort=document.querySelector('[data-sort]')?.value||'name';const catalog=document.querySelector('[data-catalog]');const cards=[...document.querySelectorAll('[data-task-card]')];let visible=0;cards.forEach(card=>{const matchesText=matchesSearch(card.dataset.search||'',terms);const matchesCategory=!category||card.dataset.category===category;card.hidden=!(matchesText&&matchesCategory);if(!card.hidden)visible++});cards.sort((a,b)=>{if(sort==='downloads'||sort==='likes')return Number(b.dataset[sort]||0)-Number(a.dataset[sort]||0);if(sort==='newest')return Number(b.dataset.newest||0)-Number(a.dataset.newest||0);return a.querySelector('h2').textContent.localeCompare(b.querySelector('h2').textContent)}).forEach(card=>catalog?.appendChild(card));if(catalog){catalog.dataset.empty=cards.length&&!visible?'true':'false';catalog.dataset.emptyMessage=tr('catalog.noMatches')}document.querySelector('[data-search-status]').textContent=cards.length?visible+'/'+cards.length:''}
+function catalogMatchedCards(cards){const terms=(document.querySelector('[data-search]')?.value||'').toLowerCase().trim().split(/\s+/).filter(Boolean);const category=document.querySelector('[data-category-filter]')?.value||'';return cards.filter(card=>matchesSearch(card.dataset.search||'',terms)&&(!category||card.dataset.category===category))}
+function updateCatalogMore(visibleCards){const more=document.querySelector('[data-catalog-more]');if(!more)return;const shown=Math.min(visibleCards.length,catalogVisibleLimit);more.hidden=shown>=visibleCards.length;more.textContent=tr('catalog.more',{shown,total:visibleCards.length});more.setAttribute('aria-label',more.textContent)}
+function showMoreTasks(){const visibleCards=catalogMatchedCards([...document.querySelectorAll('[data-task-card]')]);catalogVisibleLimit=Math.min(visibleCards.length,catalogVisibleLimit+catalogPageSize);filterTasks()}
+function resetCatalogLimit(){catalogVisibleLimit=catalogPageSize;filterTasks()}
+function filterTasks(){const sort=document.querySelector('[data-sort]')?.value||'name';const catalog=document.querySelector('[data-catalog]');const cards=[...document.querySelectorAll('[data-task-card]')];cards.sort((a,b)=>{if(sort==='downloads'||sort==='likes')return Number(b.dataset[sort]||0)-Number(a.dataset[sort]||0);if(sort==='newest')return Number(b.dataset.newest||0)-Number(a.dataset.newest||0);return a.querySelector('h2').textContent.localeCompare(b.querySelector('h2').textContent)}).forEach(card=>catalog?.appendChild(card));const visibleCards=catalogMatchedCards(cards);const shownCards=new Set(visibleCards.slice(0,catalogVisibleLimit));cards.forEach(card=>{card.hidden=!shownCards.has(card)});if(catalog){catalog.dataset.empty=cards.length&&!visibleCards.length?'true':'false';catalog.dataset.emptyMessage=tr('catalog.noMatches')}document.querySelector('[data-search-status]').textContent=cards.length?Math.min(visibleCards.length,catalogVisibleLimit)+'/'+visibleCards.length:'';updateCatalogMore(visibleCards)}
 async function refreshStats(){const names=[...new Set([...document.querySelectorAll('[data-count]')].map(n=>(n.dataset.count||'').split(':')[0]).filter(Boolean))];if(!names.length){filterTasks();return}const key=names.join('|');if(statsRefreshPromise&&statsRefreshKey===key)return statsRefreshPromise;if(Date.now()-statsRefreshAt<800&&statsRefreshKey===key)return;statsRefreshKey=key;statsRefreshAt=Date.now();names.forEach(name=>{const data=cachedStats(name);if(data)applyTaskData(name,data)});statsRefreshPromise=Promise.all(names.map(async name=>{try{const r=await fetch('/api/tasks/'+encodeURIComponent(name)+'/stats');if(r.ok){const data=await r.json();applyTaskData(name,data);cacheStats(name,data)}}catch{}})).then(()=>{filterTasks()}).finally(()=>{statsRefreshPromise=null});return statsRefreshPromise}
 function rows(items,empty){return items.length?items.map(t=>'<div class="submission-row"><strong>'+esc(t.title||t.name)+'</strong><span class="chip">'+esc(t.status||t.name)+'</span><span>'+esc(t.description||'')+'</span></div>').join(''):'<p class="notice">'+empty+'</p>'}
 async function refreshAccount(session){const root=document.querySelector('[data-account-page]');if(!root)return;if(!session.user){root.innerHTML='<p class="notice">'+tr('account.signInText')+'</p>';return}const [fav,subs,downs]=await Promise.all([fetch('/api/account/favorites'),fetch('/api/account/submissions'),fetch('/api/account/downloads')]);if(!fav.ok||!subs.ok||!downs.ok){root.innerHTML='<p class="notice">'+tr('account.unavailable')+'</p>';return}const f=await fav.json();const s=await subs.json();const d=await downs.json();root.innerHTML='<h2>@'+esc(session.user.login)+'</h2><div class="split"><div><h3>'+tr('account.favorites')+'</h3>'+rows(f.favorites||[],tr('account.noFavorites'))+'<h3>'+tr('account.downloads')+'</h3>'+rows(d.downloads||[],tr('account.noDownloads'))+'</div><div><h3>'+tr('account.submissions')+'</h3>'+rows(s.submissions||[],tr('account.noSubmissions'))+'</div></div>'}
@@ -178,7 +187,7 @@ function rollbackTaskAction(name,prev){if(prev)applyTaskData(name,{[prev.key]:pr
 async function postAction(button){const url=button.dataset.api;if(!url||button.dataset.busy==='true')return;const action=button.dataset.action;const init={method:'POST'};let prev=null;if(action==='report'){if(document.body.dataset.signedIn!=='true'){startGithubAuth();return}const reason=await askReportReason(button.dataset.task||'task');if(!reason)return;init.headers={'content-type':'application/json'};init.body=JSON.stringify({reason})}else{prev=optimisticTaskAction(button)}button.dataset.busy='true';button.setAttribute('aria-busy','true');button.disabled=true;try{const r=await fetch(url,init);if(r.status===401){rollbackTaskAction(button.dataset.task,prev);startGithubAuth();return}const data=await r.json().catch(()=>({}));if(!r.ok){rollbackTaskAction(button.dataset.task,prev);showToast(data.error||tr('toast.actionFailed'),'error');return}if(action==='report'){button.dataset.active='true';button.setAttribute('aria-pressed','true');showToast(tr('toast.reportSent'));return}applyTaskData(button.dataset.task,data);cacheStats(button.dataset.task,data);filterTasks();showToast(action==='like'?tr('toast.likeUpdated'):tr('toast.saveUpdated'))}catch{rollbackTaskAction(button.dataset.task,prev);showToast(tr('toast.actionFailed'),'error')}finally{button.dataset.busy='false';button.setAttribute('aria-busy','false');button.disabled=false}}
 document.querySelectorAll('[data-upload-form]').forEach(form=>form.addEventListener('submit',event=>{event.preventDefault();submitUpload(form)}));
 document.addEventListener('click',async event=>{const button=event.target.closest('[data-review-id]');if(!button)return;button.disabled=true;await fetch('/api/admin/submissions/'+button.dataset.reviewId,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:button.dataset.reviewStatus})});refreshAdmin()});
-fitSelectWidths();document.querySelectorAll('[data-search],[data-sort],[data-category-filter]').forEach(control=>{control.addEventListener('input',filterTasks);control.addEventListener('change',filterTasks)});
+fitSelectWidths();document.querySelectorAll('[data-search],[data-sort],[data-category-filter]').forEach(control=>{control.addEventListener('input',resetCatalogLimit);control.addEventListener('change',resetCatalogLimit)});document.querySelector('[data-catalog-more]')?.addEventListener('click',showMoreTasks);
 window.addEventListener('ugk:i18n',()=>{refreshSession().then(session=>{refreshAccount(session);if(session.user)refreshStats()});if(!renderCatalogFromCache())refreshCatalog();refreshDetailMeta();refreshAdmin()});
 bindAuthLinks();refreshSession().then(session=>{refreshAccount(session);if(session.user)refreshStats()});refreshMarketplaceStats();refreshCatalog();refreshDetailMeta();refreshAdmin();
 </script>

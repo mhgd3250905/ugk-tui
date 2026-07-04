@@ -76,6 +76,23 @@ test("task-share theme can switch to light and persist", () => {
 	assert.equal(context.localStorage.getItem("ugk.taskShare.theme"), "light");
 });
 
+test("task-share pages set saved theme before loading CSS", () => {
+	for (const file of [
+		"docs/task-share/index.html",
+		"docs/task-share/marketplace/index.html",
+		"docs/task-share/upload/index.html",
+		"docs/task-share/account/index.html",
+		"docs/task-share/admin/index.html",
+		"docs/task-share/cli-auth/index.html",
+	]) {
+		const html = readFileSync(file, "utf8");
+		const boot = html.indexOf("ugk.taskShare.theme");
+		const css = html.indexOf('rel="stylesheet"');
+		assert.ok(boot !== -1, `${file} missing early theme boot`);
+		assert.ok(boot < css, `${file} loads CSS before applying saved theme`);
+	}
+});
+
 test("task-share nav pages expose a theme switcher slot", () => {
 	for (const file of [
 		"docs/task-share/index.html",
@@ -125,17 +142,24 @@ test("task-share marketplace cards show version and bottom author", () => {
 	assert.match(html, /card-version/);
 	assert.match(html, /t\.version/);
 	assert.match(html, /card-author/);
+	assert.match(html, /<span class="task-glyph" aria-hidden="true">/);
 	assert.doesNotMatch(html, /<span class="chip">@'\+author/);
 	assert.match(css, /\.card-author \{[^}]*max-width:/);
 	assert.match(css, /\.card-author \{[^}]*text-overflow: ellipsis/);
+	assert.match(css, /\.task-glyph \{[^}]*pointer-events: none;/);
 });
 
 test("task-share copy feedback keeps label and swaps icon", () => {
 	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
+	const css = readFileSync("docs/task-share/styles.css", "utf8");
 	assert.match(html, /<symbol id="icon-check"/);
 	assert.match(html, /data-copy-icon/);
+	assert.match(html, /btn-copy/);
 	assert.match(html, /setAttribute\('href','#icon-check'\)/);
 	assert.doesNotMatch(html, /textContent=tr\('card\.copied'\)/);
+	assert.match(css, /\.btn-copy \{[^}]*min-height: 34px;/);
+	assert.match(css, /\.btn-copy \{[^}]*background: var\(--control-bg-soft\);/);
+	assert.match(css, /\.btn-copy \{[^}]*align-self: center;/);
 });
 
 test("task-share marketplace uses cache and optimistic metric feedback", () => {
@@ -151,6 +175,17 @@ test("task-share marketplace uses cache and optimistic metric feedback", () => {
 	assert.match(css, /--metric-save-text:/);
 	assert.match(css, /\.metric-like \{ --metric-color: var\(--metric-like\); --metric-text: var\(--metric-like-text\); \}/);
 	assert.match(css, /\.metric\[data-busy="true"\]/);
+});
+
+test("task-share marketplace paginates growing catalogs", () => {
+	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
+	const css = readFileSync("docs/task-share/styles.css", "utf8");
+	assert.match(html, /const catalogPageSize=12/);
+	assert.match(html, /let catalogVisibleLimit=catalogPageSize/);
+	assert.match(html, /data-catalog-more/);
+	assert.match(html, /function showMoreTasks/);
+	assert.match(html, /catalogVisibleLimit=Math\.min\(visibleCards\.length,catalogVisibleLimit\+catalogPageSize\)/);
+	assert.match(css, /\.catalog-more \{/);
 });
 
 test("task-share admin submissions show version", () => {
@@ -196,14 +231,14 @@ test("task-share mobile nav keeps theme and auth actions inside the menu", () =>
 	assert.match(css, /\.nav-menu-actions \.btn-primary/);
 });
 
-test("task-share mobile keeps marketplace filters usable", () => {
+test("task-share mobile keeps marketplace search compact", () => {
 	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
 	const css = readFileSync("docs/task-share/styles.css", "utf8");
 	assert.match(html, /data-search[^>]*name="q"|name="q"[^>]*data-search/);
 	assert.match(html, /data-category-filter[^>]*name="category"|name="category"[^>]*data-category-filter/);
 	assert.match(html, /data-sort[^>]*name="sort"|name="sort"[^>]*data-sort/);
-	assert.doesNotMatch(css, /\.toolbar select\.search,\s*[\r\n]+\s*\.search-status \{ display: none; \}/);
-	assert.match(css, /\.toolbar select\.search \{ width: 100% !important; max-width: none; \}/);
+	assert.match(css, /\.search-status \{ display: none; \}/);
+	assert.match(css, /\.toolbar select\.search \{ display: none; \}/);
 });
 
 test("task-share pages expose basic SEO and main landmark", () => {

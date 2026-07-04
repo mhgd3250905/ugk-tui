@@ -103,10 +103,11 @@ export function isSafeCommand(command: string): boolean {
 	return !isDestructive && isSafe;
 }
 
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
 export interface TodoItem {
-	step: number;
-	text: string;
-	completed: boolean;
+	content: string;
+	status: TodoStatus;
 }
 
 export function cleanStepText(text: string): string {
@@ -145,7 +146,7 @@ export function extractTodoItems(message: string): TodoItem[] {
 		if (text.length > 5 && !text.startsWith("`") && !text.startsWith("/") && !text.startsWith("-")) {
 			const cleaned = cleanStepText(text);
 			if (cleaned.length > 3) {
-				items.push({ step: items.length + 1, text: cleaned, completed: false });
+				items.push({ content: cleaned, status: "pending" });
 			}
 		}
 	}
@@ -165,9 +166,9 @@ export function markCompletedSteps(text: string, items: TodoItem[]): number {
 	const doneSteps = extractDoneSteps(text);
 	let completed = 0;
 	for (const step of doneSteps) {
-		const item = items.find((t) => t.step === step);
-		if (item && !item.completed) {
-			item.completed = true;
+		const item = items[step - 1];
+		if (item && item.status !== "completed") {
+			item.status = "completed";
 			completed++;
 		}
 	}

@@ -13,19 +13,19 @@ test("isSafeCommand blocks curl commands that execute or write", () => {
 
 test("markCompletedSteps counts only matched todo items", () => {
 	const items: TodoItem[] = [
-		{ step: 1, text: "Audit", completed: false },
-		{ step: 2, text: "Verify", completed: false },
+		{ content: "Audit", status: "pending" },
+		{ content: "Verify", status: "pending" },
 	];
 
 	assert.equal(markCompletedSteps("[DONE:99]", items), 0);
 	assert.deepEqual(
-		items.map((item) => item.completed),
-		[false, false],
+		items.map((item) => item.status),
+		["pending", "pending"],
 	);
 
 	assert.equal(markCompletedSteps("[DONE:2]", items), 1);
 	assert.deepEqual(
-		items.map((item) => item.completed),
-		[false, true],
+		items.map((item) => item.status),
+		["pending", "completed"],
 	);
 });

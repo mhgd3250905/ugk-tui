@@ -20,6 +20,10 @@ tests/fixtures/dispatcher-evals/_*.md
 # Flow local artifacts (task runs, evidence, status — per-workspace, not shared)
 .flow/
 
+# Local handoff/followup notes
+/PLAN-*.md
+/TODO-*.md
+
 # Temp / editor
 .tmp/
 .tmp_*

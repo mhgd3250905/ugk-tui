@@ -23,6 +23,7 @@ import registerUiStatusline from "./ui-statusline.ts";
 import registerUgkBrandUi from "./ui-brand.ts";
 import registerCron from "./cron.ts";
 import registerPlanMode from "./plan-mode.ts";
+import registerTodoTool from "./todo-tool.ts";
 import registerTask from "./task/task.ts";
 import registerQuestionnaire from "./questionnaire.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
@@ -32,6 +33,7 @@ import { registerUgkUpdate } from "./update-check.ts";
 import { getDeepSeekStatus } from "./deepseek-status.ts";
 import { renderTerminalTable } from "./terminal-table.ts";
 import { AUTOPILOT_PROMPT_SNIPPET, isAutopilotOn, setAutopilot } from "./shared/autopilot.ts";
+import { TODO_PROMPT_SNIPPET } from "./shared/todo-policy.ts";
 import { buildLanguagePromptSnippet, clearLanguage, getLanguage, setLanguage } from "./shared/language.ts";
 import {
 	clearUiLanguage,
@@ -138,6 +140,9 @@ export default function (pi: ExtensionAPI) {
 	// 1.3b) plan-mode:只读探索模式(/plan 切换,bash 白名单,计划提取+进度跟踪)
 	registerPlanMode(pi);
 
+	// 1.3b.1) TodoWrite 工具:复杂任务 checklist,与 plan-mode 共用状态
+	registerTodoTool(pi);
+
 	// 1.3c) questionnaire:通用多选问卷工具(让 agent 向用户提问)。原属 judge 目录,
 	// judge 删除后独立出来 —— 它是通用能力,不只 judge 用。
 	registerQuestionnaire(pi);
@@ -223,11 +228,12 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// 2.0b) before_agent_start 注入动态指令(autopilot 范围问卷 + 用户语言偏好)。
-	//   一个钩子处理两段 prompt,比两个钩子少一次 systemPrompt 读写。
+	// 2.0b) before_agent_start 注入动态指令(autopilot 范围问卷 + TodoWrite 触发规则 + 用户语言偏好)。
+	//   一个钩子处理多段 prompt,比多个钩子少几次 systemPrompt 读写。
 	pi.on("before_agent_start", async (event: { systemPrompt?: string } = {}) => {
 		const snippets: string[] = [];
 		if (isAutopilotOn()) snippets.push(AUTOPILOT_PROMPT_SNIPPET);
+		snippets.push(TODO_PROMPT_SNIPPET);
 		const langSnippet = buildLanguagePromptSnippet(getLanguage());
 		if (langSnippet) snippets.push(langSnippet);
 		if (snippets.length === 0) return undefined;

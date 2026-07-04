@@ -1500,16 +1500,22 @@ function formatSubtaskToolText(mode: "single" | "parallel", results: SubtaskResu
 		// 实测(2026-07-02):FAIL summary 不进文本时,即使文案明确写"缺 deno、别绕过",
 		// agent 仍全程未读 deno 一词,直接绕过 taskbook 自己 bash 跑 yt-dlp。
 		// 因此 FAIL 把 workerSummary 带进文本,让 agent 看到诊断、按提示行动。
-		...results.map((result) => [
-			`- ${result.name}: ${result.status.toUpperCase()}`,
-			`  outputDir: ${result.outputDir}`,
-			result.artifacts.length > 0 ? `  artifacts: ${result.artifacts.join(", ")}` : "",
-			result.verifyFailures.length > 0 ? `  verifyFailures: ${JSON.stringify(result.verifyFailures)}` : "",
-			// FAIL 时附上诊断。trim 防空/纯空白。多行 summary 整体缩进对齐。
-			result.status === "fail" && result.workerSummary && result.workerSummary.trim()
-				? `  reason: ${result.workerSummary.trim().replace(/\n/g, "\n  ")}`
-				: "",
-		].filter(Boolean).join("\n")),
+		...results.map((result) => {
+			// ponytail: 从 outputDir 提取 runId(task-<name>-<ts>-<rand>),显眼展示方便排查。
+			// 排查时用户报 runId → 直接定位 E:/AII/ugk-worker-logs/<name>-<ts>.log + runs 目录产物。
+			const runId = String(result.outputDir || "").match(/(task-[a-z0-9-]+-\d+-[a-z0-9]+)/i)?.[1] || "";
+			return [
+				`- ${result.name}: ${result.status.toUpperCase()}`,
+				runId ? `  runId: ${runId}` : "",
+				`  outputDir: ${result.outputDir}`,
+				result.artifacts.length > 0 ? `  artifacts: ${result.artifacts.join(", ")}` : "",
+				result.verifyFailures.length > 0 ? `  verifyFailures: ${JSON.stringify(result.verifyFailures)}` : "",
+				// FAIL 时附上诊断。trim 防空/纯空白。多行 summary 整体缩进对齐。
+				result.status === "fail" && result.workerSummary && result.workerSummary.trim()
+					? `  reason: ${result.workerSummary.trim().replace(/\n/g, "\n  ")}`
+					: "",
+			].filter(Boolean).join("\n");
+		}),
 	].join("\n");
 }
 

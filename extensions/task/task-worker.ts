@@ -5,6 +5,101 @@ import { peekWorkerLifecycleFactory } from "../shared/worker-lifecycle.ts";
 import { discoverAgents } from "../subagent-agents.ts";
 import { getFinalOutput, isFailedResult, type SingleResult, type UsageStats } from "../subagent-runtime.ts";
 import { runSingleAgent, type OnUpdateCallback } from "../subagent.ts";
+// ponytail: worker 运行日志落盘(E 盘,诊断用)。默认开,UGK_WORKER_LOG_DIR 可改路径,设为空字符串关闭。
+async function dumpWorkerLog(input: TaskWorkerInput, result: SingleResult, startedAt: number): Promise<void> {
+	try {
+		const logDir = process.env.UGK_WORKER_LOG_DIR ?? "E:/AII/ugk-worker-logs";
+		if (!logDir) return; // 显式置空 → 关闭
+		const { mkdirSync, writeFileSync } = await import("node:fs");
+		const { join } = await import("node:path");
+		// taskbook 名从 outputDir 提取(形如 .../task-<name>-<ts>-<rand>/output)
+		const nameMatch = String(input.outputDir || "").match(/task-([a-z0-9-]+)-\d+/i);
+		const taskbook = nameMatch?.[1] || "unknown";
+		const runId = String(input.outputDir || "").match(/task-[a-z0-9-]+-(\d+)/i)?.[1] || String(startedAt);
+		const stamp = new Date(startedAt).toISOString().replace(/[:.]/g, "-");
+		// ponytail: 文件名加 runId 后缀(含随机串),防同 taskbook 同秒并行 worker 日志互相覆盖。
+		const base = `${taskbook}-${stamp}-${runId}`;
+		mkdirSync(logDir, { recursive: true });
+
+		// 可读文本日志:每行一个事件,相对时间(秒)
+		const events: string[] = [];
+		const fmtRel = (ms: number) => `[+${(ms / 1000).toFixed(1)}s]`.padStart(12);
+		events.push(`# worker-log  taskbook=${taskbook}  runId=${runId}  started=${new Date(startedAt).toISOString()}`);
+		events.push(`# outputDir=${input.outputDir}`);
+		const phases = result.phases || {};
+		events.push(`# phases: ${Object.entries(phases).map(([k, v]) => `${k}=${Math.round(Number(v))}ms`).join("  ") || "(none)"}`);
+		events.push("");
+
+		const messages = Array.isArray(result.messages) ? result.messages : [];
+		// 找最早 timestamp 作 t0
+		const tsOf = (m: any): number => {
+			const t = m?.timestamp || m?.message?.timestamp;
+			return t ? Date.parse(t) : NaN;
+		};
+		const t0 = messages.reduce((min, m) => {
+			const t = tsOf(m);
+			return Number.isFinite(t) && (min === 0 || t < min) ? t : min;
+		}, 0);
+
+		for (const m of messages) {
+			const ts = tsOf(m);
+			const rel = Number.isFinite(ts) && t0 ? ts - t0 : 0;
+			const role = m?.role || m?.message?.role || m?.type || "?";
+			const content = m?.content || m?.message?.content;
+			if (!Array.isArray(content)) {
+				// 纯文本消息
+				const text = typeof content === "string" ? content : "";
+				if (text) events.push(`${fmtRel(rel)}  ${role.toUpperCase()}  ${text.slice(0, 200)}`);
+				continue;
+			}
+			for (const part of content) {
+				if (part.type === "thinking" && part.thinking) {
+					events.push(`${fmtRel(rel)}  THINK       ${part.thinking.slice(0, 180).replace(/\n/g, " ")}`);
+				} else if (part.type === "text" && part.text) {
+					events.push(`${fmtRel(rel)}  ${role.toUpperCase().padEnd(10)} ${part.text.slice(0, 200).replace(/\n/g, " ")}`);
+				} else if (part.type === "tool_use") {
+					const inp = part.input || {};
+					let inpSummary = "";
+					if (part.name === "chrome_cdp") {
+						inpSummary = `action=${inp.action || "?"}`;
+						if (inp.url) inpSummary += ` url=${String(inp.url).slice(0, 80)}`;
+						if (inp.timeoutMs) inpSummary += ` timeoutMs=${inp.timeoutMs}`;
+						if (inp.expression) inpSummary += ` exprLen=${String(inp.expression).length}`;
+					} else if (part.name === "bash") {
+						inpSummary = String(inp.command || "").slice(0, 100);
+					} else if (part.name === "write" || part.name === "edit") {
+						inpSummary = String(inp.file_path || "").slice(0, 80);
+					} else {
+						inpSummary = JSON.stringify(inp).slice(0, 120);
+					}
+					events.push(`${fmtRel(rel)}  TOOL_USE    ${part.name}  ${inpSummary}`);
+				} else if (part.type === "tool_result") {
+					const raw = typeof part.content === "string" ? part.content : JSON.stringify(part.content || "");
+					const ok = part.isError ? "ERR" : "ok";
+					events.push(`${fmtRel(rel)}  TOOL_RESULT ${ok}  ${raw.slice(0, 180).replace(/\n/g, " ")}`);
+				}
+			}
+		}
+		events.push("");
+		events.push(`# done  exitCode=${result.exitCode}  ok=${!isFailedResult(result)}  messages=${messages.length}  stderr=${result.stderr ? result.stderr.length + "chars" : "empty"}`);
+		writeFileSync(join(logDir, `${base}.log`), events.join("\n"), "utf8");
+		// 原始 JSON(便于程序分析,含完整 input/result)
+		writeFileSync(join(logDir, `${base}.json`), JSON.stringify({
+			taskbook, runId, startedAt: new Date(startedAt).toISOString(),
+			outputDir: input.outputDir,
+			runtimeInput: input.runtimeInput,
+			phases,
+			exitCode: result.exitCode,
+			ok: !isFailedResult(result),
+			model: result.model,
+			usage: result.usage,
+			messages,
+		}, null, 2), "utf8");
+	} catch (e) {
+		// 日志失败不影响 worker 主流程
+		console.error?.(`[worker-log] dump failed: ${e instanceof Error ? e.message : String(e)}`);
+	}
+}
 
 export interface TaskWorkerInput {
 	skill: string;
@@ -110,6 +205,7 @@ export async function dispatchWorker(
 	const factory = peekWorkerLifecycleFactory();
 	const cdpPort = opts.env?.UGK_CDP_PORT ? Number(opts.env.UGK_CDP_PORT) : 9222;
 	const lifecycle = opts.env?.UGK_TASK_ALLOW_CHROME_CDP && factory ? factory(cdpPort) : undefined;
+	const workerStartedAt = Date.now(); // ponytail: worker 日志的 t0(spawn 前)
 	let result: SingleResult;
 	try {
 		result = await runner(
@@ -165,6 +261,8 @@ export async function dispatchWorker(
 	}
 	const summary = getFinalOutput(result.messages);
 	const failed = isFailedResult(result);
+	// ponytail: worker 日志落盘(不阻塞返回,失败不影响主流程)
+	void dumpWorkerLog(input, result, workerStartedAt);
 	return {
 		ok: !failed,
 		outputDir: input.outputDir,

@@ -376,38 +376,89 @@ body[data-signed-in="true"] [data-auth-link] { display: none !important; }
 .market-showcase-head h2,
 .product-cta h2 { color: var(--text); font-size: 42px; line-height: 1.08; letter-spacing: 0; text-wrap: balance; }
 .section-head p { color: var(--text-muted); font-size: 16px; }
-.install-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: 14px;
-}
-.install-card {
-  display: grid;
-  gap: 12px;
-  align-content: start;
-  min-width: 0;
-  padding: 24px;
+.install-terminal {
+  max-width: 860px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--command-bg);
+  box-shadow: var(--shadow);
+}
+.install-terminal-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
   background: var(--control-bg-soft);
 }
-.install-card-primary { border-color: rgba(46, 231, 101, 0.34); background: var(--accent-soft); }
-.install-card span { color: var(--accent); font-size: 12px; font-weight: 820; letter-spacing: 0.08em; text-transform: uppercase; }
-.install-card code {
-  display: block;
-  width: 100%;
-  padding: 13px 14px;
+.terminal-dots { display: flex; gap: 6px; padding: 0 4px; }
+.terminal-dots span { width: 9px; height: 9px; border-radius: 50%; background: var(--border-light); }
+.terminal-dots span:first-child { background: var(--danger); }
+.terminal-dots span:nth-child(2) { background: var(--metric-save); }
+.terminal-dots span:nth-child(3) { background: var(--accent); }
+.install-segments {
+  justify-self: end;
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  background: var(--control-bg);
+}
+.install-segments label {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: var(--pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 760;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.install-segments label span { color: var(--accent); font-size: 11px; font-weight: 820; letter-spacing: 0.06em; text-transform: uppercase; }
+#install-quick:checked ~ .install-terminal-head label[for="install-quick"],
+#install-npm:checked ~ .install-terminal-head label[for="install-npm"],
+#install-github:checked ~ .install-terminal-head label[for="install-github"] {
+  background: var(--ink);
+  color: var(--primary-fg);
+}
+#install-quick:checked ~ .install-terminal-head label[for="install-quick"] span,
+#install-npm:checked ~ .install-terminal-head label[for="install-npm"] span,
+#install-github:checked ~ .install-terminal-head label[for="install-github"] span { color: currentColor; }
+.install-terminal-body { padding: 22px; }
+.install-panel { display: none; gap: 14px; }
+#install-quick:checked ~ .install-terminal-body [data-install-panel="quick"],
+#install-npm:checked ~ .install-terminal-body [data-install-panel="npm"],
+#install-github:checked ~ .install-terminal-body [data-install-panel="github"] { display: grid; }
+.install-panel p { color: var(--text-muted); }
+.install-panel pre {
+  margin: 0;
+  padding: 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--command-bg);
-  color: var(--accent);
-  font-family: "SF Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
-  overflow-wrap: anywhere;
+  overflow-x: auto;
+  background: var(--bg);
+  color: var(--text);
 }
-.install-card h3,
+.install-panel code {
+  display: grid;
+  gap: 8px;
+  font-family: "SF Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre;
+}
+.terminal-comment { color: var(--text-dim); }
+.terminal-prompt { color: var(--accent); font-weight: 820; }
 .task-bento h3,
 .concept-grid h3 { margin-top: 12px; color: var(--text); font-size: 22px; line-height: 1.2; }
-.install-card p,
 .task-bento p,
 .concept-grid p { margin-top: 8px; color: var(--text-muted); }
 .marketplace-showcase {
@@ -909,9 +960,12 @@ button.metric:disabled { cursor: wait; }
   .task-preview-card { flex-basis: 270px; height: 172px; padding: 18px; }
   .task-marquee::before,
   .task-marquee::after { width: 28px; }
-  .install-grid,
   .task-bento,
   .concept-grid { grid-template-columns: 1fr; }
+  .install-terminal-head { grid-template-columns: 1fr; }
+  .terminal-dots { display: none; }
+  .install-segments { width: 100%; justify-self: stretch; }
+  .install-segments label { padding: 0 10px; }
   .task-bento .wide { grid-column: auto; }
   .product-cta { align-items: stretch; flex-direction: column; }
   .product-cta .btn { width: 100%; }

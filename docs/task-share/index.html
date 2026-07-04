@@ -55,23 +55,43 @@
   <section id="install" class="product-section install-guide shell">
     <div class="section-head">
       <div class="kicker">Install</div>
-      <h2>两种安装方式</h2>
-      <p>新手用安装器，熟悉 npm 的用户可以直接全局安装。</p>
+      <h2>三种安装方式</h2>
+      <p>新手用安装器，熟悉 npm 或源码安装的用户可以选择对应渠道。</p>
     </div>
-    <div class="install-grid">
-      <article class="install-card install-card-primary">
-        <span>推荐</span>
-        <h3>一键安装器</h3>
-        <p>自动检测 Node/npm，安装 UGK，并引导配置 DeepSeek API key。</p>
-        <code>npx ugk-install</code>
-      </article>
-      <article class="install-card">
-        <span>npm</span>
-        <h3>手动安装</h3>
-        <p>已安装 Node.js 18+ 时，直接全局安装后运行。</p>
-        <code>npm i -g ugk-agent</code>
-        <code>ugk</code>
-      </article>
+    <div class="install-terminal" aria-label="UGK 安装命令">
+      <input class="sr-only" type="radio" name="install-channel" id="install-quick" checked>
+      <input class="sr-only" type="radio" name="install-channel" id="install-npm">
+      <input class="sr-only" type="radio" name="install-channel" id="install-github">
+      <div class="install-terminal-head">
+        <div class="terminal-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="install-segments" aria-label="选择安装渠道">
+          <label for="install-quick">一键安装器 <span>推荐</span></label>
+          <label for="install-npm">NPM <span>手动</span></label>
+          <label for="install-github">GitHub <span>Clone</span></label>
+        </div>
+      </div>
+      <div class="install-terminal-body">
+        <div class="install-panel" data-install-panel="quick">
+          <p>自动检测 Node/npm，安装 UGK，并引导配置 DeepSeek API key。</p>
+          <pre><code><span class="terminal-comment"># 推荐给第一次安装 UGK 的用户</span>
+<span><span class="terminal-prompt">$</span> npx ugk-install</span></code></pre>
+        </div>
+        <div class="install-panel" data-install-panel="npm">
+          <p>已安装 Node.js 18+ 时，直接全局安装后运行。</p>
+          <pre><code><span class="terminal-comment"># 已有 Node.js 18+ / npm 环境</span>
+<span><span class="terminal-prompt">$</span> npm i -g ugk-agent</span>
+<span><span class="terminal-prompt">$</span> ugk</span></code></pre>
+        </div>
+        <div class="install-panel" data-install-panel="github">
+          <p>想从源码跟进最新版时，直接 clone 仓库后本地链接。</p>
+          <pre><code><span class="terminal-comment"># 从 GitHub 克隆源码并链接本地命令</span>
+<span><span class="terminal-prompt">$</span> git clone https://github.com/mhgd3250905/ugk-tui.git</span>
+<span><span class="terminal-prompt">$</span> cd ugk-tui</span>
+<span><span class="terminal-prompt">$</span> npm install</span>
+<span><span class="terminal-prompt">$</span> npm link</span>
+<span><span class="terminal-prompt">$</span> ugk</span></code></pre>
+        </div>
+      </div>
     </div>
   </section>
 

@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { makeCdpTabLifecycle } from "../extensions/chrome-cdp/tab-session.ts";
 import { setWorkerLifecycleFactory } from "../extensions/shared/worker-lifecycle.ts";
-import { buildTaskWorkerPrompt, dispatchWorker, setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
+import { buildTaskWorkerPrompt, dispatchWorker, dumpWorkerLog, setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
 
 test("buildTaskWorkerPrompt injects skill contract runtime input outputDir and feedback", () => {
 	const prompt = buildTaskWorkerPrompt({
@@ -321,5 +322,72 @@ test("dispatchWorker streams assistant summary + failed tool results via onUpdat
 		assert.ok(!progress.some((line) => /✔ chrome_cdp.*navigated ok/.test(line)), `successful tool-result should NOT be streamed, got: ${JSON.stringify(progress)}`);
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
+	}
+});
+
+// ponytail: dumpWorkerLog 是非平凡逻辑(正则提取 + 循环 messages + 文件 IO),必须留可执行检查。
+// commit 139aaa8 声称"边界测试 8 场景全过"但零自动化测试 —— 这里补上,钉住两个关键不变量:
+//   1. 文件名含完整 runId(含 rand),用户 grep runId 必须命中(回归保护:旧实现文件名丢 rand)
+//   2. 日志内容含关键行(taskbook/runId/outputDir/tool 调用)
+test("dumpWorkerLog writes .log + .json with full runId in filename (grep-friendly)", async () => {
+	const logDir = mkdtempSync(path.join(tmpdir(), "ugk-worker-log-test-"));
+	const prevEnv = process.env.UGK_WORKER_LOG_DIR;
+	process.env.UGK_WORKER_LOG_DIR = logDir;
+	// outputDir 父目录名 = runId,与 task.ts executeSubtask 生成格式一致
+	const runId = "task-linkedin-search-1751730000000-ab12cd";
+	const outputDir = path.join("E:", "fake", "runs", runId, "output");
+	try {
+		await dumpWorkerLog(
+			{ skill: "# S", contract: {}, runtimeInput: { url: "x" }, outputDir },
+			{
+				agent: "worker", agentSource: "install", task: "t", exitCode: 0,
+				messages: [
+					{ role: "user", content: [{ type: "text", text: "开始" }], timestamp: "2025-07-04T10:00:00.000Z" },
+					{ role: "assistant", content: [{ type: "tool_use", name: "bash", input: { command: "echo hi" } }], timestamp: "2025-07-04T10:00:01.000Z" },
+				],
+				stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+				model: "test-model", phases: { coldStartMs: 100, llmDecisionMs: 200, toolMs: 50 },
+			} as any,
+			Date.parse("2025-07-04T10:00:00.000Z"),
+		);
+
+		const files = readdirSync(logDir);
+		const logFile = files.find((f) => f.endsWith(".log"));
+		const jsonFile = files.find((f) => f.endsWith(".json"));
+		assert.ok(logFile, "应生成 .log 文件");
+		assert.ok(jsonFile, "应生成 .json 文件");
+		// 关键不变量 1:文件名含完整 runId(含 rand),用户 grep runId 必须命中
+		assert.ok(logFile!.includes(runId), `日志文件名应含完整 runId,实际: ${logFile}`);
+		assert.ok(jsonFile!.includes(runId), `json 文件名应含完整 runId,实际: ${jsonFile}`);
+
+		const logText = readFileSync(path.join(logDir, logFile!), "utf8");
+		// 关键不变量 2:日志头含 taskbook/runId/outputDir
+		assert.match(logText, /taskbook=linkedin-search/);
+		assert.match(logText, /runId=task-linkedin-search-1751730000000-ab12cd/);
+		assert.match(logText, /outputDir=/);
+		// messages 解析:bash tool 调用应出现在日志里
+		assert.match(logText, /TOOL_USE\s+bash\s+echo hi/);
+	} finally {
+		process.env.UGK_WORKER_LOG_DIR = prevEnv;
+		rmSync(logDir, { recursive: true, force: true });
+	}
+});
+
+test("dumpWorkerLog handles empty messages and missing phases without throwing", async () => {
+	const logDir = mkdtempSync(path.join(tmpdir(), "ugk-worker-log-test-"));
+	const prevEnv = process.env.UGK_WORKER_LOG_DIR;
+	process.env.UGK_WORKER_LOG_DIR = logDir;
+	try {
+		// 空 messages、无 phases、outputDir 为空 —— 不应抛错
+		await dumpWorkerLog(
+			{ skill: "# S", contract: {}, runtimeInput: {}, outputDir: "" },
+			{ agent: "w", agentSource: "install", task: "t", exitCode: 1, messages: [], stderr: "", usage: {} as any },
+			Date.now(),
+		);
+		const files = readdirSync(logDir);
+		assert.equal(files.length, 2, "即使空输入也应生成 2 个文件(容错)");
+	} finally {
+		process.env.UGK_WORKER_LOG_DIR = prevEnv;
+		rmSync(logDir, { recursive: true, force: true });
 	}
 });

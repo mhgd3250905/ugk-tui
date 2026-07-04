@@ -1367,10 +1367,15 @@ async function executeSubtask(
 	}
 	await mkdir(outputDir, { recursive: true });
 	const maxRetry = 3;
+	// ponytail: runId 在启动时就显示,而非等到 worker 完成。worker 卡住/慢时用户等不起
+	// 跑完才拿到 runId —— 卡住的那一刻就要能去 E:/AII/ugk-worker-logs/ 翻日志排查。
+	// runId = path.basename(runDir),与完成时 formatSubtaskToolText 提取的格式完全一致。
+	const runId = path.basename(runDir);
 	const title = `⏳ run_task 已启动: ${request.name}`;
+	const runIdLine = `runId: ${runId}`;
 	const progress: string[] = [];
 	const apiUsage: TaskApiUsage[] = [];
-	setTaskRunWidget(ctx, [title, "正在解析输入..."]);
+	setTaskRunWidget(ctx, [title, runIdLine, "正在解析输入..."]);
 	// ponytail: resolveRuntimeInput 的错误(如 dispatcher 缺必填字段)也要纳入单 task 隔离,
 	// 否则 parallel 模式下单个 task 的解析失败会上抛,穿过 mapWithConcurrencyLimit,
 	// 让整个 run_task 工具进 catch,返回 isError + 空 results —— 其他并发 task 的进度全丢。
@@ -1386,6 +1391,7 @@ async function executeSubtask(
 			onWorkerStart: (attempt) => {
 				setTaskRunWidget(ctx, [
 					title,
+					runIdLine,
 					`尝试 ${attempt}/${maxRetry + 1}`,
 					"正在装载 subagent(worker)...",
 				]);
@@ -1393,6 +1399,7 @@ async function executeSubtask(
 			onWorkerStarted: (attempt) => {
 				setTaskRunWidget(ctx, [
 					title,
+					runIdLine,
 					`尝试 ${attempt}/${maxRetry + 1}`,
 					"subagent(worker) 执行中...",
 				]);
@@ -1402,6 +1409,7 @@ async function executeSubtask(
 				if (added.length === 0) return;
 				setTaskRunWidget(ctx, [
 					title,
+					runIdLine,
 					"subagent(worker) 执行中...",
 					"",
 					"最近进展:",
@@ -1411,6 +1419,7 @@ async function executeSubtask(
 			onVerifyStart: (attempt) => {
 				setTaskRunWidget(ctx, [
 					title,
+					runIdLine,
 					`尝试 ${attempt}/${maxRetry + 1}`,
 					"verify 执行中...",
 				]);

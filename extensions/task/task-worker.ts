@@ -6,19 +6,22 @@ import { discoverAgents } from "../subagent-agents.ts";
 import { getFinalOutput, isFailedResult, type SingleResult, type UsageStats } from "../subagent-runtime.ts";
 import { runSingleAgent, type OnUpdateCallback } from "../subagent.ts";
 // ponytail: worker 运行日志落盘(E 盘,诊断用)。默认开,UGK_WORKER_LOG_DIR 可改路径,设为空字符串关闭。
-async function dumpWorkerLog(input: TaskWorkerInput, result: SingleResult, startedAt: number): Promise<void> {
+export async function dumpWorkerLog(input: TaskWorkerInput, result: SingleResult, startedAt: number): Promise<void> {
 	try {
 		const logDir = process.env.UGK_WORKER_LOG_DIR ?? "E:/AII/ugk-worker-logs";
 		if (!logDir) return; // 显式置空 → 关闭
 		const { mkdirSync, writeFileSync } = await import("node:fs");
-		const { join } = await import("node:path");
-		// taskbook 名从 outputDir 提取(形如 .../task-<name>-<ts>-<rand>/output)
-		const nameMatch = String(input.outputDir || "").match(/task-([a-z0-9-]+)-\d+/i);
-		const taskbook = nameMatch?.[1] || "unknown";
-		const runId = String(input.outputDir || "").match(/task-[a-z0-9-]+-(\d+)/i)?.[1] || String(startedAt);
+		const { join, basename, dirname } = await import("node:path");
+		// ponytail: runId = outputDir 的父目录名(task-<name>-<ts>-<rand>),与 task.ts
+		// 启动时/完成时显示给用户的 runId 完全一致。用户拿 runId 来 ugk-worker-logs/
+		// grep 文件名必须能命中 —— 旧实现文件名只含 ts(丢 rand),用户 grep 不到,是 bug。
+		const runId = basename(dirname(String(input.outputDir || ""))) || `task-unknown-${startedAt}`;
+		// taskbook 名从 runId 反推:剥掉 task- 前缀和 -<ts>-<rand> 后缀。
+		const taskbook = runId.match(/^task-(.+)-\d+-[a-z0-9]+$/i)?.[1] || "unknown";
 		const stamp = new Date(startedAt).toISOString().replace(/[:.]/g, "-");
-		// ponytail: 文件名加 runId 后缀(含随机串),防同 taskbook 同秒并行 worker 日志互相覆盖。
-		const base = `${taskbook}-${stamp}-${runId}`;
+		// ponytail: 文件名 = <runId>-<stamp>,含完整 runId(含随机串),防同 taskbook 同秒
+		// 并行 worker 日志互相覆盖,且用户 grep runId 能直接命中。
+		const base = `${runId}-${stamp}`;
 		mkdirSync(logDir, { recursive: true });
 
 		// 可读文本日志:每行一个事件,相对时间(秒)

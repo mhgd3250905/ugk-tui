@@ -391,3 +391,39 @@ test("dumpWorkerLog handles empty messages and missing phases without throwing",
 		rmSync(logDir, { recursive: true, force: true });
 	}
 });
+
+// ponytail: 钉住 13b9b72 的修复 —— worker message 的 timestamp 是 epoch-ms 数字(非 ISO 字符串)。
+// 旧实现 Date.parse(数字) 先转字符串再 parse → NaN → t0=0 → 所有事件相对时间恒为 +0.0s,
+// 完全看不出时间花在哪(这正是 worker 日志的核心价值)。新实现按类型分流:number 直接用。
+// 这条测试用真实 worker 的 timestamp 格式(数字),断言第二个事件能算出正确的 +124.2s gap。
+test("dumpWorkerLog computes relative time correctly for epoch-ms numeric timestamps", async () => {
+	const logDir = mkdtempSync(path.join(tmpdir(), "ugk-worker-log-test-"));
+	const prevEnv = process.env.UGK_WORKER_LOG_DIR;
+	process.env.UGK_WORKER_LOG_DIR = logDir;
+	const base = 1783135354124; // 真实 worker log 里出现的 epoch-ms
+	try {
+		await dumpWorkerLog(
+			{ skill: "# S", contract: {}, runtimeInput: {}, outputDir: "E:/fake/runs/task-x-1783135354124-ab/output" },
+			{
+				agent: "w", agentSource: "install", task: "t", exitCode: 0,
+				messages: [
+					{ role: "user", content: [{ type: "text", text: "开始" }], timestamp: base },
+					// 间隔 124.2 秒(对应 commit message 的 LinkedIn write gap)
+					{ role: "assistant", content: [{ type: "tool_use", name: "write", input: { file_path: "out.json" } }], timestamp: base + 124200 },
+				],
+				stderr: "", usage: {} as any,
+			} as any,
+			base,
+		);
+		const files = readdirSync(logDir);
+		const logFile = files.find((f) => f.endsWith(".log"))!;
+		const logText = readFileSync(path.join(logDir, logFile), "utf8");
+		// 关键:第二个事件必须显示 +124.2s,而非 +0.0s(旧实现的 bug)
+		assert.match(logText, /\[\+124\.2s\]/, `应显示 +124.2s 的 write gap,旧实现会显示 +0.0s。日志:\n${logText}`);
+		// write tool 调用也应出现
+		assert.match(logText, /TOOL_USE\s+write\s+out\.json/);
+	} finally {
+		process.env.UGK_WORKER_LOG_DIR = prevEnv;
+		rmSync(logDir, { recursive: true, force: true });
+	}
+});

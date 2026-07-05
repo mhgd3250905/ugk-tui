@@ -1,12 +1,92 @@
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { uiText } from "../shared/ui-language.ts";
+import { getWebSearchStatus, type WebSearchStatus } from "./client.ts";
+import {
+	WEB_SEARCH_DEFAULT_PORT,
+	getDefaultWebSearchProfilePath,
+	launchVisibleWebSearchChromeAndWait,
+} from "./launcher.ts";
 import { doSearch, type WebSearchDeps } from "./search.ts";
 
 export { doSearch } from "./search.ts";
 export type { WebSearchDeps } from "./search.ts";
 
-export function registerWebSearch(pi: ExtensionAPI, overrides: WebSearchDeps = {}): void {
+interface WebSearchControlDeps {
+	status?: (port: number) => Promise<WebSearchStatus>;
+	launchVisible?: (port: number) => Promise<string>;
+}
+
+type WebSearchRenderDetails = {
+	summary?: string;
+	fullText?: string;
+	fullTextTruncated?: boolean;
+	engine?: string;
+	query?: string;
+	ok?: boolean;
+	normal?: boolean;
+	failure?: string;
+	error?: string;
+	results?: Array<{ title?: string; url?: string }>;
+};
+
+function shortText(text: string, max = 72): string {
+	return text.length <= max ? text : `${text.slice(0, max - 3)}...`;
+}
+
+function hostOf(url: string): string {
+	try {
+		return new URL(url).hostname.replace(/^www\./, "");
+	} catch {
+		return shortText(url, 40);
+	}
+}
+
+function compactResult(details: WebSearchRenderDetails | undefined, fallback: string): string {
+	if (!details) return fallback;
+	const engine = details.engine === "bing" ? "Bing" : "Google";
+	const status = details.ok === false ? "失败" : "成功";
+	const normal = details.normal ? "正常" : details.ok === false ? "异常" : "未识别";
+	const lines = [`${engine} · ${status} · ${normal} · ${shortText(String(details.query ?? ""))}`];
+
+	const reason = details.failure ?? details.error;
+	if (reason) lines.push(`原因: ${shortText(reason)}`);
+
+	for (const [index, item] of (details.results ?? []).slice(0, 2).entries()) {
+		if (!item.title || !item.url) continue;
+		lines.push(`${index + 1}. ${shortText(item.title, 48)} (${hostOf(item.url)})`);
+	}
+
+	return lines.join("\n");
+}
+
+function formatWebSearchStatus(status: WebSearchStatus): string {
+	return [
+		`web_search Chrome: ${status.online ? "online" : "offline"}`,
+		`Port: ${status.port}`,
+		`Profile: ${getDefaultWebSearchProfilePath()}`,
+		status.error ? `Error: ${status.error}` : "",
+	].filter(Boolean).join("\n");
+}
+
+async function resolveWebSearchArgs(args: string, ctx: any): Promise<string | undefined> {
+	if (args.trim()) return args.trim();
+	if (!ctx.ui?.select) return "status";
+	const options = [uiText("查看状态", "Status"), uiText("打开可见 Chrome", "Open visible Chrome"), uiText("退出", "Exit")];
+	const selection = await ctx.ui.select("web_search", options);
+	if (!selection || selection === options[2]) return undefined;
+	if (selection === options[0]) return "status";
+	if (selection === options[1]) return "open";
+	return undefined;
+}
+
+export function registerWebSearch(pi: ExtensionAPI, overrides: WebSearchDeps = {}, controlOverrides: WebSearchControlDeps = {}): void {
+	const controlDeps = {
+		status: async (port: number) => getWebSearchStatus(port),
+		launchVisible: async (port: number) => launchVisibleWebSearchChromeAndWait(port),
+		...controlOverrides,
+	};
 	pi.registerTool(
 		defineTool({
 			name: "web_search",
@@ -29,8 +109,46 @@ export function registerWebSearch(pi: ExtensionAPI, overrides: WebSearchDeps = {
 			async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
 				return doSearch({ query: params.query, engine: params.engine }, overrides, signal);
 			},
+			renderCall(args, theme) {
+				const query = typeof args?.query === "string" ? args.query : "";
+				const engine = args?.engine === "bing" ? "Bing" : "Google";
+				return new Text(theme.fg("toolTitle", theme.bold(`web_search ${engine}`)) + theme.fg("dim", ` ${query}`), 0, 0);
+			},
+			renderResult(result, { expanded, isPartial }, theme) {
+				if (isPartial) return new Text(theme.fg("warning", uiText("搜索中...", "searching...")), 0, 0);
+
+				const details = result.details as WebSearchRenderDetails | undefined;
+				const content = result.content[0];
+				let text = compactResult(details, content?.type === "text" ? content.text : "");
+
+				if (expanded && details?.fullText) {
+					text += `\n\n${uiText("完整页面文本:", "Full page text:")}\n${details.fullText}`;
+					if (details.fullTextTruncated) text += `\n${uiText("[完整文本已截断]", "[full text truncated]")}`;
+				} else if (details?.fullText) {
+					text += theme.fg("muted", "\n(Ctrl+O to expand)");
+				}
+
+				return new Text(text, 0, 0);
+			},
 		}),
 	);
+	pi.registerCommand("web-search", {
+		description: "Manage isolated web_search Chrome",
+		handler: async (args, ctx) => {
+			const resolvedArgs = await resolveWebSearchArgs(args, ctx);
+			if (resolvedArgs === undefined) return;
+			const action = resolvedArgs.trim();
+			if (!action || action === "status") {
+				ctx.ui.notify(formatWebSearchStatus(await controlDeps.status(WEB_SEARCH_DEFAULT_PORT)), "info");
+				return;
+			}
+			if (action === "open" || action === "launch" || action === "visible") {
+				ctx.ui.notify(await controlDeps.launchVisible(WEB_SEARCH_DEFAULT_PORT), "info");
+				return;
+			}
+			ctx.ui.notify(uiText("用法: /web-search status|open", "Usage: /web-search status|open"), "warning");
+		},
+	});
 }
 
 export default registerWebSearch;

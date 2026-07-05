@@ -103,7 +103,7 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const rows = [
 		[uiText("🧰 工具", "🧰 Tools", language), "✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ web_search  ✅ mcp"],
 		[uiText("🤖 代理", "🤖 Agents", language), uiText("✅ @agent 提及  ✅ /implement 流水线  ✅ 隔离摘要", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries", language)],
-		[uiText("⌨️ 命令", "⌨️ Commands", language), "/ugk  /doctor  /update  /plan  /cdp  /mcp  /ugk-ui  /ui-language  /ugk-autopilot  /language"],
+		[uiText("⌨️ 命令", "⌨️ Commands", language), "/ugk  /doctor  /update  /plan  /cdp  /web-search  /mcp  /ugk-ui  /ui-language  /ugk-autopilot  /language"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		[uiText("🛡️ 防护", "🛡️ Guardrails", language), uiText("危险 bash 门禁已启用", "Dangerous bash gate enabled", language)],
 	] as const;
@@ -158,7 +158,7 @@ export default function (pi: ExtensionAPI) {
 	// 1.3c) chrome-cdp:受保护的本地登录态 Chrome 控制器(/cdp + chrome_cdp tool)
 	registerChromeCdp(pi);
 
-	// 1.3c.1) web-search:隔离 headless Chrome 搜索工具(不复用 chrome-cdp)
+	// 1.3c.1) web-search:隔离 headless Chrome 搜索工具 + /web-search 可见调试入口(不复用 chrome-cdp)
 	registerWebSearch(pi);
 
 	// 1.3c.2) mcp:外部 MCP stdio tools 集成(/mcp + session lifecycle)

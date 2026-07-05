@@ -29,7 +29,6 @@ export function detectFailure(text: string): { failed: boolean; reason?: string 
 		/are you a robot/i,
 		/我们的系统检测到.*异常流量/,
 		/请输入验证码/,
-		/验证码/,
 		/\/sorry\/index/i,
 		/this site can.?t be reached/i,
 		/无法访问此网站/,

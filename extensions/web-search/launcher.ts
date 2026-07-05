@@ -72,6 +72,7 @@ export function getWebSearchLaunchCommand(options: {
 	port: number;
 	homeDir?: string;
 	platform?: NodeJS.Platform;
+	visible?: boolean;
 }): ChromeLaunchCommand {
 	const profilePath = getDefaultWebSearchProfilePath(options.homeDir);
 	const platform = options.platform ?? process.platform;
@@ -83,17 +84,18 @@ export function getWebSearchLaunchCommand(options: {
 	} else {
 		command = "google-chrome";
 	}
+	const args = [
+		`--remote-debugging-port=${options.port}`,
+		"--remote-debugging-address=127.0.0.1",
+		`--user-data-dir=${profilePath}`,
+		"--no-first-run",
+		"--disable-gpu",
+	];
+	if (!options.visible) args.splice(3, 0, "--headless=new");
 	return {
 		command,
 		profilePath,
-		args: [
-			`--remote-debugging-port=${options.port}`,
-			"--remote-debugging-address=127.0.0.1",
-			`--user-data-dir=${profilePath}`,
-			"--headless=new",
-			"--no-first-run",
-			"--disable-gpu",
-		],
+		args,
 	};
 }
 
@@ -147,25 +149,28 @@ function ensureTeardownHook(): void {
 	}
 }
 
-export function launchWebSearchChrome(port = WEB_SEARCH_DEFAULT_PORT): string {
-	const { command, args, profilePath } = getWebSearchLaunchCommand({ port });
+export function launchWebSearchChrome(port = WEB_SEARCH_DEFAULT_PORT, options: { visible?: boolean } = {}): string {
+	const { command, args, profilePath } = getWebSearchLaunchCommand({ port, visible: options.visible });
 	try {
 		const useShell = !path.isAbsolute(command);
 		const child = spawn(command, args, {
 			detached: true,
 			stdio: "ignore",
 			shell: useShell,
-			windowsHide: true,
+			windowsHide: !options.visible,
 		});
 		child.unref();
 		managedWebSearchPorts.add(port);
 		ensureTeardownHook();
-		return `Started web_search Chrome on 127.0.0.1:${port}\nProfile: ${profilePath}\nBinary: ${command}`;
+		return `Started ${options.visible ? "visible " : ""}web_search Chrome on 127.0.0.1:${port}\nProfile: ${profilePath}\nBinary: ${command}`;
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		throw new Error(`Failed to launch web_search Chrome: ${msg}\nLooked for: ${command}\nTry installing Google Chrome.`);
 	}
 }
+
+let launchWebSearchChromeImpl: typeof launchWebSearchChrome = launchWebSearchChrome;
+let visibleLaunchSleepImpl: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const __testOnly = {
 	get managedPorts(): Set<number> { return managedWebSearchPorts; },
@@ -177,6 +182,22 @@ export const __testOnly = {
 		killChromeByPortImpl = fn;
 		return () => { killChromeByPortImpl = previous; };
 	},
+	setLaunchImpl(fn: typeof launchWebSearchChrome): () => void {
+		const previous = launchWebSearchChromeImpl;
+		launchWebSearchChromeImpl = fn;
+		return () => { launchWebSearchChromeImpl = previous; };
+	},
+	setWaitImpl(fn: typeof waitForWebSearchReady): () => void {
+		const previous = waitForWebSearchReadyImpl;
+		waitForWebSearchReadyImpl = fn;
+		return () => { waitForWebSearchReadyImpl = previous; };
+	},
+	setSleepImpl(fn: (ms: number) => Promise<void>): () => void {
+		const previous = visibleLaunchSleepImpl;
+		visibleLaunchSleepImpl = fn;
+		return () => { visibleLaunchSleepImpl = previous; };
+	},
+	launchVisibleAndWait: launchVisibleWebSearchChromeAndWait,
 };
 
 export interface WebSearchReadinessResult {
@@ -208,9 +229,20 @@ export async function waitForWebSearchReady(options: {
 	return { ready: false, elapsedMs: Date.now() - started, error: lastError };
 }
 
+let waitForWebSearchReadyImpl: typeof waitForWebSearchReady = waitForWebSearchReady;
+
 export async function launchWebSearchChromeAndWait(port = WEB_SEARCH_DEFAULT_PORT): Promise<string> {
 	const message = launchWebSearchChrome(port);
 	const readiness = await waitForWebSearchReady({ port });
+	if (readiness.ready) return `${message}\nReady (waited ${readiness.elapsedMs}ms).`;
+	return `${message}\nNot yet reachable after 15000ms (${readiness.error}). Chrome may still be starting.`;
+}
+
+export async function launchVisibleWebSearchChromeAndWait(port = WEB_SEARCH_DEFAULT_PORT): Promise<string> {
+	killChromeByPortImpl(port);
+	await visibleLaunchSleepImpl(500);
+	const message = launchWebSearchChromeImpl(port, { visible: true });
+	const readiness = await waitForWebSearchReadyImpl({ port });
 	if (readiness.ready) return `${message}\nReady (waited ${readiness.elapsedMs}ms).`;
 	return `${message}\nNot yet reachable after 15000ms (${readiness.error}). Chrome may still be starting.`;
 }

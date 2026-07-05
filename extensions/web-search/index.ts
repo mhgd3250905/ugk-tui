@@ -8,8 +8,11 @@ import {
 	getDefaultWebSearchProfilePath,
 	launchVisibleWebSearchChromeAndWait,
 } from "./launcher.ts";
+import { doRead } from "./read.ts";
 import { doSearch, type WebSearchDeps } from "./search.ts";
 
+export { doRead } from "./read.ts";
+export type { WebReadDeps } from "./read.ts";
 export { doSearch } from "./search.ts";
 export type { WebSearchDeps } from "./search.ts";
 
@@ -129,6 +132,54 @@ export function registerWebSearch(pi: ExtensionAPI, overrides: WebSearchDeps = {
 				}
 
 				return new Text(text, 0, 0);
+			},
+		}),
+	);
+	pi.registerTool(
+		defineTool({
+			name: "web_read",
+			label: uiText("读取网页", "Read Page"),
+			description: uiText(
+				"读取任意 http/https 网页正文(用 web_search 同一个隔离 Chrome)。用于跟进搜索结果里的链接读全文。",
+				"Read the main text of any http/https page (same isolated Chrome as web_search). Use to follow links from search results.",
+			),
+			promptSnippet:
+				"当你要读某个 URL 的正文(比如 web_search 返回的链接),用 web_read。返回去噪后的正文文本。",
+			promptGuidelines: [
+				"url 必须是完整 http(s):// 地址",
+				"返回的是去噪正文,不是 HTML",
+				"读不到正文会返回 ok:false,换链接或告诉用户",
+			],
+			parameters: Type.Object({
+				url: Type.String({ description: "要读取的完整 URL,http(s)://" }),
+				maxBytes: Type.Optional(Type.Number({ description: "正文最大字节数,默认 16384" })),
+			}),
+			async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+				return doRead({ url: params.url, maxBytes: params.maxBytes }, overrides, signal);
+			},
+			renderCall(args, theme) {
+				const url = typeof args?.url === "string" ? args.url : "";
+				let host = url;
+				try {
+					host = new URL(url).hostname.replace(/^www\./, "");
+				} catch {}
+				return new Text(theme.fg("toolTitle", theme.bold("web_read")) + theme.fg("dim", ` ${host}`), 0, 0);
+			},
+			renderResult(result, { expanded, isPartial }, theme) {
+				if (isPartial) return new Text(theme.fg("warning", uiText("读取中...", "reading...")), 0, 0);
+
+				const details = result.details as any;
+				const content = result.content[0];
+				const text = content?.type === "text" ? content.text : "";
+				if (expanded) return new Text(text, 0, 0);
+
+				const firstLine = text.split("\n")[0] ?? "";
+				const status = details.ok === false ? "失败" : "成功";
+				return new Text(
+					`web_read · ${status} · ${firstLine}` + (details.fullText ? theme.fg("muted", "\n(Ctrl+O to expand)") : ""),
+					0,
+					0,
+				);
 			},
 		}),
 	);

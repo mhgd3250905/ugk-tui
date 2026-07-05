@@ -22,6 +22,7 @@ import {
 	getDefaultWebSearchProfilePath,
 	getWebSearchLaunchCommand,
 } from "../extensions/web-search/launcher.ts";
+import { doRead } from "../extensions/web-search/read.ts";
 import { doSearch } from "../extensions/web-search/search.ts";
 import { registerWebSearch } from "../extensions/web-search/index.ts";
 
@@ -114,6 +115,10 @@ test("truncateContent keeps returned text under the search limit", () => {
 	const chinese = truncateContent("字".repeat(4000), 8192);
 	assert.equal(chinese.truncated, true);
 	assert.ok(Buffer.byteLength(chinese.text, "utf8") <= 8192);
+
+	const tiny = truncateContent("abc", 1);
+	assert.equal(tiny.truncated, true);
+	assert.ok(Buffer.byteLength(tiny.text, "utf8") <= 1);
 });
 
 test("web-search client navigates and evaluateJs returns result.value", async () => {
@@ -487,4 +492,134 @@ test("/web-search menu can open the isolated Chrome visibly", async () => {
 	assert.deepEqual(selections[0].options, ["查看状态", "打开可见 Chrome", "退出"]);
 	assert.deepEqual(launchedPorts, [9223]);
 	assert.match(notifications.join("\n"), /visible web_search Chrome launched/);
+});
+
+test("doRead happy path: navigate, evaluate, return cleaned text", async () => {
+	const calls: string[] = [];
+	const result = await doRead(
+		{ url: "https://example.com/post" },
+		{
+			status: async () => ({ online: true, port: 9223 }),
+			launch: async () => {
+				calls.push("launch");
+				return "launched";
+			},
+			navigate: async (_p, url) => {
+				calls.push(`navigate:${url}`);
+				return {};
+			},
+			evaluate: async () => {
+				calls.push("evaluate");
+				return JSON.stringify({ title: "Test Post", text: "正文内容".repeat(50) });
+			},
+			sleep: async () => {
+				calls.push("sleep");
+			},
+		},
+	);
+
+	assert.deepEqual(calls, ["navigate:https://example.com/post", "sleep", "evaluate"]);
+	assert.equal(calls.includes("launch"), false);
+	assert.equal(result.details.ok, true);
+	assert.equal(result.details.url, "https://example.com/post");
+	assert.equal(result.details.host, "example.com");
+	assert.equal(result.details.title, "Test Post");
+	assert.match(result.content[0].text, /Test Post/);
+	assert.match(result.content[0].text, /https:\/\/example\.com\/post/);
+	assert.match(result.content[0].text, /正文内容/);
+});
+
+test("doRead rejects non-http(s) URLs without launching Chrome", async () => {
+	const calls: string[] = [];
+	const result = await doRead(
+		{ url: "file:///etc/passwd" },
+		{
+			status: async () => {
+				calls.push("status");
+				return { online: false, port: 9223 };
+			},
+			launch: async () => {
+				calls.push("launch");
+				return "x";
+			},
+			navigate: async () => {
+				calls.push("navigate");
+				return {};
+			},
+			evaluate: async () => {
+				calls.push("evaluate");
+				return "{}";
+			},
+			sleep: async () => {
+				calls.push("sleep");
+			},
+		},
+	);
+
+	assert.deepEqual(calls, []);
+	assert.equal(result.details.ok, false);
+	assert.match(result.content[0].text, /仅支持 http\/https/);
+});
+
+test("doRead rejects malformed URLs", async () => {
+	const result = await doRead(
+		{ url: "not a url" },
+		{
+			status: async () => ({ online: true, port: 9223 }),
+			launch: async () => "x",
+			navigate: async () => ({}),
+			evaluate: async () => "{}",
+			sleep: async () => {},
+		},
+	);
+
+	assert.equal(result.details.ok, false);
+	assert.match(result.content[0].text, /URL 解析失败/);
+});
+
+test("doRead retries evaluate once when navigation swaps target", async () => {
+	let n = 0;
+	const result = await doRead(
+		{ url: "https://example.com/a" },
+		{
+			status: async () => ({ online: true, port: 9223 }),
+			launch: async () => "x",
+			navigate: async () => ({}),
+			evaluate: async () => {
+				n += 1;
+				if (n === 1) throw new Error("Inspected target navigated");
+				return JSON.stringify({ title: "T", text: "正文" });
+			},
+			sleep: async () => {},
+		},
+	);
+
+	assert.equal(n, 2);
+	assert.equal(result.details.ok, true);
+	assert.equal(result.details.title, "T");
+});
+
+test("doRead launches Chrome when offline", async () => {
+	const calls: string[] = [];
+	await doRead(
+		{ url: "https://example.com/x" },
+		{
+			status: async () => {
+				calls.push("status");
+				return { online: false, port: 9223 };
+			},
+			launch: async (p) => {
+				calls.push(`launch:${p}`);
+				return "ok";
+			},
+			navigate: async (_p, url) => {
+				calls.push(`navigate:${url}`);
+				return {};
+			},
+			evaluate: async () => JSON.stringify({ title: "", text: "x".repeat(300) }),
+			sleep: async () => {},
+		},
+	);
+
+	assert.deepEqual(calls, ["status", "launch:9223", "navigate:https://example.com/x"]);
 });

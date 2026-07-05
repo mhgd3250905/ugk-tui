@@ -45,6 +45,11 @@ export function truncateContent(text: string, maxBytes = 8192): { text: string; 
 	if (bytes <= maxBytes) return { text, truncated: false, bytes };
 	const suffix = "\n...(已截断)";
 	const suffixBytes = Buffer.byteLength(suffix, "utf8");
+	if (maxBytes <= 0) return { text: "", truncated: true, bytes };
+	if (maxBytes <= suffixBytes) {
+		const text = Buffer.from(suffix, "utf8").subarray(0, maxBytes).toString("utf8").replace(/\uFFFD+$/u, "");
+		return { text, truncated: true, bytes };
+	}
 	const cutBytes = Math.max(0, maxBytes - suffixBytes);
 	let cut = Buffer.from(text, "utf8").subarray(0, cutBytes).toString("utf8").replace(/\uFFFD+$/u, "");
 	while (Buffer.byteLength(cut + suffix, "utf8") > maxBytes) cut = cut.slice(0, -1);

@@ -494,6 +494,76 @@ test("/web-search menu can open the isolated Chrome visibly", async () => {
 	assert.match(notifications.join("\n"), /visible web_search Chrome launched/);
 });
 
+test("/web-search open does not restart when Chrome is already online", async () => {
+	const commands = new Map<string, any>();
+	const calls: string[] = [];
+	registerWebSearch(
+		{
+			registerTool() {},
+			registerCommand(name: string, options: any) {
+				commands.set(name, options);
+			},
+		} as any,
+		{},
+		{
+			status: async (port) => {
+				calls.push(`status:${port}`);
+				return { online: true, port };
+			},
+			launchVisible: async (port) => {
+				calls.push(`launch:${port}`);
+				return "visible web_search Chrome launched";
+			},
+		},
+	);
+	const notifications: string[] = [];
+
+	await commands.get("web-search").handler("open", {
+		ui: {
+			notify: (message: string) => {
+				notifications.push(message);
+			},
+		},
+	});
+
+	assert.deepEqual(calls, ["status:9223"]);
+	assert.match(notifications.join("\n"), /web_search Chrome: online/);
+	assert.match(notifications.join("\n"), /\/web-search restart/);
+});
+
+test("/web-search restart relaunches visible Chrome even when online", async () => {
+	const commands = new Map<string, any>();
+	const launchedPorts: number[] = [];
+	registerWebSearch(
+		{
+			registerTool() {},
+			registerCommand(name: string, options: any) {
+				commands.set(name, options);
+			},
+		} as any,
+		{},
+		{
+			status: async (port) => ({ online: true, port }),
+			launchVisible: async (port) => {
+				launchedPorts.push(port);
+				return "visible web_search Chrome relaunched";
+			},
+		},
+	);
+	const notifications: string[] = [];
+
+	await commands.get("web-search").handler("restart", {
+		ui: {
+			notify: (message: string) => {
+				notifications.push(message);
+			},
+		},
+	});
+
+	assert.deepEqual(launchedPorts, [9223]);
+	assert.match(notifications.join("\n"), /relaunched/);
+});
+
 test("doRead happy path: navigate, evaluate, return cleaned text", async () => {
 	const calls: string[] = [];
 	const result = await doRead(

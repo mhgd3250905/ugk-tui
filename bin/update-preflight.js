@@ -129,6 +129,9 @@ export async function runUgkUpdatePreflight(options = {}) {
 
 	if (!shouldCheckForUgkUpdate(state, now, options.force)) return { action: "continue" };
 
+	if (!options.force) {
+		stdout.write("UGK 启动中: 正在检查更新...\n");
+	}
 	const info = await (options.detectUpdate || (() => detectUgkUpdate(options)))();
 	const checkedState = { ...state, lastCheckedAt: now.toISOString() };
 	writeState(checkedState);

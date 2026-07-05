@@ -189,15 +189,27 @@ export function registerWebSearch(pi: ExtensionAPI, overrides: WebSearchDeps = {
 			const resolvedArgs = await resolveWebSearchArgs(args, ctx);
 			if (resolvedArgs === undefined) return;
 			const action = resolvedArgs.trim();
+			const [command, ...flags] = action.split(/\s+/);
 			if (!action || action === "status") {
 				ctx.ui.notify(formatWebSearchStatus(await controlDeps.status(WEB_SEARCH_DEFAULT_PORT)), "info");
 				return;
 			}
-			if (action === "open" || action === "launch" || action === "visible") {
+			if (command === "open" || command === "launch" || command === "visible") {
+				if (!flags.includes("--force")) {
+					const status = await controlDeps.status(WEB_SEARCH_DEFAULT_PORT);
+					if (status.online) {
+						ctx.ui.notify(`${formatWebSearchStatus(status)}\n\n已在线;如需重启为可见 Chrome,运行 /web-search restart`, "info");
+						return;
+					}
+				}
 				ctx.ui.notify(await controlDeps.launchVisible(WEB_SEARCH_DEFAULT_PORT), "info");
 				return;
 			}
-			ctx.ui.notify(uiText("用法: /web-search status|open", "Usage: /web-search status|open"), "warning");
+			if (command === "restart") {
+				ctx.ui.notify(await controlDeps.launchVisible(WEB_SEARCH_DEFAULT_PORT), "info");
+				return;
+			}
+			ctx.ui.notify(uiText("用法: /web-search status|open|open --force|restart", "Usage: /web-search status|open|open --force|restart"), "warning");
 		},
 	});
 }

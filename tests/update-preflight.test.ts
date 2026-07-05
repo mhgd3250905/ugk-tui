@@ -150,6 +150,23 @@ test("runUgkUpdatePreflight continues when no update is available", async () => 
 	assert.equal(output.text(), "");
 });
 
+test("runUgkUpdatePreflight shows loading message during interactive update check", async () => {
+	const output = ttyStream();
+	const result = await runUgkUpdatePreflight({
+		argv: [],
+		env: {},
+		stdin: { isTTY: true } as any,
+		stdout: output as any,
+		stderr: ttyStream() as any,
+		readState: () => ({}),
+		writeState: () => {},
+		detectUpdate: async () => undefined,
+	});
+
+	assert.deepEqual(result, { action: "continue" });
+	assert.match(output.text(), /UGK 启动中: 正在检查更新/);
+});
+
 test("runUgkUpdatePreflight skip only affects the current run", async () => {
 	const output = ttyStream();
 	let state: UgkUpdateState = {};

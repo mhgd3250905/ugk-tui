@@ -303,6 +303,234 @@ test("session view patch guards autocomplete providers without applyCompletion",
 	assert.equal(mode.defaultEditor.provider, mode.autocompleteProvider);
 });
 
+test("session view patch shows loading status while /new creates a session", async () => {
+	class FakeInteractiveMode {
+		constructor(mainSession) {
+			this.runtimeHost = {
+				session: mainSession,
+				newSession: async () => {
+					this.calls.push("newSession");
+					return { cancelled: false };
+				},
+			};
+			this.calls = [];
+			this.statusContainer = {
+				clear: () => {
+					this.calls.push("status:clear");
+				},
+			};
+			this.chatContainer = {
+				children: [],
+				addChild: (child) => {
+					this.chatContainer.children.push(child);
+				},
+			};
+			this.ui = {
+				requestRender: () => {
+					this.calls.push("requestRender");
+				},
+			};
+		}
+
+		get session() {
+			return this.runtimeHost.session;
+		}
+
+		get agent() {
+			return this.session.agent;
+		}
+
+		get sessionManager() {
+			return this.session.sessionManager;
+		}
+
+		createExtensionUIContext() {
+			return {};
+		}
+
+		showStatus(message) {
+			const children = this.chatContainer.children;
+			const last = children.length > 0 ? children[children.length - 1] : undefined;
+			const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
+			if (last && secondLast && last === this.lastStatusText && secondLast === this.lastStatusSpacer) {
+				this.lastStatusText.message = message;
+				this.calls.push(`status:${message}`);
+				return;
+			}
+			const spacer = { kind: "spacer" };
+			const text = { kind: "text", message };
+			this.chatContainer.addChild(spacer);
+			this.chatContainer.addChild(text);
+			this.lastStatusSpacer = spacer;
+			this.lastStatusText = text;
+			this.calls.push(`status:${message}`);
+		}
+
+		renderCurrentSessionState() {
+			this.calls.push("render");
+		}
+
+		async handleClearCommand() {
+			this.statusContainer.clear();
+			const result = await this.runtimeHost.newSession();
+			if (result.cancelled) return;
+			this.renderCurrentSessionState();
+			this.chatContainer.addChild({});
+			this.ui.requestRender();
+		}
+	}
+
+	installUgkSessionViewPatch({ InteractiveMode: FakeInteractiveMode });
+	const mode = new FakeInteractiveMode(createSession("main"));
+
+	await mode.handleClearCommand();
+
+	const loadingIndex = mode.calls.findIndex((call) => /正在创建新会话.*加载扩展资源.*重连 MCP/.test(call));
+	assert.ok(loadingIndex > mode.calls.indexOf("status:clear"));
+	assert.ok(loadingIndex < mode.calls.indexOf("newSession"));
+	assert.ok(mode.calls.lastIndexOf("status:clear") > mode.calls.indexOf("newSession"));
+	assert.equal(mode.chatContainer.children.some((child) => /正在创建新会话/.test(child.message ?? "")), false);
+});
+
+test("session view patch shows loading status while rebinding the current session", async () => {
+	class FakeInteractiveMode {
+		constructor(mainSession) {
+			this.runtimeHost = { session: mainSession };
+			this.calls = [];
+			this.ui = {
+				requestRender: () => {
+					this.calls.push("requestRender");
+				},
+			};
+			this.statusContainer = {
+				clear: () => {
+					this.calls.push("status:clear");
+				},
+			};
+			this.chatContainer = {
+				children: [],
+				addChild: (child) => {
+					this.chatContainer.children.push(child);
+				},
+			};
+		}
+
+		get session() {
+			return this.runtimeHost.session;
+		}
+
+		get agent() {
+			return this.session.agent;
+		}
+
+		get sessionManager() {
+			return this.session.sessionManager;
+		}
+
+		createExtensionUIContext() {
+			return {};
+		}
+
+		showStatus(message) {
+			const spacer = { kind: "spacer" };
+			const text = { kind: "text", message };
+			this.chatContainer.addChild(spacer);
+			this.chatContainer.addChild(text);
+			this.lastStatusSpacer = spacer;
+			this.lastStatusText = text;
+			this.calls.push(`status:${message}`);
+		}
+
+		async rebindCurrentSession() {
+			this.calls.push("rebind");
+		}
+	}
+
+	installUgkSessionViewPatch({ InteractiveMode: FakeInteractiveMode });
+	const mode = new FakeInteractiveMode(createSession("main"));
+
+	await mode.rebindCurrentSession();
+
+	const loadingIndex = mode.calls.findIndex((call) => /正在加载会话.*初始化扩展资源.*连接 MCP/.test(call));
+	assert.ok(loadingIndex >= 0);
+	assert.ok(loadingIndex < mode.calls.indexOf("rebind"));
+	assert.ok(mode.calls.indexOf("status:clear") > mode.calls.indexOf("rebind"));
+	assert.equal(mode.chatContainer.children.some((child) => /正在加载会话/.test(child.message ?? "")), false);
+});
+
+test("session view patch keeps a later status while clearing loading", async () => {
+	class FakeInteractiveMode {
+		constructor(mainSession) {
+			this.runtimeHost = { session: mainSession };
+			this.calls = [];
+			this.ui = {
+				requestRender: () => {
+					this.calls.push("requestRender");
+				},
+			};
+			this.statusContainer = {
+				clear: () => {
+					this.calls.push("status:clear");
+				},
+			};
+			this.chatContainer = {
+				children: [],
+				addChild: (child) => {
+					this.chatContainer.children.push(child);
+				},
+			};
+		}
+
+		get session() {
+			return this.runtimeHost.session;
+		}
+
+		get agent() {
+			return this.session.agent;
+		}
+
+		get sessionManager() {
+			return this.session.sessionManager;
+		}
+
+		createExtensionUIContext() {
+			return {};
+		}
+
+		showStatus(message) {
+			const children = this.chatContainer.children;
+			const last = children.length > 0 ? children[children.length - 1] : undefined;
+			const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
+			if (last && secondLast && last === this.lastStatusText && secondLast === this.lastStatusSpacer) {
+				this.lastStatusText.message = message;
+				this.calls.push(`status:${message}`);
+				return;
+			}
+			const spacer = { kind: "spacer" };
+			const text = { kind: "text", message };
+			this.chatContainer.addChild(spacer);
+			this.chatContainer.addChild(text);
+			this.lastStatusSpacer = spacer;
+			this.lastStatusText = text;
+			this.calls.push(`status:${message}`);
+		}
+
+		async rebindCurrentSession() {
+			this.showStatus("MCP server failed");
+			this.calls.push("rebind");
+		}
+	}
+
+	installUgkSessionViewPatch({ InteractiveMode: FakeInteractiveMode });
+	const mode = new FakeInteractiveMode(createSession("main"));
+
+	await mode.rebindCurrentSession();
+
+	assert.equal(mode.calls.includes("status:clear"), false);
+	assert.ok(mode.calls.indexOf("status:MCP server failed") < mode.calls.indexOf("rebind"));
+	assert.equal(mode.chatContainer.children.some((child) => child.message === "MCP server failed"), true);
+});
+
 test("session view patch is idempotent", () => {
 	class FakeInteractiveMode {
 		get session() {

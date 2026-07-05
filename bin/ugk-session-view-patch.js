@@ -5,6 +5,8 @@ const ACTIVE_VIEW = Symbol.for("ugk.sessionViewPatch.activeView");
 const SESSION_SWITCHER = Symbol.for("ugk.sessionViewPatch.sessionSwitcher");
 const SESSION_SWITCHER_SHORTCUT = Symbol.for("ugk.sessionViewPatch.sessionSwitcherShortcut");
 const SESSION_SWITCHER_WIDGET_KEY = "ugk-session-switcher";
+const NEW_SESSION_LOADING_STATUS = "正在创建新会话,加载扩展资源并重连 MCP...";
+const REBIND_SESSION_LOADING_STATUS = "正在加载会话,初始化扩展资源并连接 MCP...";
 
 function fallbackApplyCompletion(lines, cursorLine, cursorCol, item, prefix = "") {
 	const newLines = [...lines];
@@ -111,6 +113,55 @@ function setSessionSwitcherWidget(mode, state) {
 	return true;
 }
 
+function showLoadingStatus(mode, message) {
+	mode.showStatus?.(message);
+	mode.ui?.requestRender?.();
+}
+
+function removeLastChatStatus(mode) {
+	const children = mode.chatContainer?.children;
+	const spacer = mode.lastStatusSpacer;
+	const text = mode.lastStatusText;
+	if (!Array.isArray(children) || !spacer || !text || children.length < 2) {
+		return false;
+	}
+	if (children[children.length - 1] !== text || children[children.length - 2] !== spacer) {
+		return false;
+	}
+	children.splice(children.length - 2, 2);
+	mode.lastStatusSpacer = undefined;
+	mode.lastStatusText = undefined;
+	return true;
+}
+
+async function withLoadingStatus(mode, message, work) {
+	let lastStatus = message;
+	const originalShowStatus = mode.showStatus;
+	const trackedShowStatus = typeof originalShowStatus === "function"
+		? function trackedUgkLoadingStatus(nextMessage, ...args) {
+			lastStatus = nextMessage;
+			return originalShowStatus.call(this, nextMessage, ...args);
+		}
+		: undefined;
+
+	if (trackedShowStatus) {
+		mode.showStatus = trackedShowStatus;
+	}
+	try {
+		showLoadingStatus(mode, message);
+		return await work();
+	} finally {
+		if (trackedShowStatus && mode.showStatus === trackedShowStatus) {
+			mode.showStatus = originalShowStatus;
+		}
+		if (lastStatus === message) {
+			removeLastChatStatus(mode);
+			mode.statusContainer?.clear?.();
+			mode.ui?.requestRender?.();
+		}
+	}
+}
+
 function handleSessionSwitcherInput(mode, data) {
 	const state = mode[SESSION_SWITCHER];
 	if (!state || state.items.length === 0) {
@@ -214,6 +265,8 @@ export function installUgkSessionViewPatch({ InteractiveMode } = {}) {
 	const agentDescriptor = Object.getOwnPropertyDescriptor(proto, "agent");
 	const sessionManagerDescriptor = Object.getOwnPropertyDescriptor(proto, "sessionManager");
 	const originalCreateExtensionUIContext = proto.createExtensionUIContext;
+	const originalHandleClearCommand = proto.handleClearCommand;
+	const originalRebindCurrentSession = proto.rebindCurrentSession;
 	const originalSetupExtensionShortcuts = proto.setupExtensionShortcuts;
 	const originalSetupAutocompleteProvider = proto.setupAutocompleteProvider;
 	if (
@@ -257,6 +310,47 @@ export function installUgkSessionViewPatch({ InteractiveMode } = {}) {
 			const result = originalSetupExtensionShortcuts.apply(this, args);
 			installSessionSwitcherShortcut(this);
 			return result;
+		};
+	}
+
+	if (typeof originalHandleClearCommand === "function") {
+		proto.handleClearCommand = async function handleUgkClearCommandWithLoading(...args) {
+			const runtimeHost = this.runtimeHost;
+			const originalNewSession = runtimeHost?.newSession;
+			if (typeof originalNewSession !== "function") {
+				return originalHandleClearCommand.apply(this, args);
+			}
+
+			const mode = this;
+			function restoreNewSession() {
+				if (runtimeHost.newSession === wrappedNewSession) {
+					runtimeHost.newSession = originalNewSession;
+				}
+			}
+			async function wrappedNewSession(...newSessionArgs) {
+				return withLoadingStatus(mode, NEW_SESSION_LOADING_STATUS, async () => {
+					try {
+						return await originalNewSession.apply(this, newSessionArgs);
+					} finally {
+						restoreNewSession();
+					}
+				}).finally(() => {
+					restoreNewSession();
+				});
+			}
+
+			runtimeHost.newSession = wrappedNewSession;
+			try {
+				return await originalHandleClearCommand.apply(this, args);
+			} finally {
+				restoreNewSession();
+			}
+		};
+	}
+
+	if (typeof originalRebindCurrentSession === "function") {
+		proto.rebindCurrentSession = async function rebindUgkCurrentSessionWithLoading(...args) {
+			return withLoadingStatus(this, REBIND_SESSION_LOADING_STATUS, () => originalRebindCurrentSession.apply(this, args));
 		};
 	}
 

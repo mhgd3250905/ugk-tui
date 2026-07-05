@@ -24,6 +24,7 @@ tests/fixtures/dispatcher-evals/_*.md
 /PLAN-*.md
 /TODO-*.md
 /HANDOFF-*.md
+/PR-*.md
 
 # Temp / editor
 .tmp/

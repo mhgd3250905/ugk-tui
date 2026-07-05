@@ -28,6 +28,7 @@ import registerCompaction from "./compaction/index.ts";
 import registerTask from "./task/task.ts";
 import registerQuestionnaire from "./questionnaire.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
+import registerWebSearch from "./web-search/index.ts";
 import registerDoctor from "./doctor/index.ts";
 import registerMcp from "./mcp/index.ts";
 import { registerUgkUpdate } from "./update-check.ts";
@@ -100,7 +101,7 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const apiIcon = apiConfigured ? "✅" : "❌";
 	const apiSummary = formatDeepSeekSummary(deepseekStatus, language);
 	const rows = [
-		[uiText("🧰 工具", "🧰 Tools", language), "✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ mcp"],
+		[uiText("🧰 工具", "🧰 Tools", language), "✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ web_search  ✅ mcp"],
 		[uiText("🤖 代理", "🤖 Agents", language), uiText("✅ @agent 提及  ✅ /implement 流水线  ✅ 隔离摘要", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries", language)],
 		[uiText("⌨️ 命令", "⌨️ Commands", language), "/ugk  /doctor  /update  /plan  /cdp  /mcp  /ugk-ui  /ui-language  /ugk-autopilot  /language"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
@@ -157,10 +158,13 @@ export default function (pi: ExtensionAPI) {
 	// 1.3c) chrome-cdp:受保护的本地登录态 Chrome 控制器(/cdp + chrome_cdp tool)
 	registerChromeCdp(pi);
 
-	// 1.3c.1) mcp:外部 MCP stdio tools 集成(/mcp + session lifecycle)
+	// 1.3c.1) web-search:隔离 headless Chrome 搜索工具(不复用 chrome-cdp)
+	registerWebSearch(pi);
+
+	// 1.3c.2) mcp:外部 MCP stdio tools 集成(/mcp + session lifecycle)
 	registerMcp(pi, { packageRoot });
 
-	// 1.3c.2) doctor: legacy entrypoint for guided environment troubleshooting skill.
+	// 1.3c.3) doctor: legacy entrypoint for guided environment troubleshooting skill.
 	registerDoctor(pi);
 
 	// 1.3d) UGK 自管更新:只暴露 UGK 更新,不暴露 pi update

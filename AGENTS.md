@@ -22,6 +22,7 @@
 
 - `subagent` — 子代理委派(single/parallel/chain 三模式,隔离 context 只回摘要)
 - `cron` — 定时任务管理(status/list/add/remove/history)
+- `web_search` — 公网搜索工具:自动启动隔离的 headless Chrome(9223 + 独立 profile),Google 优先,Bing 中国版兜底,返回 SERP 页面文本给 agent 自己读
 - `chrome_cdp` — 受保护的本地登录态 Chrome 控制(status/launch/tabs/navigate/evaluate/screenshot,默认 ask-gated)
 - `mcp` — MCP stdio client:连接外部 MCP server,把 tools 注册为 `server__tool`(scope 合并:install < user < project < local,同名 server 高 scope 完全覆盖低 scope)
 - `run_task` — subtask 工具:让 main agent 复用已机器验收的 taskbook,返回 PASS/FAIL + 产物路径。**两条铁律:需求驱动(任务确定才匹配 taskbook);责任归 LLM(dispatcher 翻译失败直接报错,headless 不弹 UI)。task 是最小单位,不可嵌套。**
@@ -43,9 +44,16 @@
 
 - `/cdp status|ask|on|off|port|launch|tabs`
 - 默认 `ask` 模式,控制本地登录态 Chrome 前需说明原因并经用户确认
-- 仅用于 SSO/cookie/CAPTCHA/私有工作区/本地 Chrome 状态,不替代普通联网检索
+- 仅用于 SSO/cookie/CAPTCHA/私有工作区/本地 Chrome 状态,不替代普通联网检索;公网搜索优先用 `web_search`
 - CDP 未连接时用 `chrome_cdp action=launch`,不要用 bash 启动 Chrome
 - 并行 worker 各自动分到独立 CDP tab(runtime 管理,agent 无需指定 target,不会互相覆盖);taskbook 须用 `chrome_cdp` 工具而非 python/curl 直连端口,否则拿不到独立 tab
+
+### Web 搜索
+
+- `web_search` 调用时自动启动完全隔离的 headless Chrome:端口 9223,profile `~/.ugk/web-search-profile`
+- Google 搜索优先,Google 不通或疑似反爬时 fallback 到 Bing 中国版(`cn.bing.com`)
+- 返回搜索结果页文本,不写结果 parser;agent 自己读取标题/URL/摘要
+- 与 `chrome_cdp` 完全隔离,不共享端口/profile/ask 门
 
 ### MCP tools 接入
 

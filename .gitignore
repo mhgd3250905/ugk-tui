@@ -23,6 +23,7 @@ tests/fixtures/dispatcher-evals/_*.md
 # Local handoff/followup notes
 /PLAN-*.md
 /TODO-*.md
+/HANDOFF-*.md
 
 # Temp / editor
 .tmp/

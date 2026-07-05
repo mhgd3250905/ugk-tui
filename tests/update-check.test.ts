@@ -138,6 +138,36 @@ test("getUgkUpdateCommandLabel describes git and npm install modes", () => {
 	assert.equal(getUgkUpdateCommandLabel("C:\\repo", false), "npm install -g ugk-agent");
 });
 
+test("session_start update check ignores stale extension ctx", () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		registerCommand() {},
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+	};
+	let checked = false;
+
+	registerUgkUpdate(pi as any, {
+		getCurrentRef: async () => {
+			checked = true;
+			return CURRENT;
+		},
+		getLatestRef: async () => LATEST,
+		getCurrentVersion: () => "1.0.0",
+	});
+
+	const ctx = {
+		get mode() {
+			throw new Error("This extension ctx is stale after session replacement or reload.");
+		},
+		hasUI: true,
+	};
+
+	assert.doesNotThrow(() => handlers.get("session_start")!({}, ctx));
+	assert.equal(checked, false);
+});
+
 test("/update prompts and applies update when user selects now", async () => {
 	const commands = new Map<string, { handler: Function }>();
 	const pi = {

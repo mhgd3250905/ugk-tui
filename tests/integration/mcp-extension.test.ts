@@ -143,6 +143,45 @@ test("session_start connects configured MCP servers and registers tools", async 
 	await waitForNoProcess(/mcp-stub-server\.mjs/);
 });
 
+test("session_start ignores stale extension ctx during MCP tool registration", async () => {
+	let disconnects = 0;
+	const registry = {
+		connections: new Map(),
+		async connect(name: string) {
+			const connection = {
+				name,
+				status: "connected",
+				tools: [{ name: "echo", inputSchema: { type: "object" } }],
+				async callTool() {
+					return { content: [{ type: "text", text: "ok" }] };
+				},
+			};
+			this.connections.set(name, connection);
+			return connection;
+		},
+		async disconnectAll() {
+			disconnects += 1;
+			this.connections.clear();
+		},
+	};
+	const pi = makePi(["local_tool"]);
+	(pi as any).getActiveTools = () => {
+		throw new Error("This extension ctx is stale after session replacement or reload.");
+	};
+	registerMcpForTest(pi, {
+		registry: registry as any,
+		loadConfig: () => ({
+			servers: new Map([["alpha", { name: "alpha", scope: "user", config: { command: "node" } }]]),
+			errors: [],
+		}),
+	});
+
+	await assert.doesNotReject(() => emit(pi, "session_start", { reason: "startup" }, makeCtx(process.cwd())));
+
+	assert.equal(pi.registeredTools.has("alpha__echo"), false);
+	assert.equal(disconnects, 1);
+});
+
 // ponytail: 锁死修复 —— resume/new/fork 也必须连 MCP(原白名单只含 startup/reload,
 // 导致恢复会话/新建会话时 MCP 不加载,必须手动 /mcp reload)。
 for (const reason of ["resume", "new", "fork"] as const) {

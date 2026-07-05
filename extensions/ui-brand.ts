@@ -83,8 +83,17 @@ function clearStartupScreen(ctx: ExtensionContext): void {
 }
 
 function hasSessionMessages(ctx: { sessionManager?: { getEntries?: () => unknown[]; getBranch?: () => unknown[] } }): boolean {
+	try {
+		const messages = (ctx.sessionManager as any)?.buildSessionContext?.()?.messages;
+		if (Array.isArray(messages)) return messages.length > 0;
+	} catch {
+		// Fall back to entry inspection below.
+	}
 	const entries = ctx.sessionManager?.getEntries?.() ?? ctx.sessionManager?.getBranch?.() ?? [];
-	return entries.length > 0;
+	return entries.some((entry) => {
+		const type = (entry as any)?.type;
+		return type === "message" || type === "custom_message" || type === "branch_summary" || type === "compaction";
+	});
 }
 
 // ponytail: tone 规则来自 ui-brand-utils 的 UGK_BLOCK_LOGO_TONES,改 logo 时同处维护,
@@ -476,14 +485,15 @@ export default function registerUgkBrandUi(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		const disabledByFlag = pi.getFlag("ugk-ui-off") === true;
 		if (disabledByFlag || (envDisablesBrandUi() && !envEnablesBrandUi()) || !enabled) {
 			clearBrandUi(ctx);
 			return;
 		}
 		enabled = true;
-		clearStartupScreen(ctx);
+		// ponytail: ANSI clear desyncs TUI diff state during /new; only process startup gets a physical clear.
+		if ((event as any)?.reason === "startup") clearStartupScreen(ctx);
 		applyBrandUi(pi, ctx);
 	});
 

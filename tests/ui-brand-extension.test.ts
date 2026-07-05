@@ -12,6 +12,49 @@ function tempAgentDir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "ugk-ui-brand-"));
 }
 
+test("ugk brand does not physically clear terminal on /new session replacement", async () => {
+	const handlers = new Map<string, Function>();
+	const writes: string[] = [];
+	const originalWrite = process.stdout.write;
+	const originalIsTty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+	const originalClearStartup = process.env.UGK_CLEAR_STARTUP;
+	process.env.UGK_CLEAR_STARTUP = "1";
+	Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+	(process.stdout as any).write = (chunk: unknown) => {
+		writes.push(String(chunk));
+		return true;
+	};
+
+	try {
+		registerUgkBrandUi({
+			on: (event: string, handler: Function) => handlers.set(event, handler),
+			registerCommand() {},
+			registerFlag() {},
+			getFlag: () => undefined,
+			getSessionName: () => "demo",
+		} as any);
+
+		await handlers.get("session_start")!({ reason: "new" }, {
+			cwd: "/repo",
+			model: { id: "mimo-v2.5-pro" },
+			sessionManager: { getCwd: () => "/repo", getEntries: () => [] },
+			ui: {
+				setHeader() {},
+				setFooter() {},
+				setTitle() {},
+			},
+		});
+	} finally {
+		(process.stdout as any).write = originalWrite;
+		if (originalIsTty) Object.defineProperty(process.stdout, "isTTY", originalIsTty);
+		else delete (process.stdout as any).isTTY;
+		if (originalClearStartup === undefined) delete process.env.UGK_CLEAR_STARTUP;
+		else process.env.UGK_CLEAR_STARTUP = originalClearStartup;
+	}
+
+	assert.equal(writes.some((text) => text.includes("\x1b[2J")), false);
+});
+
 test("ugk brand extension installs through safe extension UI hooks", async () => {
 	const handlers = new Map<string, Function>();
 	const commands = new Map<string, { handler: Function }>();
@@ -106,6 +149,70 @@ test("ugk brand extension installs through safe extension UI hooks", async () =>
 	assert.match(coloredHeader, /› <success>\/plan<\/success>/);
 	assert.doesNotMatch(coloredHeader, /^<b><success>│.*最近更新/m);
 	header.dispose?.();
+});
+
+test("ugk brand header treats metadata-only sessions as empty startup", async () => {
+	const handlers = new Map<string, Function>();
+	const pi = {
+		on(event: string, handler: Function) {
+			handlers.set(event, handler);
+		},
+		registerCommand() {},
+		registerFlag() {},
+		getFlag() {
+			return undefined;
+		},
+		getSessionName() {
+			return "demo";
+		},
+	};
+	let entries: any[] = [];
+	let messages: any[] = [];
+	let headerFactory: Function | undefined;
+	const ctx = {
+		cwd: "/Users/shengkai/projects/ugk-tui",
+		model: { id: "mimo-v2.5-pro", contextWindow: 1000000 },
+		sessionManager: {
+			getCwd: () => "/Users/shengkai/projects/ugk-tui",
+			getEntries: () => entries,
+			getBranch: () => entries,
+			buildSessionContext: () => ({ messages, thinkingLevel: "off", model: null }),
+		},
+		getContextUsage: () => ({ percent: 0, contextWindow: 1000000 }),
+		ui: {
+			setHeader: (factory: unknown) => {
+				headerFactory = factory as Function;
+			},
+			setFooter: () => {},
+			setTitle: () => {},
+		},
+	};
+	const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+	const originalRows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+	Object.defineProperty(process.stdout, "rows", { configurable: true, value: 60 });
+
+	try {
+		registerUgkBrandUi(pi as any);
+		await handlers.get("session_start")!({ reason: "startup" }, ctx);
+
+		const emptyHeader = headerFactory!({ requestRender() {} }, theme).render(80);
+		entries = [
+			{ type: "model_change", provider: "deepseek", modelId: "mimo-v2.5-pro" },
+			{ type: "thinking_level_change", thinkingLevel: "off" },
+			{ type: "session_info", name: "New session" },
+			{ type: "custom", customType: "ugk", data: { ready: true } },
+		];
+		const metadataOnlyHeader = headerFactory!({ requestRender() {} }, theme).render(80);
+		assert.deepEqual(metadataOnlyHeader, emptyHeader);
+
+		entries = [{ type: "message", message: { role: "user", content: "hi" } }];
+		messages = [{ role: "user", content: "hi" }];
+		const messageHeader = headerFactory!({ requestRender() {} }, theme).render(80);
+		assert.notDeepEqual(messageHeader, emptyHeader);
+	} finally {
+		if (originalRows) Object.defineProperty(process.stdout, "rows", originalRows);
+		else delete (process.stdout as any).rows;
+	}
 });
 
 test("ugk footer totals subagent and run_task api usage by model", async () => {

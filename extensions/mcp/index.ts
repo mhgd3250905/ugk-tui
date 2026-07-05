@@ -77,7 +77,14 @@ export function registerMcp(pi: ExtensionAPI, deps: McpExtensionDeps = {}): McpE
 		if (event.reason && !STARTUP_REASONS.has(event.reason)) {
 			return;
 		}
-		await startup(ctx);
+		try {
+			await startup(ctx);
+		} catch (error) {
+			if (!isStaleExtensionContextError(error)) {
+				throw error;
+			}
+			await registry.disconnectAll().catch(() => undefined);
+		}
 	});
 
 	pi.on("session_shutdown", async (event: { reason?: string } = {}, _ctx: McpRuntimeContext = {}) => {
@@ -290,6 +297,10 @@ function resolveCwd(ctx: McpRuntimeContext): string {
 
 function hasInteractiveUi(ctx: McpRuntimeContext | undefined): boolean {
 	return Boolean(ctx?.ui?.confirm || ctx?.ui?.select);
+}
+
+function isStaleExtensionContextError(error: unknown): boolean {
+	return String(error instanceof Error ? error.message : error).includes("extension ctx is stale");
 }
 
 function connectionErrorMessage(error: unknown): string {

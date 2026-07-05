@@ -34,6 +34,10 @@ test("session view patch switches visible session and restores main on detach co
 			};
 		}
 
+		setExtensionStatus(key, text) {
+			this.calls.push(`footer:${key}:${text ?? "clear"}`);
+		}
+
 		get session() {
 			return this.runtimeHost.session;
 		}
@@ -348,6 +352,10 @@ test("session view patch shows loading status while /new creates a session", asy
 			return {};
 		}
 
+		setExtensionStatus(key, text) {
+			this.calls.push(`footer:${key}:${text ?? "clear"}`);
+		}
+
 		showStatus(message) {
 			const children = this.chatContainer.children;
 			const last = children.length > 0 ? children[children.length - 1] : undefined;
@@ -375,7 +383,8 @@ test("session view patch shows loading status while /new creates a session", asy
 			const result = await this.runtimeHost.newSession();
 			if (result.cancelled) return;
 			this.renderCurrentSessionState();
-			this.chatContainer.addChild({});
+			this.chatContainer.addChild({ kind: "spacer" });
+			this.chatContainer.addChild({ kind: "text", message: "✓ New session started" });
 			this.ui.requestRender();
 		}
 	}
@@ -389,7 +398,10 @@ test("session view patch shows loading status while /new creates a session", asy
 	assert.ok(loadingIndex > mode.calls.indexOf("status:clear"));
 	assert.ok(loadingIndex < mode.calls.indexOf("newSession"));
 	assert.ok(mode.calls.lastIndexOf("status:clear") > mode.calls.indexOf("newSession"));
+	assert.ok(mode.calls.some((call) => call === "footer:ugk-loading:clear"));
 	assert.equal(mode.chatContainer.children.some((child) => /正在创建新会话/.test(child.message ?? "")), false);
+	assert.equal(mode.chatContainer.children.some((child) => /New session started/.test(child.message ?? "")), false);
+	assert.deepEqual(mode.chatContainer.children, []);
 });
 
 test("session view patch shows loading status while rebinding the current session", async () => {
@@ -413,6 +425,10 @@ test("session view patch shows loading status while rebinding the current sessio
 					this.chatContainer.children.push(child);
 				},
 			};
+		}
+
+		setExtensionStatus(key, text) {
+			this.calls.push(`footer:${key}:${text ?? "clear"}`);
 		}
 
 		get session() {
@@ -455,6 +471,7 @@ test("session view patch shows loading status while rebinding the current sessio
 	assert.ok(loadingIndex >= 0);
 	assert.ok(loadingIndex < mode.calls.indexOf("rebind"));
 	assert.ok(mode.calls.indexOf("status:clear") > mode.calls.indexOf("rebind"));
+	assert.ok(mode.calls.some((call) => call === "footer:ugk-loading:clear"));
 	assert.equal(mode.chatContainer.children.some((child) => /正在加载会话/.test(child.message ?? "")), false);
 });
 

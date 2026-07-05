@@ -122,7 +122,7 @@ test("buildUgkLogoLines renders a compact block-character logo", () => {
 	}
 });
 
-test("buildUgkStartupScreenLines fills the terminal viewport with character effects", () => {
+test("buildUgkStartupScreenLines reserves room for TUI chrome", () => {
 	const lines = buildUgkStartupScreenLines({
 		version: "1.0.0",
 		cwdName: "ugk-tui",
@@ -131,7 +131,7 @@ test("buildUgkStartupScreenLines fills the terminal viewport with character effe
 		rows: 24,
 	});
 
-	assert.equal(lines.length, 19);
+	assert.equal(lines.length, 13);
 	assert.match(lines.join("\n"), /欢迎回来/);
 	assert.match(lines.join("\n"), /◆ 入门提示/);
 	assert.match(lines.join("\n"), /◆ 最近更新/);
@@ -140,6 +140,19 @@ test("buildUgkStartupScreenLines fills the terminal viewport with character effe
 	for (const line of lines) {
 		assert.ok(visibleWidth(line) <= 80, `line exceeded width: ${line}`);
 	}
+});
+
+test("buildUgkStartupScreenLines anchors content near the top in tall terminals", () => {
+	const lines = buildUgkStartupScreenLines({
+		version: "1.0.0",
+		cwdName: "ugk-tui",
+		modelId: "deepseek-v4-pro",
+		width: 120,
+		rows: 60,
+	});
+
+	assert.equal(lines.length, 49);
+	assert.equal(lines.findIndex((line) => line.includes("ugk v1.0.0")), 0);
 });
 
 test("buildUgkStartupScreenLines falls back to compact header in cramped terminals", () => {

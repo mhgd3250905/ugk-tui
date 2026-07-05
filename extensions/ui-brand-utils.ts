@@ -285,13 +285,12 @@ export function buildUgkStartupScreenLines(options: UgkStartupScreenOptions): st
 		return buildUgkHeaderLines(options);
 	}
 
-	const targetRows = Math.max(12, options.rows - 5);
+	// ponytail: pi keeps 11 rows outside this header: header spacers, editor, widget spacer, and footer.
+	const targetRows = Math.max(12, options.rows - 11);
 	const content = buildUgkHeaderLines(options);
 
 	const missing = Math.max(0, targetRows - content.length);
-	const topPadding = Math.floor(missing / 2);
-	const bottomPadding = missing - topPadding;
-	return [...Array(topPadding).fill(""), ...content, ...Array(bottomPadding).fill("")];
+	return [...content, ...Array(missing).fill("")];
 }
 
 export function buildUgkFooterLines(options: UgkFooterOptions): string[] {

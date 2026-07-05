@@ -130,8 +130,18 @@ export function registerUgkUpdate(pi: ExtensionAPI, deps: UgkUpdateDeps = {}): v
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		if (ctx.mode !== "tui" || !ctx.hasUI) return;
+		if (!isTuiUiContext(ctx)) return;
 		void checkAndPrompt(ctx, deps, false).catch(() => undefined);
 	});
 }
 
+function isTuiUiContext(ctx: any): boolean {
+	try {
+		return ctx.mode === "tui" && Boolean(ctx.hasUI);
+	} catch (error) {
+		if (String(error instanceof Error ? error.message : error).includes("extension ctx is stale")) {
+			return false;
+		}
+		throw error;
+	}
+}

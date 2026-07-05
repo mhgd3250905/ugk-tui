@@ -5,6 +5,7 @@ const ACTIVE_VIEW = Symbol.for("ugk.sessionViewPatch.activeView");
 const SESSION_SWITCHER = Symbol.for("ugk.sessionViewPatch.sessionSwitcher");
 const SESSION_SWITCHER_SHORTCUT = Symbol.for("ugk.sessionViewPatch.sessionSwitcherShortcut");
 const SESSION_SWITCHER_WIDGET_KEY = "ugk-session-switcher";
+const LOADING_STATUS_KEY = "ugk-loading";
 const NEW_SESSION_LOADING_STATUS = "正在创建新会话,加载扩展资源并重连 MCP...";
 const REBIND_SESSION_LOADING_STATUS = "正在加载会话,初始化扩展资源并连接 MCP...";
 
@@ -114,8 +115,14 @@ function setSessionSwitcherWidget(mode, state) {
 }
 
 function showLoadingStatus(mode, message) {
+	if (typeof mode.setExtensionStatus === "function") {
+		mode.setExtensionStatus(LOADING_STATUS_KEY, message);
+		mode.ui?.requestRender?.();
+		return "footer";
+	}
 	mode.showStatus?.(message);
 	mode.ui?.requestRender?.();
+	return "chat";
 }
 
 function removeLastChatStatus(mode) {
@@ -147,14 +154,19 @@ async function withLoadingStatus(mode, message, work) {
 	if (trackedShowStatus) {
 		mode.showStatus = trackedShowStatus;
 	}
+	let target = "chat";
 	try {
-		showLoadingStatus(mode, message);
+		target = showLoadingStatus(mode, message);
 		return await work();
 	} finally {
 		if (trackedShowStatus && mode.showStatus === trackedShowStatus) {
 			mode.showStatus = originalShowStatus;
 		}
-		if (lastStatus === message) {
+		if (target === "footer") {
+			mode.setExtensionStatus?.(LOADING_STATUS_KEY, undefined);
+			mode.statusContainer?.clear?.();
+			mode.ui?.requestRender?.();
+		} else if (lastStatus === message) {
 			removeLastChatStatus(mode);
 			mode.statusContainer?.clear?.();
 			mode.ui?.requestRender?.();
@@ -320,6 +332,11 @@ export function installUgkSessionViewPatch({ InteractiveMode } = {}) {
 			if (typeof originalNewSession !== "function") {
 				return originalHandleClearCommand.apply(this, args);
 			}
+			if (this.loadingAnimation) {
+				this.loadingAnimation.stop();
+				this.loadingAnimation = undefined;
+			}
+			this.statusContainer?.clear?.();
 
 			const mode = this;
 			function restoreNewSession() {
@@ -341,7 +358,14 @@ export function installUgkSessionViewPatch({ InteractiveMode } = {}) {
 
 			runtimeHost.newSession = wrappedNewSession;
 			try {
-				return await originalHandleClearCommand.apply(this, args);
+				const result = await runtimeHost.newSession();
+				if (result?.cancelled) {
+					return;
+				}
+				this.renderCurrentSessionState?.();
+				this.ui?.requestRender?.();
+			} catch (error) {
+				await this.handleFatalRuntimeError?.("Failed to create session", error);
 			} finally {
 				restoreNewSession();
 			}

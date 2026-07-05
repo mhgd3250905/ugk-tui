@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
 import type { TodoItem, TodoStatus } from "./plan-mode-utils.ts";
 import { renderTodoStatus, renderTodoWidget } from "./todo-render.ts";
 

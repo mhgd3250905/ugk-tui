@@ -1,6 +1,7 @@
 # `/task` 设计文档 v1.0
 
 > **状态:v1 已实现并 dogfood 验证通过(2026-06-22)。** 实现细节以 `extensions/task/` 代码 + `tests/task-*.test.ts` 测试为准;本文是设计意图的权威说明,如跟代码冲突以代码为准。
+> **当前状态提示(2026-07-05)**:本文包含早期 Judge 模块引用;`extensions/judge/*` 已删除。当前实现以 `extensions/task/*`、`extensions/questionnaire.ts` 和对应测试为准。
 >
 > 本文档把多轮架构讨论的结论固化成可实现的规格。落地范围:**one-step 固定任务的 taskbook 创造 + 复用闭环**。multi-step 编排留到 v2。
 >

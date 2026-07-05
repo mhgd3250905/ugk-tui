@@ -30,7 +30,7 @@ import {
 
 // Build a minimal valid task package zip in-memory for submit tests.
 const SAMPLE_FILES = {
-	"taskbook.json": JSON.stringify({ name: "pkg-task", description: "demo", scope: "user", tags: ["demo"], runs: [] }),
+	"taskbook.json": JSON.stringify({ name: "pkg-task", description: "demo", scope: "user", createdAt: "2026-07-05T00:00:00.000Z", updatedAt: "2026-07-05T00:00:00.000Z", tags: ["demo"], runs: [] }),
 	"spec.json": JSON.stringify({ goal: "demo task", hardConstraints: ["works"], acceptance: ["passes"] }),
 	"skill.md": "# Pkg Task\nWrite result.json.\n",
 	"verify.mjs": "process.exit(0);\n",
@@ -594,6 +594,28 @@ test("task submissions reject malformed dependency contract fields", async () =>
 		assert.match(body.detail, new RegExp(`Invalid contract\\.${field}`));
 		assert.equal(testEnv.TASK_UPLOADS.objects.size, 0);
 	}
+});
+
+test("task submissions reject taskbook metadata that install would reject", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "pkg-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Bad Taskbook");
+	form.set("description", "taskbook metadata is missing timestamps");
+	form.set("artifact", new File([taskZipWithFiles("pkg-task", {
+		"taskbook.json": JSON.stringify({ name: "pkg-task", description: "demo", scope: "user", runs: [] }),
+	}) as BlobPart], "bad-taskbook.zip", { type: "application/zip" }));
+
+	const response = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const body = await response.json();
+
+	assert.equal(response.status, 400);
+	assert.equal(body.error, "invalid_package");
+	assert.match(body.detail, /Invalid taskbook\.json/);
+	assert.equal(testEnv.TASK_UPLOADS.objects.size, 0);
 });
 
 test("task submissions reject a package that references a missing scripts file", async () => {

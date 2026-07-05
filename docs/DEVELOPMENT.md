@@ -49,8 +49,8 @@
 
 ## 4. 模型选择契约
 
-- 全局默认 `deepseek-v4-pro`
-- `agents/*.md` 的 frontmatter 记录角色意图,但**当前 pi 运行时不靠修改这些 frontmatter 来切换 Judge/Driver 的实际模型**
+- 主会话默认模型由 pi/settings/provider 决定,UGK 不在 CLI 参数层强塞 `--model`
+- `agents/*.md` 的 frontmatter 记录角色意图,但**当前 pi 运行时不靠修改这些 frontmatter 来切换子代理的实际模型**
 - 需要更换模型时**必须改 session 创建/模型选择代码并补测试**
 
 ---
@@ -87,7 +87,7 @@
 ## 8. bash 部署路径
 
 - bash 工具走 Git Bash,命令用 Linux 语法,Windows 路径用正斜杠 `/`
-- Git Bash 路径由 `doctor/checks.ts` 按 Program Files 默认位置解析,或用户经 `settings.json` 的 `shellPath` 提供(由 environment-doctor skill + `set_shell_path.mjs` 引导写入)。不要在代码/文档里硬编码个人安装盘符
+- Git Bash 路径由 `skills/ugk-environment-doctor/scripts/set_shell_path.mjs` 验证后写入用户 `settings.json.shellPath`;不要在代码/文档里硬编码个人安装盘符
 - bash 工具若报 WSL 错(`WSL ERROR: execvpe /bin/bash failed 2`),按 README "Windows 用户:修复 bash 工具"一节,把 Git Bash 路径写进 `%USERPROFILE%\.pi\agent\settings.json` 的 `shellPath`
 
 ---

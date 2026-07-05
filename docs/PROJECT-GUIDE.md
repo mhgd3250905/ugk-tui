@@ -1,7 +1,8 @@
 # ugk-core 项目说明书
 
-> **当前版本**:v2.3.0(tag `v2.3.0`,commit `c744038`)
-> **更新日期**:2026-07-02
+> **发布基线**:v2.3.0(tag `v2.3.0`,commit `c744038`)
+> **当前代码**:main/feat-codex-0703 已包含 v2.3.0 后续 compaction、todo polish、terminal-recorder 等提交。
+> **更新日期**:2026-07-05
 > **读者**:接手 ugk-core 开发/维护的工程师。读完这一份,就能建立完整心智模型。
 > **定位**:项目全景快照。与现有文档分工——
 > - `README.md`:用户向(怎么装、怎么用)
@@ -28,8 +29,8 @@ git clone <repo> ugk-core
 cd ugk-core
 npm install
 npm link              # 让全局 ugk 指向本仓库(开发时改代码即时生效)
-npm test              # 568 pass / 0 fail(默认测试)
-npm run test:integration   # 36/36(integration,默认不跑)
+npm test              # 默认单元/逻辑测试
+npm run test:integration   # 集成测试,默认不跑
 ```
 
 **关键**:`npm link` 后,全局 `ugk` 命令直接跑仓库代码。改 `extensions/`、`bin/` 立即生效,无需重装。
@@ -61,6 +62,7 @@ ugk-core/
 │   ├── index.ts              # 主入口:工具/命令注册 + @mention + 权限门 + resources_discover
 │   ├── task/                 # task 系统(task.ts 2300+ 行 + task-book/share-publish/verify 等)
 │   ├── chrome-cdp/           # 本地登录态 Chrome CDP 控制
+│   ├── compaction/           # 智能上下文压缩阈值、模型选择和手动触发
 │   ├── mcp/                  # MCP stdio client/registry/tools/permissions
 │   ├── cron.ts + cron-contract.ts
 │   ├── subagent.ts + subagent-runtime/ + agents.ts
@@ -70,7 +72,8 @@ ugk-core/
 │   └── shared/               # 跨扩展共享(driver-view.ts 已于 v2.3.0 删除)
 ├── cron/service.ts           # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent(scout/planner/reviewer/checker/worker,随包加载)
-├── skills/                   # 随包 skill(resources_discover 自动发现)
+├── skills/                   # 随包 system skill(resources_discover 自动发现)
+├── user-skills/              # 随仓库加载的 user skill,如 terminal-recorder
 ├── themes/                   # ugk-geek 默认 + 16 社区主题
 ├── prompts/                  # /implement /scout-and-plan 等
 ├── functions/                # ★ Cloudflare Pages Functions(marketplace 后端)
@@ -102,7 +105,12 @@ ugk-core/
 - **taskbook 契约**:5 个核心文件(taskbook/spec/skill/verify/contract)+ 可选 `scripts/` 子目录
 
 ### slash 命令(v2.3.0 已对齐代码)
-`/ugk` `/welcome` `/subagent` `/update` `/cdp` `/mcp` `/ugk-ui` `/ui-language` `/ugk-autopilot` `/language` `/plan` `/todos` `/task`(`/task list|show|new|run|edit|rename|save|delete|publish|toggle|exit`)
+`/ugk` `/welcome` `/subagent` `/update` `/cdp` `/mcp` `/compaction-model` `/trigger-compact` `/ugk-ui` `/ui-language` `/ugk-autopilot` `/language` `/plan` `/todos` `/task`(`/task list|show|new|run|edit|rename|save|delete|publish|toggle|exit`)
+
+### 智能上下文压缩
+- 长会话按模型 contextWindow 分档自动触发压缩,避免上下文爆仓。
+- `/compaction-model` 写入 `settings.json.compactionModel`,用于选择压缩模型。
+- `/trigger-compact [指令]` 手动触发压缩,可附加保留重点。
 
 ---
 
@@ -111,7 +119,7 @@ ugk-core/
 1. **pi 是内部 runtime,版本钉死**:`package.json` 里 `@earendil-works/*` 全部固定,pi 升级只能通过 UGK 主动升依赖 + 兼容验证 + 发新版。
 2. **pi runtime patch**:`bin/ugk-*.js` 在启动时安装(Symbol.for 守卫防重复),pi 升级后每个 patch 的 descriptor 检查可能失效,需回归。
 3. **UI 组件不得在 render 阶段持有 ExtensionContext**:必须在 `session_start` 抽取普通 session 数据,防 session replacement 后 stale ctx 崩溃。
-4. **bash 走 Git Bash**:Linux 语法,Windows 路径用正斜杠;Git Bash 路径由 `doctor/checks.ts` 解析或用户 `settings.json` 的 `shellPath` 提供。
+4. **bash 走 Git Bash**:Linux 语法,Windows 路径用正斜杠;Git Bash 路径由 `skills/ugk-environment-doctor/scripts/set_shell_path.mjs` 验证并写入 `settings.json.shellPath`。
 5. **task 打包/下载契约**(v2.3.0 修复):publish 打包**扫描目录**(含 `scripts/`,排除 `*.test.mjs`);`REQUIRED_FILES`(5 个)是"最小必需校验集",**不是打包全集**;引用完整性两端校验(本地 publish + 服务端 submitTask)。
 
 详见 `docs/DEVELOPMENT.md` 和 `docs/extension-contracts.md`。
@@ -122,12 +130,12 @@ ugk-core/
 
 ### 测试
 ```bash
-npm test                      # 单元/逻辑(568 pass / 0 fail)
+npm test                      # 单元/逻辑
 npm run test:integration      # 集成(36/36,需真实环境)
 npm pack --dry-run --json     # 验证 npm 包内容(应无 functions/migrations/scripts/wrangler)
 ```
 
-**注意**:`npm test` 的通过数随环境浮动——`environment-doctor-skill` 的 2 个 `realBash` 守卫测试在 bash 可用时执行、不可用时 skip。两者都算全绿,不要写死具体数字。
+**注意**:`npm test` 的通过数随功能演进和环境浮动——`environment-doctor-skill` 的 2 个 `realBash` 守卫测试在 bash 可用时执行、不可用时 skip。两者都算全绿,不要写死具体数字。
 
 ### 发布流程(已验证的约定)
 1. 改动走 PR(分支 → push → `gh pr create` → 审核自合 → 本地 main 拉取)
@@ -145,6 +153,7 @@ npm pack --dry-run --json     # 验证 npm 包内容(应无 functions/migrations
 | **v2.3.0 PR #32** | fix: publish 打包漏传 scripts/ + 链路引用校验 | `docs/handoff/2026-07-02-task-publish-scripts-fix-handoff.md` |
 | **v2.3.0 PR #31** | feat: task update / remove CLI 命令(补齐更新环节) | 同上 |
 | **v2.3.0 PR #30** | chore: 边界清理(npm 包/smoke/死代码/文档事实) | `docs/handoff/2026-07-02-boundary-cleanup-plan.md` |
+| v2.3.0 后续 main | smart compaction + `/todos` UI polish + terminal-recorder user skill | `extensions/compaction/`, `extensions/todo-*`, `user-skills/terminal-recorder/` |
 | v2.2.0 | 发布交接(marketplace r2 直连 + 前端改写 + hardening) | `docs/handoff/2026-07-01-v2.2.0-release-handoff.md` |
 
 **接手必读**:`docs/handoff/2026-07-02-task-publish-scripts-fix-handoff.md` —— 它汇总了 task 系统当前状态、三个 PR 的根因/修法、三层验证方法。
@@ -156,6 +165,7 @@ npm pack --dry-run --json     # 验证 npm 包内容(应无 functions/migrations
 - **结构债(P2,按 ponytail 留待碰相关文件时做)**:危险命令策略三处重复、LLM JSON 提取四处重复、taskbook contract 校验三处不一致、cron daemon 反向依赖 extension formatter、extension 反向 import bin/update-core.js。详见 `docs/handoff/2026-07-02-boundary-cleanup-plan.md` 附录。
 - **x-search JSON 截断**:偶发,根因是 worker 把整个 JSON 当文本生成撞 token 上限。未改代码,等第二次复现确认。详见 `docs/handoff/2026-07-02-x-search-json-truncation-diagnosis.md`。
 - **`/task publish` 体验缺陷**:一路回车会用默认标题/描述提交,易误发重复 submission。非 bug,留待决策。
+- **`debug_log` 迁移是历史调试遗留**:当前 `functions/_lib/marketplace.js` 已无 `debugLog()` 调用点;远端已应用的 `0008_debug_log` 不改历史 migration,如需删远端表应新增清理 migration。
 
 ---
 

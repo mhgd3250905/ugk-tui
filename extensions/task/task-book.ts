@@ -3,10 +3,17 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import { isRequirementsSpec, type RequirementsSpec } from "./task-spec.ts";
+import type { RequirementsSpec } from "./task-spec.ts";
 import { stripBom } from "../shared/settings-io.ts";
+import {
+	assertValidContract as assertValidContractSchema,
+	isRequirementsSpec as isRequirementsSpecSchema,
+	isTaskbook as isTaskbookSchema,
+} from "../../shared/taskbook-schema.js";
 
-export { isRequirementsSpec } from "./task-spec.ts";
+export function isRequirementsSpec(value: unknown): value is RequirementsSpec {
+	return isRequirementsSpecSchema(value);
+}
 
 export interface VerifyFailure {
 	assertion: string;
@@ -63,48 +70,8 @@ export function isValidTaskbookName(name: string): boolean {
 	return /^[A-Za-z0-9_-]+$/.test(name);
 }
 
-function isStringArray(value: unknown): value is string[] {
-	return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function isVerifyFailure(value: unknown): value is VerifyFailure {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	const record = value as Record<string, unknown>;
-	return (
-		typeof record.assertion === "string" &&
-		typeof record.expected === "string" &&
-		typeof record.actual === "string" &&
-		(record.hint === undefined || typeof record.hint === "string")
-	);
-}
-
-function isTaskRun(value: unknown): value is TaskRun {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	const record = value as Record<string, unknown>;
-	return (
-		typeof record.timestamp === "string" &&
-		(record.status === "pass" || record.status === "fail") &&
-		typeof record.exitCode === "number" &&
-		Array.isArray(record.verifyFailures) &&
-		record.verifyFailures.every(isVerifyFailure) &&
-		typeof record.duration === "number" &&
-		"input" in record
-	);
-}
-
 export function isTaskbook(value: unknown): value is Taskbook {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	const record = value as Record<string, unknown>;
-	return (
-		typeof record.name === "string" &&
-		typeof record.description === "string" &&
-		(record.scope === "user" || record.scope === "project") &&
-		typeof record.createdAt === "string" &&
-		typeof record.updatedAt === "string" &&
-		(record.tags === undefined || isStringArray(record.tags)) &&
-		Array.isArray(record.runs) &&
-		record.runs.every(isTaskRun)
-	);
+	return isTaskbookSchema(value);
 }
 
 function normalizeTaskbook(value: unknown): Taskbook {
@@ -113,22 +80,7 @@ function normalizeTaskbook(value: unknown): Taskbook {
 }
 
 export function assertValidContract(contract: unknown): void {
-	if (!contract || typeof contract !== "object" || Array.isArray(contract)) throw new Error("Invalid contract.json");
-	const record = contract as Record<string, unknown>;
-	if (record.runtimeInput !== undefined && !isStringArray(record.runtimeInput)) throw new Error("Invalid contract.runtimeInput");
-	// ponytail: 依赖声明字段都设可选 + 同为 string[]。这三个之前完全不校验(独立 bug),
-	// contract 可乱写、运行时才炸。requiredBinaries 是这次新增的外部 CLI 依赖,
-	// requiredEnv/requiredTools 已存在但同样没校验,顺手补齐。
-	if (record.requiredEnv !== undefined && !isStringArray(record.requiredEnv)) throw new Error("Invalid contract.requiredEnv");
-	if (record.requiredTools !== undefined && !isStringArray(record.requiredTools)) throw new Error("Invalid contract.requiredTools");
-	if (record.requiredBinaries !== undefined && !isStringArray(record.requiredBinaries)) throw new Error("Invalid contract.requiredBinaries");
-	if (record.runtimeInputMeta === undefined) return;
-	if (!record.runtimeInputMeta || typeof record.runtimeInputMeta !== "object" || Array.isArray(record.runtimeInputMeta)) throw new Error("Invalid contract.runtimeInputMeta");
-	const fields = new Set(isStringArray(record.runtimeInput) ? record.runtimeInput : []);
-	for (const [field, meta] of Object.entries(record.runtimeInputMeta as Record<string, unknown>)) {
-		if (!fields.has(field)) throw new Error(`Invalid contract.runtimeInputMeta: "${field}" is not declared in runtimeInput`);
-		if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new Error(`Invalid contract.runtimeInputMeta.${field}`);
-	}
+	assertValidContractSchema(contract);
 }
 
 export function sortAndTrimRuns(runs: TaskRun[]): TaskRun[] {

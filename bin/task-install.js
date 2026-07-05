@@ -3,6 +3,7 @@ import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import * as readline from "node:readline/promises";
 import { defaultAgentDir } from "./paths.js";
+import { assertValidContract, isRequirementsSpec, isTaskbook } from "../shared/taskbook-schema.js";
 
 export const OFFICIAL_MANIFEST_URL = "https://ugk-task-share.pages.dev/api/manifest";
 
@@ -11,78 +12,6 @@ export const OFFICIAL_MANIFEST_URL = "https://ugk-task-share.pages.dev/api/manif
 // "一个 taskbook 至少得有这 5 个",不决定打包/下载的全部内容。
 const REQUIRED_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"];
 const NAME_RE = /^[A-Za-z0-9_-]+$/;
-
-function isStringArray(value) {
-	return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function isVerifyFailure(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	return (
-		typeof value.assertion === "string" &&
-		typeof value.expected === "string" &&
-		typeof value.actual === "string" &&
-		(value.hint === undefined || typeof value.hint === "string")
-	);
-}
-
-function isTaskRun(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	return (
-		typeof value.timestamp === "string" &&
-		(value.status === "pass" || value.status === "fail") &&
-		typeof value.exitCode === "number" &&
-		Array.isArray(value.verifyFailures) &&
-		value.verifyFailures.every(isVerifyFailure) &&
-		typeof value.duration === "number" &&
-		Object.hasOwn(value, "input")
-	);
-}
-
-function isTaskbook(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	return (
-		typeof value.name === "string" &&
-		typeof value.description === "string" &&
-		(value.scope === "user" || value.scope === "project") &&
-		typeof value.createdAt === "string" &&
-		typeof value.updatedAt === "string" &&
-		(value.tags === undefined || isStringArray(value.tags)) &&
-		Array.isArray(value.runs) &&
-		value.runs.every(isTaskRun)
-	);
-}
-
-function isRequirementsSpec(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	return (
-		typeof value.goal === "string" &&
-		value.goal.trim().length > 0 &&
-		isStringArray(value.hardConstraints) &&
-		value.hardConstraints.length > 0 &&
-		isStringArray(value.acceptance) &&
-		value.acceptance.length > 0 &&
-		(value.forbidden === undefined || isStringArray(value.forbidden)) &&
-		(value.context === undefined || typeof value.context === "string")
-	);
-}
-
-function assertValidContract(contract) {
-	if (!contract || typeof contract !== "object" || Array.isArray(contract)) throw new Error("Invalid contract.json");
-	if (contract.runtimeInput !== undefined && !isStringArray(contract.runtimeInput)) throw new Error("Invalid contract.runtimeInput");
-	if (contract.requiredEnv !== undefined && !isStringArray(contract.requiredEnv)) throw new Error("Invalid contract.requiredEnv");
-	if (contract.requiredTools !== undefined && !isStringArray(contract.requiredTools)) throw new Error("Invalid contract.requiredTools");
-	if (contract.requiredBinaries !== undefined && !isStringArray(contract.requiredBinaries)) throw new Error("Invalid contract.requiredBinaries");
-	if (contract.runtimeInputMeta === undefined) return;
-	if (!contract.runtimeInputMeta || typeof contract.runtimeInputMeta !== "object" || Array.isArray(contract.runtimeInputMeta)) {
-		throw new Error("Invalid contract.runtimeInputMeta");
-	}
-	const fields = new Set(isStringArray(contract.runtimeInput) ? contract.runtimeInput : []);
-	for (const [field, meta] of Object.entries(contract.runtimeInputMeta)) {
-		if (!fields.has(field)) throw new Error(`Invalid contract.runtimeInputMeta: "${field}" is not declared in runtimeInput`);
-		if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new Error(`Invalid contract.runtimeInputMeta.${field}`);
-	}
-}
 
 function stripBom(text) {
 	return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;

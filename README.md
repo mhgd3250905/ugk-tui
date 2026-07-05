@@ -86,7 +86,7 @@ subagent 工具和 5 个预设 agent(`scout`/`planner`/`reviewer`/`checker`/`wor
 
 | 输入 | 期望 |
 | --- | --- |
-| `/ugk` | 弹出状态(列全部能力) |
+| `/ugk` | 弹出核心状态 |
 | `帮我看看当前目录结构` | agent 正常读取并总结项目 |
 | `@scout 列出项目目录` | 调 `subagent` 委派 scout(随包预装,直接可用) |
 | `/subagent` | 列出所有 subagent,选择后设置该 subagent 的模型 |
@@ -108,6 +108,8 @@ ugk --print "总结当前目录结构"
 :: 指定模型
 ugk --model deepseek-reasoner
 ```
+
+首次在某个项目目录运行时会先要求信任工作目录;非交互 `--print` 在未信任目录会直接失败。确认后信任记录写到 `~/.pi/agent/trusted-workspaces.json`。`UGK_SKIP_WORKSPACE_TRUST=1` 只给你已经信任的自动化环境使用。
 
 进对话后,直接用自然语言或 `/命令` 即可。例:
 - `帮我看看这个项目的结构` — agent 自己探索
@@ -214,7 +216,7 @@ UGK_CLEAR_STARTUP=0 ugk
 
 ### plan-mode 只读探索模式
 
-`/plan` 进入只读模式:工具限制为 read/bash/grep/find/ls,bash 命令过白名单(只放行只读命令,拦 rm/git commit/npm install,并阻止 `curl | sh`、`curl -o`、curl 上传/变更请求等非只读形态)。agent 产出 `Plan:` 编号计划后,可选择执行(恢复全部工具)/继续规划/精炼。执行阶段用 `[DONE:n]` 跟踪进度,状态栏显示 `📋 N/M`。
+`/plan` 进入只读模式:工具限制为 read/bash/grep/find/ls/questionnaire,bash 命令过白名单(只放行只读命令,拦 rm/git commit/npm install,并阻止 `curl | sh`、`curl -o`、curl 上传/变更请求等非只读形态)。agent 产出 `Plan:` 编号计划后,可选择执行(恢复全部工具)/继续规划/精炼。执行阶段用 `[DONE:n]` 跟踪进度,状态栏显示 `📋 N/M`。
 
 ### 智能上下文压缩
 
@@ -369,6 +371,8 @@ npm run cron:start   # 启动常驻服务(127.0.0.1:17741)
 | `bash-guide` | bash 工具/Git Bash 配置与排障 |
 | `skill-guide` | skill 加载机制与 user-skills 安装 |
 | `skill-creator` | 创建、改进和评测 agent skill(来自 Anthropic skills, Apache-2.0) |
+| `task-install-guide` | 识别并执行 `ugk task install <name>` 安装指令 |
+| `terminal-recorder` | 录制终端/TUI 演示并生成 GIF/SVG/WebM(user-skills 随仓库加载) |
 | `task-creator` | 固定 task(taskbook)的创建流程与机制全景 |
 | `ugk-environment-doctor` | 引导式环境配置与排障(Shell/CDP/MCP/Node/API) |
 
@@ -401,6 +405,7 @@ ugk-core/
 ├── agents/                   # 预设 subagent 定义(随包自动加载;同名 user 副本覆盖)
 │   ├── scout.md planner.md reviewer.md checker.md worker.md
 ├── skills/                   # 随包加载(resources_discover 自动发现)
+├── user-skills/              # 随仓库加载的 user skill(如 terminal-recorder)
 ├── themes/                   # ugk-geek(默认)+ 16 个社区主题(atom/catppuccin/dracula/gruvbox/nord/solarized),见 NOTICE.md
 ├── prompts/                  # /implement /scout-and-plan 等(随包加载)
 └── tests/                    # Node test runner 逻辑覆盖

@@ -3,6 +3,7 @@
 > **日期**:2026-07-01
 > **状态**:需求已定,待实现(交接到新会话)
 > **规范**:ponytail full(最短可用 diff、复用优先、每步留可跑 check)
+> **已更新事实(2026-07-02)**:本文 §2/§6 中“只传 5 个核心文件、scripts/ 不上传”的设计已被 v2.3.0 修正。当前 publish 会扫描 task 目录并打包 `scripts/` 等额外文件,同时保留 5 个核心文件作为最小必需校验集。见 `docs/handoff/2026-07-02-task-publish-scripts-fix-handoff.md`。
 > **前置阅读**:`docs/handoff/2026-07-01-marketplace-r2-direct-and-frontend-rewrite.md`(市场架构)、`docs/handoff/2026-07-01-frontend-ui-optimization-handoff.md`(前端结构)
 
 ---

@@ -1831,7 +1831,7 @@ async function handleTaskPublish(ctx: any, name: string | undefined): Promise<vo
 	if (descriptionInput === undefined) { ctx.ui.notify("已取消上传。", "info"); return; }
 	const description = descriptionInput.trim() || descriptionDefault;
 
-	// 4. 打包上传(内部清空 runs 历史,只传 5 核心文件)。
+	// 4. 打包上传(内部清空 runs 历史,打包核心文件 + scripts/ 等额外文件)。
 	ctx.ui.notify(`正在上传 "${finalName}" v${version}...`, "info");
 	try {
 		const result = await publishTask(loaded, version, config.token!, config.marketplaceUrl, title, description);

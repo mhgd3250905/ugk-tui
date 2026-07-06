@@ -1593,7 +1593,7 @@ function formatSubtaskToolText(mode: "single" | "parallel", results: SubtaskResu
 async function handleTaskRun(
 	pi: ExtensionAPI,
 	ctx: any,
-	name: string | undefined,
+	loaded: LoadedTaskbook,
 	rawInput: string,
 	onFail?: (failure: TaskRunFailure) => void,
 	activeTools: string[] = TASK_NORMAL_TOOLS,
@@ -1603,13 +1603,7 @@ async function handleTaskRun(
 		ctx.ui.notify(`taskbook "${activeTaskRun.taskbookName}" 正在运行。可用 /task stop 中断。`, "warning");
 		return;
 	}
-	const finalName = await chooseTaskbookName(ctx, name);
-	if (!finalName) return;
-	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
-	if (!loaded) {
-		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
-		return;
-	}
+	const finalName = loaded.taskbook.name;
 	const missingEnv = await promptMissingRequiredEnv(ctx, loaded.contract);
 	if (missingEnv.length > 0) {
 		ctx.ui.notify(formatMissingEnvMessage(missingEnv), "warning");
@@ -1622,9 +1616,7 @@ async function handleTaskRun(
 		ctx.ui.notify(formatMissingBinariesMessage(missingBinaries), "warning");
 		return;
 	}
-	const finalRawInput = !name && !rawInput.trim()
-		? await ctx.ui?.input?.("一句话输入", "")
-		: rawInput;
+	const finalRawInput = rawInput;
 	const workerEnv = await resolveTaskWorkerEnv(ctx, loaded, activeTools);
 	if (workerEnv === null) {
 		ctx.ui.notify("已取消: 本次 task 未获得受保护工具授权。", "warning");
@@ -1763,15 +1755,9 @@ async function handleTaskRun(
 	taskRunPromiseForTests = runPromise;
 }
 
-async function handleTaskDelete(ctx: any, name: string | undefined, tokens: string[]): Promise<void> {
-	const finalName = await chooseTaskbookName(ctx, name);
-	if (!finalName) return;
-	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
-	if (!loaded) {
-		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
-		return;
-	}
-	const scope = name ? scopeFromTokens(tokens) : loaded.scope;
+async function handleTaskDelete(ctx: any, loaded: LoadedTaskbook): Promise<void> {
+	const finalName = loaded.taskbook.name;
+	const scope = loaded.scope;
 	const ok = ctx.ui?.confirm
 		? await ctx.ui.confirm("删除 taskbook", `删除 ${scope} taskbook "${finalName}"?`)
 		: false;
@@ -1783,22 +1769,16 @@ async function handleTaskDelete(ctx: any, name: string | undefined, tokens: stri
 	ctx.ui.notify(`taskbook "${finalName}" 已删除。`, "info");
 }
 
-async function handleTaskRename(ctx: any, name: string | undefined, tokens: string[]): Promise<void> {
-	const oldName = await chooseTaskbookName(ctx, name);
-	if (!oldName) return;
-	const loaded = await loadTaskbook(cwdOf(ctx), oldName);
-	if (!loaded) {
-		ctx.ui.notify(`taskbook "${oldName}" 不存在`, "warning");
-		return;
-	}
-	const newName = tokens[2]?.trim() || await ctx.ui?.input?.(`重命名 "${oldName}" 为`, oldName);
-	if (!newName?.trim() || newName.trim() === oldName) {
+async function handleTaskRename(ctx: any, loaded: LoadedTaskbook, newName?: string): Promise<void> {
+	const oldName = loaded.taskbook.name;
+	const next = newName?.trim() || await ctx.ui?.input?.(`重命名 "${oldName}" 为`, oldName);
+	if (!next?.trim() || next.trim() === oldName) {
 		ctx.ui.notify("已取消重命名。", "info");
 		return;
 	}
 	try {
-		await renameTaskbook(loaded.scope, cwdOf(ctx), oldName, newName.trim());
-		ctx.ui.notify(`taskbook "${oldName}" 已重命名为 "${newName.trim()}"。`, "info");
+		await renameTaskbook(loaded.scope, cwdOf(ctx), oldName, next.trim());
+		ctx.ui.notify(`taskbook "${oldName}" 已重命名为 "${next.trim()}"。`, "info");
 	} catch (error) {
 		ctx.ui.notify(`重命名失败: ${error instanceof Error ? error.message : String(error)}`, "error");
 	}
@@ -1806,14 +1786,8 @@ async function handleTaskRename(ctx: any, name: string | undefined, tokens: stri
 
 // 上传 taskbook 到分享市场(首次走市场网站 OAuth 中转授权,凭证存本地复用)。
 // 设计见 docs/design/2026-07-01-task-publish-from-tui.md §6.6。
-async function handleTaskPublish(ctx: any, name: string | undefined): Promise<void> {
-	const finalName = await chooseTaskbookName(ctx, name);
-	if (!finalName) return;
-	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
-	if (!loaded) {
-		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
-		return;
-	}
+async function handleTaskPublish(ctx: any, loaded: LoadedTaskbook): Promise<void> {
+	const finalName = loaded.taskbook.name;
 
 	// 1. 确保授权:无本地凭证则走 OAuth 中转(浏览器登录 → 轮询拿 cli_token)。
 	let config = readTaskShareConfig();
@@ -1972,6 +1946,33 @@ export function registerTask(pi: ExtensionAPI): void {
 		} finally {
 			promptingTaskMenu = false;
 		}
+	}
+
+	// ponytail: 命令行路径(/task run x / /task delete x)经此 helper 选 taskbook → load,
+	// 拿到 LoadedTaskbook 传给改造后的 handler(它们只认 loaded,不自己选)。
+	// 新菜单(runTaskMenu)不经过这里,它自己弹列表选。
+	async function selectAndLoad(ctx: any, name: string | undefined): Promise<LoadedTaskbook | undefined> {
+		const finalName = await chooseTaskbookName(ctx, name);
+		if (!finalName) return undefined;
+		const loaded = await loadTaskbook(cwdOf(ctx), finalName);
+		if (!loaded) {
+			ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
+			return undefined;
+		}
+		return loaded;
+	}
+
+	// 专用切换:翻转标记 → 重生成披露清单 → 失效 prompt 缓存。
+	// 重新 loadTaskbook 拿最新 tags(防止连翻两次都当同一方向)。
+	async function toggleTaskDedicated(ctx: any, loaded: LoadedTaskbook): Promise<void> {
+		const fresh = await loadTaskbook(cwdOf(ctx), loaded.taskbook.name);
+		const wasDedicated = !!(fresh && Array.isArray(fresh.taskbook.tags) && fresh.taskbook.tags.includes("dedicated"));
+		await setTaskbookDedicated(loaded.scope, cwdOf(ctx), loaded.taskbook.name, !wasDedicated);
+		await regenerateDedicatedIndex(cwdOf(ctx));
+		cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx));
+		ctx.ui.notify(wasDedicated
+			? `已取消"${loaded.taskbook.name}"的专用标记,该 task 重新对 agent 可见(可自动触发)。`
+			: `已将"${loaded.taskbook.name}"设为专用,该 task 对 agent 隐藏(仅当你点名 task 名时才可用)。`, "info");
 	}
 
 	function enableTask(ctx: any): void {
@@ -2355,21 +2356,17 @@ export function registerTask(pi: ExtensionAPI): void {
 				const userEditRequest = request ?? (ctx.ui?.input ? await ctx.ui.input("你想怎么修改这个 taskbook?(可留空)", "") : "");
 				if (userEditRequest === undefined) return;
 				await startTaskbookEdit(ctx, loaded, userEditRequest);
-			}, async (loaded) => {
-				// ponytail: 翻转专用标记 → 重生成披露清单 → 失效 prompt 缓存(指针段是否出现
-				// 取决于当前有无专用 task,必须重算)。三步同一函数族,确保翻转后下一轮 agent turn 生效。
-				// 重新加载拿最新 tags —— 传入的 loaded 可能是循环里上一次的旧对象(handleTaskShow
-				// 翻转后菜单刷新,但传入回调的还是同一引用),直接信它会连翻两次都当"非专用→设专用"。
-				const fresh = await loadTaskbook(cwdOf(ctx), loaded.taskbook.name);
-				const wasDedicated = !!(fresh && Array.isArray(fresh.taskbook.tags) && fresh.taskbook.tags.includes("dedicated"));
-				await setTaskbookDedicated(loaded.scope, cwdOf(ctx), loaded.taskbook.name, !wasDedicated);
-				await regenerateDedicatedIndex(cwdOf(ctx));
-				cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx));
-				ctx.ui.notify(wasDedicated
-					? `已取消"${loaded.taskbook.name}"的专用标记,该 task 重新对 agent 可见(可自动触发)。`
-					: `已将"${loaded.taskbook.name}"设为专用,该 task 对 agent 隐藏(仅当你点名 task 名时才可用)。`, "info");
-			});
-			if (action === "run" || action === "rerun") return await handleTaskRun(pi, ctx, name ?? (action === "rerun" ? state.taskbookName : undefined), rawInput, (failure) => {
+			}, (loaded) => toggleTaskDedicated(ctx, loaded));
+			if (action === "run" || action === "rerun") {
+				const loaded = await selectAndLoad(ctx, name ?? (action === "rerun" ? state.taskbookName : undefined));
+				if (!loaded) return;
+				// ponytail: 沿用基线 —— 仅当命令行未指定 taskbook 名(/task run 无 name 无 rawInput)
+				// 时弹"一句话输入"。/task run mytask 有 name 则 rawInput 用原值(可能空,走默认)。
+				// 新菜单的"运行"由 runTaskMenu 自己弹框后传 rawInput 进来。
+				const runRawInput = !name && !rawInput.trim()
+					? (await ctx.ui?.input?.("一句话输入", "") ?? "")
+					: rawInput;
+				return await handleTaskRun(pi, ctx, loaded, runRawInput, (failure) => {
 				state = setPendingTransition({
 					...state,
 					phase: "aborted",
@@ -2389,9 +2386,22 @@ export function registerTask(pi: ExtensionAPI): void {
 				state = { ...state, lastRunReview: review };
 				persistState();
 			});
-			if (action === "delete") return await handleTaskDelete(ctx, name, tokens);
-			if (action === "rename") return await handleTaskRename(ctx, name, tokens);
-			if (action === "publish") return await handleTaskPublish(ctx, name);
+			}
+			if (action === "delete") {
+				const loaded = await selectAndLoad(ctx, name);
+				if (!loaded) return;
+				return await handleTaskDelete(ctx, loaded);
+			}
+			if (action === "rename") {
+				const loaded = await selectAndLoad(ctx, name);
+				if (!loaded) return;
+				return await handleTaskRename(ctx, loaded, tokens[2]);
+			}
+			if (action === "publish") {
+				const loaded = await selectAndLoad(ctx, name);
+				if (!loaded) return;
+				return await handleTaskPublish(ctx, loaded);
+			}
 			if (action === "stop" || action === "exit" || action === "toggle" || action === "abort") {
 				state = abortTask(state);
 				persistState();

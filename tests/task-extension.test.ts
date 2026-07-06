@@ -205,6 +205,43 @@ test("registerTask registers /task list and show", async () => {
 	}
 });
 
+test("chooseTaskbookName 选择器显示 🔒 标记且选中后正确映射回干净 name", async () => {
+	const { pi, commands } = makePi();
+	const { cwd, ctx, selections, notifications } = makeCtx();
+	registerTask(pi as any);
+	// ponytail: guide runner 给个最小返回,避免 show 流程往下走时炸
+	mockTaskGuideRunner("1. 任务目标: x\n5. 产物契约: 未声明");
+	try {
+		// 专用 task 名字典序在前 → mock select 返回 options[0] = "🔒 ada"
+		await saveTaskbook("project", cwd, "ada", {
+			description: "专用 task",
+			spec, skill: "# x\n", verify: "process.exit(0);\n",
+			contract: { artifacts: [] },
+			tags: ["dedicated"],
+		});
+		await saveTaskbook("project", cwd, "zoo", {
+			description: "通用 task",
+			spec, skill: "# x\n", verify: "process.exit(0);\n",
+			contract: { artifacts: [] },
+		});
+		// 不带 name 触发 chooseTaskbookName 选择器
+		await commands.get("task").handler("show", ctx);
+		// 1. 选择器 options 含 🔒 前缀的专用 task
+		const chooseSel = selections.find((s) => s.title === "选择 taskbook");
+		assert.ok(chooseSel, "应触发选择 taskbook");
+		assert.ok(chooseSel!.options.some((o) => o.startsWith("🔒 ada")), `options 应含 🔒 ada,实际: ${JSON.stringify(chooseSel!.options)}`);
+		assert.ok(chooseSel!.options.includes("zoo"), "通用 task 无前缀");
+		// 2. mock 选中 "🔒 ada" 后,系统应映射回 "ada" 并成功加载(否则会 notify "不存在")
+		//    show 流程下一步会进入 taskbook 详情 select,说明 loadTaskbook 成功了
+		const detailSel = selections.find((s) => s.title.startsWith("taskbook:"));
+		assert.ok(detailSel, "应进入 taskbook 详情(说明 🔒 前缀被正确剥除,name 映射成功)");
+		assert.match(detailSel!.title, /taskbook: ada/);
+	} finally {
+		setTaskGuideRunnerForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("/task publish uses shown defaults when the user submits blank inputs", async () => {
 	const { pi, commands } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();

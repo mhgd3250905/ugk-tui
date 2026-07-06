@@ -48,13 +48,13 @@ import {
 	type TaskPhase,
 	type TaskState,
 } from "./task-state.ts";
-import { appendRunToTaskbook, assertValidContract, deleteTaskbook, listTaskbooks, loadTaskbook, renameTaskbook, saveTaskbook, type LoadedTaskbook } from "./task-book.ts";
+import { appendRunToTaskbook, assertValidContract, deleteTaskbook, listTaskbooks, loadTaskbook, renameTaskbook, saveTaskbook, setTaskbookDedicated, type LoadedTaskbook } from "./task-book.ts";
 import { ensureCliAuth, readTaskShareConfig, writeTaskShareConfig } from "./task-share-auth.ts";
 import { fetchLatestTaskSubmission, nextPatchVersion, publishTask } from "./task-share-publish.ts";
 import { dispatchChecker } from "./task-checker.ts";
 import { resolveRuntimeInputFromText } from "./task-dispatcher.ts";
 import { buildTaskReviewPrompt, extractTaskReviewResult, TASK_ALIGN_PROMPT } from "./task-prompts.ts";
-import { buildTaskbookPrompt } from "./task-registry.ts";
+import { buildTaskbookPrompt, regenerateDedicatedIndex } from "./task-registry.ts";
 import { dispatchTaskGuide } from "./task-guide.ts";
 import { dispatchTaskRunReviewer } from "./task-run-reviewer.ts";
 import { runVerify, type VerifyFailure } from "./task-verify.ts";
@@ -375,10 +375,12 @@ function restoreTaskState(data: unknown): TaskState | undefined {
 function formatTaskList(items: Awaited<ReturnType<typeof listTaskbooks>>): string {
 	if (items.length === 0) return "No taskbooks found.";
 	return items
-		.map((item) => {
-			const last = item.lastRun ? ` last=${item.lastRun.status}` : " last=-";
-			return `${item.name} [${item.scope}]${last} — ${item.description}`;
-		})
+			.map((item) => {
+				const last = item.lastRun ? ` last=${item.lastRun.status}` : " last=-";
+				// ponytail: 专用 task 在列表里仍显示(用户要能显式调用就得看见),只加 🔒 标记区分。
+				const lock = Array.isArray(item.tags) && item.tags.includes("dedicated") ? "🔒 " : "";
+				return `${lock}${item.name} [${item.scope}]${last} — ${item.description}`;
+			})
 		.join("\n");
 }
 
@@ -399,8 +401,14 @@ async function chooseTaskbookName(ctx: any, name: string | undefined, tag?: stri
 		return undefined;
 	}
 	if (!ctx.ui?.select) return items[0].name;
-	const selected = await ctx.ui.select("选择 taskbook", items.map((item) => item.name));
-	return selected || undefined;
+	// ponytail: 选择器显示带 🔒 前缀方便用户辨认专用 task,但返回值必须是干净 name
+	// (调用方拿它去 loadTaskbook)。用 label→name 映射,选中后剥前缀。
+	const byLabel = new Map(items.map((item) => {
+		const lock = Array.isArray(item.tags) && item.tags.includes("dedicated") ? "🔒 " : "";
+		return [`${lock}${item.name}`, item.name];
+	}));
+	const selected = await ctx.ui.select("选择 taskbook", [...byLabel.keys()]);
+	return selected ? byLabel.get(selected) : undefined;
 }
 
 type TaskGuideItem = {
@@ -662,7 +670,12 @@ function buildGuideEditRequest(input: string, items: TaskGuideItem[]): string {
 	].join("\n");
 }
 
-async function handleTaskShow(ctx: any, name: string | undefined, onEdit: (loaded: LoadedTaskbook, request?: string) => Promise<void>): Promise<void> {
+async function handleTaskShow(
+	ctx: any,
+	name: string | undefined,
+	onEdit: (loaded: LoadedTaskbook, request?: string) => Promise<void>,
+	onToggleDedicated?: (loaded: LoadedTaskbook) => Promise<void>,
+): Promise<void> {
 	const finalName = await chooseTaskbookName(ctx, name);
 	if (!finalName) return;
 	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
@@ -674,10 +687,19 @@ async function handleTaskShow(ctx: any, name: string | undefined, onEdit: (loade
 		ctx.ui.notify(formatTaskbookRawDetails(loaded), "info");
 		return;
 	}
-	const action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, ["task 导览", "task 编辑", "Exit"]);
+	const isDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
+	const toggleLabel = isDedicated ? "取消专用" : "设为专用(藏 prompt)";
+	// ponytail: "设为专用"嵌入详情页菜单 —— 零命令记忆,回车选即可翻转。
+	// 仅当调用方提供 onToggleDedicated 回调时才显示该项(交互式入口);headless 不暴露。
+	const options = onToggleDedicated ? ["task 导览", "task 编辑", toggleLabel, "Exit"] : ["task 导览", "task 编辑", "Exit"];
+	const action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, options);
 	if (!action || action === "Exit") return;
 	if (action === "task 编辑") {
 		await onEdit(loaded);
+		return;
+	}
+	if (action === toggleLabel && onToggleDedicated) {
+		await onToggleDedicated(loaded);
 		return;
 	}
 	if (action !== "task 导览") return;
@@ -2301,6 +2323,16 @@ export function registerTask(pi: ExtensionAPI): void {
 				const userEditRequest = request ?? (ctx.ui?.input ? await ctx.ui.input("你想怎么修改这个 taskbook?(可留空)", "") : "");
 				if (userEditRequest === undefined) return;
 				await startTaskbookEdit(ctx, loaded, userEditRequest);
+			}, async (loaded) => {
+				// ponytail: 翻转专用标记 → 重生成披露清单 → 失效 prompt 缓存(指针段是否出现
+				// 取决于当前有无专用 task,必须重算)。三步同一函数族,确保翻转后下一轮 agent turn 生效。
+				const wasDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
+				await setTaskbookDedicated(loaded.scope, cwdOf(ctx), loaded.taskbook.name, !wasDedicated);
+				await regenerateDedicatedIndex(cwdOf(ctx));
+				cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx));
+				ctx.ui.notify(wasDedicated
+					? `已取消"${loaded.taskbook.name}"的专用标记,该 task 重新对 agent 可见(可自动触发)。`
+					: `已将"${loaded.taskbook.name}"设为专用,该 task 对 agent 隐藏(仅当你点名 task 名时才可用)。`, "info");
 			});
 			if (action === "run" || action === "rerun") return await handleTaskRun(pi, ctx, name ?? (action === "rerun" ? state.taskbookName : undefined), rawInput, (failure) => {
 				state = setPendingTransition({
@@ -2346,6 +2378,9 @@ export function registerTask(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx) => {
 		cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx));
+		// ponytail: 生成专用 task 的渐进式披露清单文件。buildTaskbookPrompt 已决定要不要
+		// 在 prompt 里放指针,这里同步把指针指向的文件备好,agent 点名时 read 即可拿到最新清单。
+		await regenerateDedicatedIndex(cwdOf(ctx));
 		const entries = ctx.sessionManager?.getEntries?.() ?? [];
 		for (const entry of [...entries].reverse()) {
 			if (entry.customType !== TASK_STATE_TYPE) continue;

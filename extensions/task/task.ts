@@ -695,6 +695,7 @@ async function handleTaskShow(
 	// 等同 Esc,做不到"回上一级";菜单项是 ugk 既定层级返回模式。
 	const BACK = uiText("返回", "Back");
 	let pendingName = name;
+	let firstRound = true; // 区分"显式传名"首轮 vs 列表重选轮
 	taskbookLoop: while (true) {
 		const finalName = await chooseTaskbookName(ctx, pendingName);
 		pendingName = undefined; // 重弹列表不带预选,避免再跳详情
@@ -702,8 +703,11 @@ async function handleTaskShow(
 		const loaded = await loadTaskbook(cwdOf(ctx), finalName);
 		if (!loaded) {
 			ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
-			continue; // 回列表重选
+			// 显式传了不存在的名(首轮)→ 报错退出(保持原行为);列表重选后失败 → 回列表重选
+			if (firstRound) return;
+			continue;
 		}
+		firstRound = false;
 		// ponytail: 详情菜单 —— 菜单项文案带当前状态(🔒/🔓),翻转专用后回菜单继续操作
 		// (轻量动作不该踢出整个 /task);导览/编辑是重动作,做完即走(导览完可选编辑,编辑进 reviewing 状态机)。
 		let isDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");

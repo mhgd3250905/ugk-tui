@@ -12,7 +12,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { complete } from "@earendil-works/pi-ai";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { buildTaskDispatcherPrompt, extractRuntimeInputFromText } from "../extensions/task/task-dispatcher.ts";
@@ -23,13 +23,8 @@ import { judgeField, judgeCase } from "../extensions/task/task-eval-judge.ts";
 // re-export 保持向后兼容(若有外部代码仍从 eval-dispatcher 拿评判器)
 export { judgeField, judgeCase };
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const legacyFixturesTaskbooksDir = path.join(root, "tests", "fixtures", "taskbooks");
-const legacyFixturesEvalsDir = path.join(root, "tests", "fixtures", "dispatcher-evals");
-
 // ponytail: task 包结构闭环 —— eval cases 现在随 task 包走,落在 <taskDir>/<name>/tests/eval.cases.json。
-// runner 按 --task=<name> 解析已安装 task 包(user scope 优先,project scope 兜底);
-// --legacy-fixtures flag 仅迁移期用,回退到老 tests/fixtures/ 路径。
+// runner 按 --task=<name> 解析已安装 task 包(user scope 优先,project scope 兜底)。
 function tasksRootUser() {
 	const base = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 	return path.join(base, "tasks");
@@ -38,32 +33,24 @@ function tasksRootProject(cwd) {
 	return path.join(cwd, ".tasks");
 }
 /**
- * 按 name 解析 task 包目录:user scope → project scope(cwd)→ legacy fixtures(--legacy-fixtures 时)。
+ * 按 name 解析 task 包目录:user scope → project scope(cwd)。
  * 找不到返回 null,调用方报清晰错误。
  */
-function resolveTaskDir(name, opts) {
+function resolveTaskDir(name) {
 	const candidates = [
 		path.join(tasksRootUser(), name),
 		path.join(tasksRootProject(process.cwd()), name),
 	];
-	if (opts.legacyFixtures) candidates.push(path.join(legacyFixturesTaskbooksDir, name));
 	for (const dir of candidates) {
 		if (existsSync(path.join(dir, "contract.json"))) return dir;
 	}
 	return null;
 }
 /**
- * 解析 eval cases 路径:优先包内 tests/eval.cases.json;--legacy-fixtures 时回退到老 dispatcher-evals/。
- * 返回 { casesPath, reportBase } —— reportBase 是报告输出前缀(随包走或随老位置走)。
+ * 解析 eval cases 路径:包内 tests/eval.cases.json。
+ * 返回 { casesPath, reportBase } —— reportBase 是报告输出前缀。
  */
-function resolveEvalPaths(name, taskDir, opts) {
-	if (opts.legacyFixtures) {
-		return {
-			casesPath: path.join(legacyFixturesEvalsDir, `${name}.cases.json`),
-			reportBase: legacyFixturesEvalsDir,
-			reportPrefix: name,
-		};
-	}
+function resolveEvalPaths(taskDir) {
 	return {
 		casesPath: path.join(taskDir, "tests", "eval.cases.json"),
 		reportBase: path.join(taskDir, "tests"),
@@ -81,8 +68,6 @@ function parseCliArgs(argv) {
 		else if (a.startsWith("--model=")) args.model = a.slice("--model=".length);
 		else if (a === "--task") args.task = argv[++i];
 		else if (a === "--model") args.model = argv[++i];
-		// ponytail: 迁移期 flag,回退读老 tests/fixtures/ 路径。迁完所有 task 后删除。
-		else if (a === "--legacy-fixtures") args.legacyFixtures = true;
 	}
 	return args;
 }
@@ -177,27 +162,23 @@ function buildMarkdownReport(taskName, modelLabel, results) {
 async function main() {
 	const args = parseCliArgs(process.argv.slice(2));
 	if (!args.task) {
-		console.error("用法: node scripts/eval-dispatcher.mjs --task=<name> [--model=provider/modelId] [--legacy-fixtures]");
+		console.error("用法: node scripts/eval-dispatcher.mjs --task=<name> [--model=provider/modelId]");
 		console.error("  --task          已安装的 taskbook 名(user scope 优先,project scope 兜底)");
 		console.error("  --model         provider/modelId,如 deepseek/deepseek-chat。省略取首个可用 model");
-		console.error("  --legacy-fixtures  迁移期:回退读 tests/fixtures/ 老路径(task 迁完删除)");
 		process.exit(1);
 	}
 	const taskName = args.task;
-	const opts = { legacyFixtures: !!args.legacyFixtures };
 	// ponytail: task 包结构闭环 —— contract/skill 从 task 包根读,cases 从包内 tests/ 读。
-	const taskDir = resolveTaskDir(taskName, opts);
+	const taskDir = resolveTaskDir(taskName);
 	if (!taskDir) {
-		const where = opts.legacyFixtures
-			? `user/project scope 或 ${legacyFixturesTaskbooksDir}`
-			: `user scope(${tasksRootUser()})或 project scope(${tasksRootProject(process.cwd())})`;
-		throw new Error(`找不到 task "${taskName}" 的包目录(查找:${where})。确认已安装,或用 --legacy-fixtures 读老 fixture。`);
+		const where = `user scope(${tasksRootUser()})或 project scope(${tasksRootProject(process.cwd())})`;
+		throw new Error(`找不到 task "${taskName}" 的包目录(查找:${where})。确认已安装。`);
 	}
 	const contractPath = path.join(taskDir, "contract.json");
 	const skillPath = path.join(taskDir, "skill.md");
-	const { casesPath, reportBase, reportPrefix } = resolveEvalPaths(taskName, taskDir, opts);
+	const { casesPath, reportBase, reportPrefix } = resolveEvalPaths(taskDir);
 	if (!existsSync(casesPath)) {
-		throw new Error(`task "${taskName}" 未自带 eval 用例: ${casesPath}\n该 task 包内没有 tests/eval.cases.json。若用老 fixture,加 --legacy-fixtures。`);
+		throw new Error(`task "${taskName}" 未自带 eval 用例: ${casesPath}\n该 task 包内没有 tests/eval.cases.json。`);
 	}
 
 	const contract = JSON.parse(await readFile(contractPath, "utf8"));
@@ -244,7 +225,7 @@ async function main() {
 		results,
 	};
 	const reportMd = buildMarkdownReport(taskName, modelLabel, results);
-	// ponytail: 报告随包走,写到 task 包内 tests/ 下(gitignore);legacy 模式回退到老 dispatcher-evals/。
+	// ponytail: 报告随包走,写到 task 包内 tests/ 下(gitignore)。
 	const { mkdir } = await import("node:fs/promises");
 	await mkdir(reportBase, { recursive: true });
 	const jsonPath = path.join(reportBase, `${reportPrefix}.report.json`);

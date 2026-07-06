@@ -359,9 +359,7 @@ node ~/.pi/agent/tasks/<你的task>/verify.mjs; echo "exit=$?"  # 应该是 0
 
 UGK 自带一个通用 dispatcher eval 框架（`scripts/eval-dispatcher.mjs`），用真实 LLM 跑一组真实用户表述，量化翻译准确率。用法：
 
-1. 准备两个 fixture（放在仓库 `tests/fixtures/` 下，随 taskbook 一起演进）：
-   - `taskbooks/<你的task>/contract.json` + `skill.md`（从你的 taskbook 目录拷过来）
-   - `dispatcher-evals/<你的task>.cases.json`（用例集：每条是"自然语言输入 → 期望字段值/断言"）
+1. 在 task 包内准备 `tests/eval.cases.json`（用例集：每条是"自然语言输入 → 期望字段值/断言"），随 taskbook 一起演进。
 2. 写用例。至少覆盖三类：**明确表述**（基线，应 100%）、**模糊表述**（测"该不该省略可选字段"——这是最易错的，省略=走自动策略，显式输出=走用户指定，下游行为不同）、**边界**（allowedValues 枚举、required 缺失、超档位值）。
 3. 跑：
 
@@ -377,7 +375,7 @@ npm run eval:dispatcher -- --task=<你的task>
 
 **不进 `npm test`/CI**：eval 调真实 LLM 会花 token，只手动跑。离线机制单测（评判器正确性、prompt 注入）在 `tests/task-dispatcher-eval.test.ts`，进 `npm test`。
 
-详见仓库根 `tests/fixtures/dispatcher-evals/video-downloader.cases.json` 作为完整用例集范本。
+详见已安装 task 包内的 `tests/eval.cases.json` 作为完整用例集范本。
 
 **自验全过，再 `/task run`。** 这套动作把"多轮试错"压成"一轮自验 + 一次真跑"。
 

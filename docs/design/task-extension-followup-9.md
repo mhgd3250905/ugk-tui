@@ -49,6 +49,12 @@ eval 实测发现:用户没给必填字段时(如"转写个视频"缺 file_path)
 
 ### 架构(通用,可插拔)
 
+> **过时说明(2026-07-06)**:下面架构段落记录的是当时的 fixture 方案。
+> 现在 task 测试已随包迁移到 `<task>/tests/`,仓库根 `tests/fixtures/taskbooks/`
+> 和 `tests/fixtures/dispatcher-evals/` 已删除。
+> 现行 runner 只从已安装 task 包读取 `contract.json` / `skill.md`
+> 以及 `tests/eval.cases.json`。
+
 ```
 scripts/eval-dispatcher.mjs                    # 通用 runner(--task=<name>)
 tests/fixtures/taskbooks/<name>/               # 可插拔 taskbook 样本

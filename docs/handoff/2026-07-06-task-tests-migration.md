@@ -216,25 +216,25 @@ cd <仓库根> && npm test
 
 ### 批次 1(简单 task)
 - [x] video-downloader(样板,已验证)
-- [ ] subtitle-cleaner
-- [ ] subtitle-fluent-translator
-- [ ] subtitle-to-speech
-- [ ] video-zh-composer
-- [ ] whisper-audio-to-text
+- [x] subtitle-cleaner
+- [x] subtitle-fluent-translator
+- [x] subtitle-to-speech
+- [x] video-zh-composer
+- [x] whisper-audio-to-text
 
 ### 批次 2(糖尿病 task)
-- [ ] medical-diabetes-news
-- [ ] diabetes-device-regulatory-signals
-- [ ] diabetes-device-custom-source-news(**含回收的引擎测试,见 §3**)
-- [ ] diabetes-news-report-packager
-- [ ] diabetes-news-report-renderer
-- [ ] diabetes-news-report-translator
+- [x] medical-diabetes-news
+- [x] diabetes-device-regulatory-signals
+- [x] diabetes-device-custom-source-news(**含回收的引擎测试,见 §3**)
+- [x] diabetes-news-report-packager
+- [x] diabetes-news-report-renderer
+- [x] diabetes-news-report-translator
 
 ### 批次 3(清理)
-- [ ] 删 `tests/fixtures/taskbooks/`
-- [ ] 删 `tests/fixtures/dispatcher-evals/`
-- [ ] 删 `scripts/eval-dispatcher.mjs` 的 `--legacy-fixtures`
-- [ ] 更新 `docs/design/task-package-structure.md` 状态
+- [x] 删 `tests/fixtures/taskbooks/`
+- [x] 删 `tests/fixtures/dispatcher-evals/`
+- [x] 删 `scripts/eval-dispatcher.mjs` 的 `--legacy-fixtures`
+- [x] 更新 `docs/design/task-package-structure.md` 状态
 
 ---
 

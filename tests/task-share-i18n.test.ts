@@ -155,11 +155,16 @@ test("task-share marketplace cards show version and bottom author", () => {
 	assert.match(html, /card-version/);
 	assert.match(html, /t\.version/);
 	assert.match(html, /card-author/);
-	assert.match(html, /<span class="task-glyph" aria-hidden="true">/);
+	assert.match(html, /data-task-detail/);
+	assert.match(html, /function openTaskDetail/);
+	assert.match(html, /fetchTaskFile\(task,'skill\.md'\)/);
+	assert.match(html, /runtimeInputMeta/);
 	assert.doesNotMatch(html, /<span class="chip">@'\+author/);
 	assert.match(css, /\.card-author \{[^}]*max-width:/);
 	assert.match(css, /\.card-author \{[^}]*text-overflow: ellipsis/);
-	assert.match(css, /\.task-glyph \{[^}]*pointer-events: none;/);
+	assert.match(css, /\.task-glyph \{[^}]*cursor: pointer;/);
+	assert.match(css, /\.task-detail-dialog \{/);
+	assert.match(css, /\.task-detail-pre \{/);
 });
 
 test("task-share copy feedback keeps label and swaps icon", () => {

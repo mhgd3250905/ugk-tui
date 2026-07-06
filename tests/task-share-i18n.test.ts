@@ -212,6 +212,19 @@ test("task-share admin submissions show version", () => {
 	assert.match(html, /card-version/);
 });
 
+test("task-share account page manages submissions with withdraw and archive UI", () => {
+	const html = readFileSync("docs/task-share/account/index.html", "utf8");
+	const css = readFileSync("docs/task-share/styles.css", "utf8");
+	assert.match(html, /data-account-summary/);
+	assert.match(html, /accountSubmissionRows/);
+	assert.match(html, /data-withdraw-submission/);
+	assert.match(html, /account\.withdraw/);
+	assert.match(html, /account\.archivedSubmissions/);
+	assert.match(css, /\.account-dashboard/);
+	assert.match(css, /\.account-list/);
+	assert.match(css, /\.status-chip/);
+});
+
 test("cli auth page uses the marketplace shell and localized copy", () => {
 	const html = readFileSync("docs/task-share/cli-auth/index.html", "utf8");
 	assert.match(html, /<body class="marketplace-page">/);

@@ -24,6 +24,7 @@ import {
 	submitTask,
 	toggleFavorite,
 	toggleLike,
+	withdrawSubmission,
 	startCliAuth,
 	pollCliAuth,
 	confirmCliAuth,
@@ -93,7 +94,14 @@ function createDb() {
 					}
 					if (sql.startsWith("SELECT * FROM users WHERE id = ?")) return usersById.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT * FROM users WHERE github_id = ?")) return users.get(String(this.values[0])) ?? null;
+					if (sql.startsWith("SELECT task_submissions.* FROM task_submissions WHERE id = ? AND user_id = ?")) return submissions.find((item) => item.id === this.values[0] && item.user_id === this.values[1]) ?? null;
 					if (sql.startsWith("SELECT task_submissions.*")) return submissions.find((item) => item.id === this.values[0]) ?? null;
+					if (sql.startsWith("SELECT task_submissions.version")) {
+						return submissions
+							.filter((item) => item.name === this.values[0] && item.status === "published")
+							.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id - a.id)
+							.map((item) => ({ version: item.version, title: item.title, description: item.description, user_id: item.user_id, author_login: usersById.get(item.user_id)?.login ?? "Community" }))[0] ?? null;
+					}
 					if (sql.startsWith("SELECT 1 FROM task_likes")) return likes.has(`${this.values[0]}:${this.values[1]}`) ? { ok: 1 } : null;
 					if (sql.startsWith("SELECT 1 FROM task_favorites")) return favorites.has(`${this.values[0]}:${this.values[1]}`) ? { ok: 1 } : null;
 					if (sql.startsWith("SELECT 1 FROM download_events")) return downloads.some((item) => item.task_name === this.values[0] && item.user_id === this.values[1]) ? { ok: 1 } : null;
@@ -183,6 +191,15 @@ function createDb() {
 							submissions.push({ id: nextSubmissionId++, user_id: userId, name, version, title, description, source_type: sourceType, source_url: sourceUrl, artifact_key: artifactKey, artifact_name: artifactName, file_list: fileList, status: "pending", created_at: now, updated_at: now, author_login: usersById.get(userId)?.login ?? "unknown" });
 							return { success: true };
 						}
+					if (sql.startsWith("UPDATE task_submissions SET status = 'withdrawn'")) {
+						const [now, id, userId] = this.values;
+						const item = submissions.find((submission) => submission.id === id && submission.user_id === userId);
+						if (item) {
+							item.status = "withdrawn";
+							item.updated_at = now;
+						}
+						return { success: true };
+					}
 					if (sql.startsWith("UPDATE task_submissions SET status")) {
 						const [status, reviewerId, note, now, id] = this.values;
 						const item = submissions.find((submission) => submission.id === id);
@@ -202,6 +219,17 @@ function createDb() {
 							tasks.set(name, { title, description, author_user_id: authorUserId, author_name: authorName, latest_version: latestVersion, created_at: now, download_count: 0, like_count: 0, favorite_count: 0 });
 							return { success: true };
 						}
+					if (sql.startsWith("UPDATE tasks SET latest_version = NULL")) {
+						const task = tasks.get(this.values[0]);
+						if (task) task.latest_version = null;
+						return { success: true };
+					}
+					if (sql.startsWith("UPDATE tasks") && sql.includes("latest_version = ?")) {
+						const [title, description, authorUserId, authorName, latestVersion, name] = this.values;
+						const task = tasks.get(name) ?? { created_at: new Date().toISOString(), download_count: 0, like_count: 0, favorite_count: 0 };
+						tasks.set(name, { ...task, title, description, author_user_id: authorUserId, author_name: authorName, latest_version: latestVersion });
+						return { success: true };
+					}
 					if (sql.startsWith("INSERT INTO task_likes")) {
 						likes.add(`${this.values[0]}:${this.values[1]}`);
 						return { success: true };
@@ -749,6 +777,83 @@ test("admins publish pending submissions into the public queue", async () => {
 	assert.equal(pending.submissions.length, 1);
 	assert.equal((await review.json()).status, "published");
 	assert.equal(publicTasks.tasks[0].name, "public-task");
+});
+
+test("authors can withdraw their own published submissions from public install surfaces", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "retired-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Retired Task");
+	form.set("description", "Ready for review");
+	form.set("artifact", new File([taskZip("retired-task") as BlobPart], "retired-task.zip", { type: "application/zip" }));
+	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	await reviewSubmission(
+		new Request("https://ugk-task-share.pages.dev/api/admin/submissions/1", { method: "POST", headers: { cookie }, body: JSON.stringify({ status: "published" }) }),
+		testEnv,
+		1,
+	);
+
+	const response = await withdrawSubmission(new Request("https://ugk-task-share.pages.dev/api/account/submissions/1", { method: "DELETE", headers: { cookie } }), testEnv, 1);
+	const body = await response.json();
+	const publicTasks = await (await communityTasks(testEnv)).json();
+	const manifest = await (await buildManifest(new Request("https://ugk-task-share.pages.dev/api/manifest"), testEnv)).json();
+	const account = await (await accountSubmissions(new Request("https://ugk-task-share.pages.dev/api/account/submissions", { headers: { cookie } }), testEnv)).json();
+
+	assert.equal(response.status, 200);
+	assert.equal(body.status, "withdrawn");
+	assert.equal(publicTasks.tasks.some((task) => task.name === "retired-task"), false);
+	assert.equal(manifest.tasks.some((task) => task.name === "retired-task"), false);
+	assert.equal(account.submissions.find((item) => item.name === "retired-task")?.status, "withdrawn");
+});
+
+test("withdrawing one published version keeps an older published version installable", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	for (const version of ["1.0.0", "1.0.1"]) {
+		const form = new FormData();
+		form.set("name", "versioned-task");
+		form.set("version", version);
+		form.set("title", `Versioned Task ${version}`);
+		form.set("description", `Version ${version}`);
+		form.set("artifact", new File([taskZip("versioned-task") as BlobPart], `versioned-task-${version}.zip`, { type: "application/zip" }));
+		await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+		await reviewSubmission(
+			new Request(`https://ugk-task-share.pages.dev/api/admin/submissions/${version === "1.0.0" ? 1 : 2}`, { method: "POST", headers: { cookie }, body: JSON.stringify({ status: "published" }) }),
+			testEnv,
+			version === "1.0.0" ? 1 : 2,
+		);
+	}
+
+	await withdrawSubmission(new Request("https://ugk-task-share.pages.dev/api/account/submissions/2", { method: "DELETE", headers: { cookie } }), testEnv, 2);
+	const manifest = await (await buildManifest(new Request("https://ugk-task-share.pages.dev/api/manifest"), testEnv)).json();
+
+	assert.equal(manifest.tasks.find((task) => task.name === "versioned-task")?.version, "1.0.0");
+});
+
+test("authors cannot withdraw another user's submission", async () => {
+	const testEnv = env();
+	const now = new Date().toISOString();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", now).run();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("43", "other", "", now).run();
+	const ownerCookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const otherCookie = await createSessionCookie({ id: 2, login: "other" }, testEnv);
+	const form = new FormData();
+	form.set("name", "owned-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Owned Task");
+	form.set("description", "Owned by octo");
+	form.set("artifact", new File([taskZip("owned-task") as BlobPart], "owned-task.zip", { type: "application/zip" }));
+	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie: ownerCookie }, body: form }), testEnv);
+
+	const response = await withdrawSubmission(new Request("https://ugk-task-share.pages.dev/api/account/submissions/1", { method: "DELETE", headers: { cookie: otherCookie } }), testEnv, 1);
+	const account = await (await accountSubmissions(new Request("https://ugk-task-share.pages.dev/api/account/submissions", { headers: { cookie: ownerCookie } }), testEnv)).json();
+
+	assert.equal(response.status, 404);
+	assert.equal(account.submissions[0].status, "pending");
 });
 
 test("admins cannot publish a submission over a different submission's version", async () => {

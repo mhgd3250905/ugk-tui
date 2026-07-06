@@ -550,6 +550,46 @@ export async function accountSubmissions(request, env) {
 	return json({ submissions: rows.results ?? [] });
 }
 
+async function refreshLatestTaskVersion(env, name) {
+	const latest = await env.DB.prepare(
+		`SELECT task_submissions.version, task_submissions.title, task_submissions.description, task_submissions.user_id, users.login AS author_login
+		FROM task_submissions
+		JOIN users ON users.id = task_submissions.user_id
+		WHERE task_submissions.name = ? AND task_submissions.status = 'published'
+		ORDER BY task_submissions.updated_at DESC, task_submissions.id DESC
+		LIMIT 1`,
+	).bind(name).first();
+	if (!latest) {
+		await env.DB.prepare("UPDATE tasks SET latest_version = NULL WHERE name = ?").bind(name).run();
+		return null;
+	}
+	await env.DB.prepare(
+		`UPDATE tasks
+		SET title = ?, description = ?, author_user_id = ?, author_name = ?, latest_version = ?
+		WHERE name = ?`,
+	).bind(latest.title, latest.description, latest.user_id, latest.author_login ?? "Community", latest.version, name).run();
+	return latest.version;
+}
+
+export async function withdrawSubmission(request, env, id) {
+	const hasBearer = request.headers.get("authorization")?.startsWith("Bearer ");
+	const auth = hasBearer ? await requireBearerUser(request, env) : await requireUser(request, env);
+	if (auth.response) return auth.response;
+	const submission = await env.DB.prepare(
+		"SELECT task_submissions.* FROM task_submissions WHERE id = ? AND user_id = ?",
+	).bind(Number(id), auth.user.id).first();
+	if (!submission) return json({ error: "submission_not_found" }, { status: 404 });
+	const wasPublished = submission.status === "published";
+	if (submission.status !== "withdrawn") {
+		const now = new Date().toISOString();
+		await env.DB.prepare(
+			"UPDATE task_submissions SET status = 'withdrawn', updated_at = ? WHERE id = ? AND user_id = ?",
+		).bind(now, Number(id), auth.user.id).run();
+		if (wasPublished) await refreshLatestTaskVersion(env, submission.name);
+	}
+	return json({ id: Number(id), name: submission.name, status: "withdrawn" });
+}
+
 export async function accountDownloads(request, env) {
 	const auth = await requireUser(request, env);
 	if (auth.response) return auth.response;

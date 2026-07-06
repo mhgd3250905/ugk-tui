@@ -320,18 +320,23 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			let raw = (args || "").trim();
 			if (raw === "" && ctx.ui?.select) {
-				const options = uiLanguageMenuOptions();
-				const selection = await ctx.ui.select(uiText("界面语言", "UI Language"), options);
-				if (!selection || selection === options[3]) return;
-				if (selection === options[0]) raw = "status";
-				if (selection === options[2]) raw = "clear";
-				if (selection === options[1]) {
+				// ponytail: 主菜单 → 选语言 两层 select。二级 BACK = 回主菜单重选
+				// (对齐 task/mcp/subagent 层级返回模式);原 BACK=return 退出命令,不合直觉。
+				menuLoop: while (true) {
+					const options = uiLanguageMenuOptions();
+					const selection = await ctx.ui.select(uiText("界面语言", "UI Language"), options);
+					if (!selection || selection === options[3]) return; // cancel/退出 → 退出命令
+					if (selection === options[0]) { raw = "status"; break; }
+					if (selection === options[2]) { raw = "clear"; break; }
+					// 设置界面语言 → 进二级
 					const choices = uiLanguageChoiceOptions();
 					const choice = await ctx.ui.select(uiText("选择界面语言", "Select UI Language"), choices);
-					if (!choice || choice === choices.at(-1)) return;
+					if (!choice) return; // cancel → 退出命令
+					if (choice === choices.at(-1)) continue menuLoop; // BACK → 回主菜单
 					const selected = SUPPORTED_UI_LANGUAGES[choices.indexOf(choice)];
 					if (!selected) return;
 					raw = selected.code;
+					break;
 				}
 			}
 

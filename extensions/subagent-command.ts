@@ -50,25 +50,32 @@ export default function registerSubagentCommand(pi: ExtensionAPI) {
 					agent,
 				]),
 			);
-			const agentChoice = await ctx.ui.select(uiText("子代理", "Subagents"), Array.from(agentLabels.keys()));
-			if (!agentChoice) return;
-			const agent = agentLabels.get(agentChoice);
-			if (!agent) return;
+			const back = uiText("返回", "Back");
+			// ponytail: 选 agent → 选模型 是两层 select,二级加 BACK 项 + 外层 while,
+			// BACK = 回 agent 列表重选(对齐 task/mcp 的层级返回模式)。
+			agentLoop: while (true) {
+				const agentChoice = await ctx.ui.select(uiText("子代理", "Subagents"), Array.from(agentLabels.keys()));
+				if (!agentChoice) return; // 列表层 cancel → 退出
+				const agent = agentLabels.get(agentChoice);
+				if (!agent) return;
 
-			const models = ctx.modelRegistry.getAvailable();
-			if (models.length === 0) {
-				ctx.ui.notify(uiText("没有可用模型。请先配置 API 或使用 /login。", "No models available. Configure an API or use /login first."), "warning");
+				const models = ctx.modelRegistry.getAvailable();
+				if (models.length === 0) {
+					ctx.ui.notify(uiText("没有可用模型。请先配置 API 或使用 /login。", "No models available. Configure an API or use /login first."), "warning");
+					return;
+				}
+
+				const modelLabels = new Map(models.map((model) => [`${modelValue(model)} · ${model.name}`, model]));
+				const inherited = inheritModelLabel();
+				const modelChoice = await ctx.ui.select(`${agent.name} ${uiText("模型", "model")}`, [inherited, ...modelLabels.keys(), back]);
+				if (!modelChoice) return; // cancel → 退出
+				if (modelChoice === back) continue agentLoop; // 回 agent 列表重选
+
+				const selected = modelChoice === inherited ? undefined : modelValue(modelLabels.get(modelChoice)!);
+				await setAgentModel(agent.filePath, selected);
+				ctx.ui.notify(uiText(`已保存 ${agent.name} 模型设置，下一次 subagent 调用生效。`, `${agent.name} model setting saved. It takes effect on the next subagent call.`), "info");
 				return;
 			}
-
-			const modelLabels = new Map(models.map((model) => [`${modelValue(model)} · ${model.name}`, model]));
-			const inherited = inheritModelLabel();
-			const modelChoice = await ctx.ui.select(`${agent.name} ${uiText("模型", "model")}`, [inherited, ...modelLabels.keys()]);
-			if (!modelChoice) return;
-
-			const selected = modelChoice === inherited ? undefined : modelValue(modelLabels.get(modelChoice)!);
-			await setAgentModel(agent.filePath, selected);
-			ctx.ui.notify(uiText(`已保存 ${agent.name} 模型设置，下一次 subagent 调用生效。`, `${agent.name} model setting saved. It takes effect on the next subagent call.`), "info");
 		},
 	});
 }

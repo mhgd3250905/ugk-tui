@@ -687,19 +687,26 @@ async function handleTaskShow(
 		ctx.ui.notify(formatTaskbookRawDetails(loaded), "info");
 		return;
 	}
-	const isDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
-	const toggleLabel = isDedicated ? "取消专用" : "设为专用(藏 prompt)";
-	// ponytail: "设为专用"嵌入详情页菜单 —— 零命令记忆,回车选即可翻转。
-	// 仅当调用方提供 onToggleDedicated 回调时才显示该项(交互式入口);headless 不暴露。
-	const options = onToggleDedicated ? ["task 导览", "task 编辑", toggleLabel, "Exit"] : ["task 导览", "task 编辑", "Exit"];
-	const action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, options);
+	// ponytail: 详情菜单 —— 菜单项文案带当前状态(🔒/🔓),翻转专用后回菜单继续操作
+	// (轻量动作不该踢出整个 /task);导览/编辑是重动作,做完即走(导览完可选编辑,编辑进 reviewing 状态机)。
+	let isDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
+	const toggleLabel = () => onToggleDedicated
+		? (isDedicated ? "取消专用(当前🔒)" : "设为专用(当前🔓)")
+		: null;
+	const options = () => {
+		const tl = toggleLabel();
+		return tl ? ["task 导览", "task 编辑", tl, "Exit"] : ["task 导览", "task 编辑", "Exit"];
+	};
+	let action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, options());
+	// 专用翻转: 回菜单继续,刷新状态反映新值
+	while (toggleLabel() && action === toggleLabel() && onToggleDedicated) {
+		await onToggleDedicated(loaded);
+		isDedicated = !isDedicated; // 翻转后立即反映到文案
+		action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, options());
+	}
 	if (!action || action === "Exit") return;
 	if (action === "task 编辑") {
 		await onEdit(loaded);
-		return;
-	}
-	if (action === toggleLabel && onToggleDedicated) {
-		await onToggleDedicated(loaded);
 		return;
 	}
 	if (action !== "task 导览") return;
@@ -2326,7 +2333,10 @@ export function registerTask(pi: ExtensionAPI): void {
 			}, async (loaded) => {
 				// ponytail: 翻转专用标记 → 重生成披露清单 → 失效 prompt 缓存(指针段是否出现
 				// 取决于当前有无专用 task,必须重算)。三步同一函数族,确保翻转后下一轮 agent turn 生效。
-				const wasDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
+				// 重新加载拿最新 tags —— 传入的 loaded 可能是循环里上一次的旧对象(handleTaskShow
+				// 翻转后菜单刷新,但传入回调的还是同一引用),直接信它会连翻两次都当"非专用→设专用"。
+				const fresh = await loadTaskbook(cwdOf(ctx), loaded.taskbook.name);
+				const wasDedicated = !!(fresh && Array.isArray(fresh.taskbook.tags) && fresh.taskbook.tags.includes("dedicated"));
 				await setTaskbookDedicated(loaded.scope, cwdOf(ctx), loaded.taskbook.name, !wasDedicated);
 				await regenerateDedicatedIndex(cwdOf(ctx));
 				cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx));

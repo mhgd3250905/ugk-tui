@@ -35,7 +35,8 @@ export interface TaskSubmissionSummary {
 const CORE_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"] as const;
 
 // 排除规则:打包时跳过这些。核心 5 文件由 buildTaskZip 单独构造(sanitized),不靠目录扫描。
-// ponytail: 所有 task 的测试文件实测统一为 *.test.mjs,加 *.spec.* / __tests__/ 是 YAGNI。
+// ponytail: task 包结构闭环 —— 测试资产收在 tests/ 子目录里随包发布(可插拔功能包自包含)。
+// tests/ 下的 *.test.mjs 放行;包根或 scripts/ 散落的 *.test.mjs 仍排除(防意外混入运行时目录)。
 const SKIP_DIRS = new Set(["node_modules", ".git", ".DS_Store"]);
 const SKIP_SUFFIXES = [".test.mjs", ".log"];
 
@@ -43,6 +44,8 @@ function shouldSkip(relPath: string): boolean {
 	const parts = relPath.split("/");
 	if (parts.some((p) => SKIP_DIRS.has(p))) return true;
 	if (relPath.endsWith(".DS_Store")) return true;
+	// tests/ 子目录下的文件是 task 自带测试资产,随包发布,不受后缀排除规则约束。
+	if (parts[0] === "tests") return false;
 	return SKIP_SUFFIXES.some((s) => relPath.endsWith(s));
 }
 

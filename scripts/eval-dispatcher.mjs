@@ -11,109 +11,64 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { complete } from "@earendil-works/pi-ai";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { buildTaskDispatcherPrompt, extractRuntimeInputFromText } from "../extensions/task/task-dispatcher.ts";
+// ponytail: 评判器抽到引擎侧共享模块,切断"引擎单测 → import 会读 fixture 的 runner"耦合。
+// runner 和单测都从这里 import;评判逻辑零行为变化(现有单测保护)。
+import { judgeField, judgeCase } from "../extensions/task/task-eval-judge.ts";
+
+// re-export 保持向后兼容(若有外部代码仍从 eval-dispatcher 拿评判器)
+export { judgeField, judgeCase };
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const fixturesTaskbooksDir = path.join(root, "tests", "fixtures", "taskbooks");
-const fixturesEvalsDir = path.join(root, "tests", "fixtures", "dispatcher-evals");
+const legacyFixturesTaskbooksDir = path.join(root, "tests", "fixtures", "taskbooks");
+const legacyFixturesEvalsDir = path.join(root, "tests", "fixtures", "dispatcher-evals");
 
-// ===== 通用评判器(纯函数,被单测直接 import 验证)=====
-// rule 格式:"equals:<值>" | "omitted" | "absent" | "present" | "in:a|b|c"
-// 返回 { ok: boolean, detail: string }
-
-function ruleParts(rule) {
-	const idx = rule.indexOf(":");
-	return idx >= 0 ? { op: rule.slice(0, idx), arg: rule.slice(idx + 1) } : { op: rule, arg: undefined };
+// ponytail: task 包结构闭环 —— eval cases 现在随 task 包走,落在 <taskDir>/<name>/tests/eval.cases.json。
+// runner 按 --task=<name> 解析已安装 task 包(user scope 优先,project scope 兜底);
+// --legacy-fixtures flag 仅迁移期用,回退到老 tests/fixtures/ 路径。
+function tasksRootUser() {
+	const base = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+	return path.join(base, "tasks");
 }
-
-function isPresentValue(value) {
-	if (value === null || value === undefined) return false;
-	if (typeof value === "string") return value.trim().length > 0;
-	if (typeof value === "number") return Number.isFinite(value);
-	if (typeof value === "boolean") return true;
-	if (Array.isArray(value)) return value.length > 0;
-	if (typeof value === "object") return Object.keys(value).length > 0;
-	return false;
+function tasksRootProject(cwd) {
+	return path.join(cwd, ".tasks");
 }
-
-export function judgeField(actualValue, hasField, rule) {
-	const { op, arg } = ruleParts(rule);
-	switch (op) {
-		case "equals": {
-			const expected = arg;
-			const actual = hasField ? String(actualValue) : undefined;
-			return actual === expected
-				? { ok: true, detail: `=${expected}` }
-				: { ok: false, detail: `期望 ${expected},实际 ${actual === undefined ? "(字段不存在)" : actualValue}` };
-		}
-		case "path-equals": {
-			// ponytail: 路径断言。Windows 上 dispatcher 可能把正斜杠翻成反斜杠(等价路径),
-			// 严格 equals 会误判。归一化(全转 / 后比)避免这种非确定性假阴性。
-			const expected = String(arg).replace(/\\/g, "/");
-			const actual = hasField ? String(actualValue).replace(/\\/g, "/") : undefined;
-			return actual === expected
-				? { ok: true, detail: `路径=${expected}` }
-				: { ok: false, detail: `期望路径 ${expected},实际 ${actual === undefined ? "(字段不存在)" : actualValue}` };
-		}
-		case "omitted":
-		case "absent":
-			return !hasField
-				? { ok: true, detail: "字段已省略" }
-				: { ok: false, detail: `期望 omitted,实际存在 ${JSON.stringify(actualValue)}` };
-		case "present":
-			return hasField && isPresentValue(actualValue)
-				? { ok: true, detail: `字段存在 (${JSON.stringify(actualValue)})` }
-				: { ok: false, detail: "期望 present,实际缺失或无效" };
-		case "in": {
-			const allowed = String(arg).split("|");
-			// ponytail: in 原语支持 "omitted" 作为特殊成员 —— 当 allowed 含 "omitted" 且字段
-			// 不存在时算通过。用于"省略或某值都算对"的断言(如有 default 的字段,dispatcher
-			// 省略它和显式输出 default 值行为等价,两者都该判 PASS)。
-			if (!hasField) {
-				return allowed.includes("omitted")
-					? { ok: true, detail: "字段省略(in:omitted)" }
-					: { ok: false, detail: `期望 in ${allowed.join("|")},实际(字段不存在)` };
-			}
-			const actual = String(actualValue);
-			return allowed.includes(actual)
-				? { ok: true, detail: `${actual} in ${allowed.join("|")}` }
-				: { ok: false, detail: `期望 in ${allowed.join("|")},实际 ${actualValue}` };
-		}
-		default:
-			return { ok: false, detail: `未知评判原语: ${op}` };
+/**
+ * 按 name 解析 task 包目录:user scope → project scope(cwd)→ legacy fixtures(--legacy-fixtures 时)。
+ * 找不到返回 null,调用方报清晰错误。
+ */
+function resolveTaskDir(name, opts) {
+	const candidates = [
+		path.join(tasksRootUser(), name),
+		path.join(tasksRootProject(process.cwd()), name),
+	];
+	if (opts.legacyFixtures) candidates.push(path.join(legacyFixturesTaskbooksDir, name));
+	for (const dir of candidates) {
+		if (existsSync(path.join(dir, "contract.json"))) return dir;
 	}
+	return null;
 }
-
-// 整体结果评判:支持 __outcome 特殊字段(如 "fails-required-gate")
-export function judgeCase(actualOutput, parsedOk, assertSpec) {
-	// __outcome 断言整体结果而非字段
-	if (assertSpec.__outcome) {
-		if (assertSpec.__outcome === "fails-required-gate") {
-			// dispatcher 解析失败(无有效输出 或 抛错)算 PASS
-			return {
-				ok: !parsedOk,
-				fieldResults: [],
-				detail: parsedOk
-					? "期望解析失败(required 缺失),但 dispatcher 返回了有效输出"
-					: "正确解析失败(required 缺失)",
-			};
-		}
-		return { ok: false, fieldResults: [], detail: `未知 __outcome: ${assertSpec.__outcome}` };
+/**
+ * 解析 eval cases 路径:优先包内 tests/eval.cases.json;--legacy-fixtures 时回退到老 dispatcher-evals/。
+ * 返回 { casesPath, reportBase } —— reportBase 是报告输出前缀(随包走或随老位置走)。
+ */
+function resolveEvalPaths(name, taskDir, opts) {
+	if (opts.legacyFixtures) {
+		return {
+			casesPath: path.join(legacyFixturesEvalsDir, `${name}.cases.json`),
+			reportBase: legacyFixturesEvalsDir,
+			reportPrefix: name,
+		};
 	}
-
-	const output = actualOutput && typeof actualOutput === "object" && !Array.isArray(actualOutput) ? actualOutput : {};
-	const fieldResults = [];
-	let allOk = parsedOk; // dispatcher 没解析出 = 整体失败(除非 __outcome)
-	for (const [field, rule] of Object.entries(assertSpec)) {
-		const hasField = Object.prototype.hasOwnProperty.call(output, field);
-		const result = judgeField(output[field], hasField, rule);
-		fieldResults.push({ field, rule, ...result });
-		if (!result.ok) allOk = false;
-	}
-	return { ok: allOk, fieldResults, detail: allOk ? "全部字段通过" : "存在失败字段" };
+	return {
+		casesPath: path.join(taskDir, "tests", "eval.cases.json"),
+		reportBase: path.join(taskDir, "tests"),
+		reportPrefix: "eval",
+	};
 }
 
 // ===== LLM 调用(复用 dispatcher 生产路径)=====
@@ -126,6 +81,8 @@ function parseCliArgs(argv) {
 		else if (a.startsWith("--model=")) args.model = a.slice("--model=".length);
 		else if (a === "--task") args.task = argv[++i];
 		else if (a === "--model") args.model = argv[++i];
+		// ponytail: 迁移期 flag,回退读老 tests/fixtures/ 路径。迁完所有 task 后删除。
+		else if (a === "--legacy-fixtures") args.legacyFixtures = true;
 	}
 	return args;
 }
@@ -220,23 +177,35 @@ function buildMarkdownReport(taskName, modelLabel, results) {
 async function main() {
 	const args = parseCliArgs(process.argv.slice(2));
 	if (!args.task) {
-		console.error("用法: node scripts/eval-dispatcher.mjs --task=<name> [--model=provider/modelId]");
+		console.error("用法: node scripts/eval-dispatcher.mjs --task=<name> [--model=provider/modelId] [--legacy-fixtures]");
+		console.error("  --task          已安装的 taskbook 名(user scope 优先,project scope 兜底)");
+		console.error("  --model         provider/modelId,如 deepseek/deepseek-chat。省略取首个可用 model");
+		console.error("  --legacy-fixtures  迁移期:回退读 tests/fixtures/ 老路径(task 迁完删除)");
 		process.exit(1);
 	}
 	const taskName = args.task;
-	const contractPath = path.join(fixturesTaskbooksDir, taskName, "contract.json");
-	const skillPath = path.join(fixturesTaskbooksDir, taskName, "skill.md");
-	const casesPath = path.join(fixturesEvalsDir, `${taskName}.cases.json`);
-
-	for (const p of [contractPath, skillPath, casesPath]) {
-		if (!existsSync(p)) throw new Error(`缺少 fixture: ${p}`);
+	const opts = { legacyFixtures: !!args.legacyFixtures };
+	// ponytail: task 包结构闭环 —— contract/skill 从 task 包根读,cases 从包内 tests/ 读。
+	const taskDir = resolveTaskDir(taskName, opts);
+	if (!taskDir) {
+		const where = opts.legacyFixtures
+			? `user/project scope 或 ${legacyFixturesTaskbooksDir}`
+			: `user scope(${tasksRootUser()})或 project scope(${tasksRootProject(process.cwd())})`;
+		throw new Error(`找不到 task "${taskName}" 的包目录(查找:${where})。确认已安装,或用 --legacy-fixtures 读老 fixture。`);
 	}
+	const contractPath = path.join(taskDir, "contract.json");
+	const skillPath = path.join(taskDir, "skill.md");
+	const { casesPath, reportBase, reportPrefix } = resolveEvalPaths(taskName, taskDir, opts);
+	if (!existsSync(casesPath)) {
+		throw new Error(`task "${taskName}" 未自带 eval 用例: ${casesPath}\n该 task 包内没有 tests/eval.cases.json。若用老 fixture,加 --legacy-fixtures。`);
+	}
+
 	const contract = JSON.parse(await readFile(contractPath, "utf8"));
 	const skill = await readFile(skillPath, "utf8");
 	const casesFile = JSON.parse(await readFile(casesPath, "utf8"));
 	const cases = Array.isArray(casesFile.cases) ? casesFile.cases : [];
 
-	console.error(`[eval] task=${taskName} cases=${cases.length} 解析 model...`);
+	console.error(`[eval] task=${taskName} 包=${taskDir} cases=${cases.length} 解析 model...`);
 	const { model, apiKey, headers } = await resolveModel(args.model);
 	const modelLabel = `${model.provider}/${model.id}`;
 	console.error(`[eval] 使用 model=${modelLabel},开始逐条跑(${cases.length} 条)...`);
@@ -275,8 +244,11 @@ async function main() {
 		results,
 	};
 	const reportMd = buildMarkdownReport(taskName, modelLabel, results);
-	const jsonPath = path.join(fixturesEvalsDir, `${taskName}.report.json`);
-	const mdPath = path.join(fixturesEvalsDir, `${taskName}.report.md`);
+	// ponytail: 报告随包走,写到 task 包内 tests/ 下(gitignore);legacy 模式回退到老 dispatcher-evals/。
+	const { mkdir } = await import("node:fs/promises");
+	await mkdir(reportBase, { recursive: true });
+	const jsonPath = path.join(reportBase, `${reportPrefix}.report.json`);
+	const mdPath = path.join(reportBase, `${reportPrefix}.report.md`);
 	await writeFile(jsonPath, JSON.stringify(reportJson, null, 2), "utf8");
 	await writeFile(mdPath, reportMd, "utf8");
 

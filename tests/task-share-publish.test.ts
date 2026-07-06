@@ -68,11 +68,18 @@ test("buildTaskZip does not mutate the source LoadedTaskbook", async () => {
 });
 
 // 造一个带 scripts/ 的真实临时 task 目录,模拟实际 task 结构
-function realTaskDir(opts: { withScript?: boolean; withTest?: boolean } = {}): string {
+function realTaskDir(opts: { withScript?: boolean; withTest?: boolean; withTestsDir?: boolean } = {}): string {
 	const dir = tempDir();
 	mkdirSync(path.join(dir, "scripts"), { recursive: true });
 	if (opts.withScript !== false) writeFileSync(path.join(dir, "scripts", "make-fluent-subtitle.mjs"), "export const ok = true;\n");
+	// 包根/scripts 散落的 *.test.mjs 仍排除(防运行时目录混入测试)
 	if (opts.withTest) writeFileSync(path.join(dir, "scripts", "make-fluent-subtitle.test.mjs"), "import assert;\n");
+	// tests/ 子目录下的测试资产随包发布(task 包结构闭环)
+	if (opts.withTestsDir) {
+		mkdirSync(path.join(dir, "tests"), { recursive: true });
+		writeFileSync(path.join(dir, "tests", "verify.test.mjs"), "import assert;\n");
+		writeFileSync(path.join(dir, "tests", "eval.cases.json"), '{"task":"demo","cases":[]}');
+	}
 	return dir;
 }
 
@@ -103,6 +110,22 @@ test("buildTaskZip excludes *.test.mjs files", async () => {
 	}
 });
 
+test("buildTaskZip packages tests/ directory (task-bundled tests ship with the package)", async () => {
+	// ponytail: task 包结构闭环 —— tests/ 子目录是 task 自带测试资产,随包发布。
+	// 与散落在 scripts/ 的 *.test.mjs 区别对待:tests/ 放行,scripts/ 排除。
+	const dir = realTaskDir({ withScript: true, withTestsDir: true });
+	try {
+		const loaded = { ...sampleLoaded(), dir };
+		const zip = await buildTaskZip(loaded);
+		const entries = Object.keys(unzipSync(zip));
+		assert.ok(entries.includes("tests/verify.test.mjs"), "tests/*.test.mjs 应随包发布");
+		assert.ok(entries.includes("tests/eval.cases.json"), "tests/eval.cases.json 应随包发布");
+		assert.ok(entries.includes("scripts/make-fluent-subtitle.mjs"), "runtime script 仍打包");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("collectExtraFiles returns scripts/ files but not core/test/garbage", async () => {
 	const dir = tempDir();
 	try {
@@ -113,6 +136,21 @@ test("collectExtraFiles returns scripts/ files but not core/test/garbage", async
 		writeFileSync(path.join(dir, "run.log"), "x"); // 垃圾,不返回
 		const extras = await collectExtraFiles(dir);
 		assert.deepEqual(extras, ["scripts/a.mjs"]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("collectExtraFiles returns tests/ directory contents (task-bundled tests)", async () => {
+	// ponytail: tests/ 子目录放行 *.test.mjs 和其它测试资产(eval.cases.json 等)。
+	const dir = tempDir();
+	try {
+		mkdirSync(path.join(dir, "tests"), { recursive: true });
+		writeFileSync(path.join(dir, "tests", "verify.test.mjs"), "x");
+		writeFileSync(path.join(dir, "tests", "eval.cases.json"), "{}");
+		const extras = await collectExtraFiles(dir);
+		assert.ok(extras.includes("tests/verify.test.mjs"), "tests/*.test.mjs 应返回");
+		assert.ok(extras.includes("tests/eval.cases.json"), "tests/eval.cases.json 应返回");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

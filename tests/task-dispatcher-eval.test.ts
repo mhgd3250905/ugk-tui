@@ -1,14 +1,12 @@
 // dispatcher eval 框架的离线机制单测。
 // 不调真实 LLM —— 只钉两件事:
 //   1. 通用评判器(judgeField/judgeCase)对所有原语的判定正确,含 omitted 关键原语
-//   2. buildTaskDispatcherPrompt 在真实 taskbook fixture 下正确注入 contract 内容
+//   2. buildTaskDispatcherPrompt 正确注入 contract 内容(用内联样本,不依赖真实 task fixture)
 // 真实 LLM 翻译质量由 scripts/eval-dispatcher.mjs 手动跑,不进 npm test。
+// ponytail: 评判器从 task-eval-judge.ts import,切断"引擎单测 → import 会读 fixture 的 runner"耦合。
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { judgeField, judgeCase } from "../scripts/eval-dispatcher.mjs";
+import { judgeField, judgeCase } from "../extensions/task/task-eval-judge.ts";
 import { buildTaskDispatcherPrompt } from "../extensions/task/task-dispatcher.ts";
 
 // ===== 评判器原语正确性 =====
@@ -130,14 +128,23 @@ test("judgeCase: omitted 在多字段 contract 里精准定位(回归保护)", (
 	assert.match(failed.detail, /期望 omitted.*实际存在 1080/);
 });
 
-// ===== prompt 注入回归(video-downloader fixture)=====
+// ===== prompt 注入回归(内联 contract 样本,不依赖真实 task fixture)=====
+// ponytail: 原本借 video-downloader/contract.json 当样本,但那让引擎单测耦合具体 task 包。
+// 改用内联 contract 字面量 —— 被测对象是 buildTaskDispatcherPrompt 引擎,样本形状自定即可。
 
-const fixtureDir = fileURLToPath(new URL("./fixtures/taskbooks/video-downloader/", import.meta.url));
+// 一份覆盖关键字段类型(string/number/allowedValues)的内联 contract,形状模拟视频下载 task。
+const sampleContract = {
+	runtimeInput: ["url", "maxHeight", "subLangs", "cookiesFromBrowser"],
+	runtimeInputMeta: {
+		url: { description: "视频地址", required: true },
+		maxHeight: { description: "最大分辨率 height", required: false, default: 0 },
+		subLangs: { description: "字幕语言", required: false },
+		cookiesFromBrowser: { description: "浏览器 cookie 来源", required: false, allowedValues: ["none", "chrome"] },
+	},
+};
 
-test("buildTaskDispatcherPrompt 注入 video-downloader contract 的字段名和 allowedValues", async () => {
-	const contract = JSON.parse(await readFile(path.join(fixtureDir, "contract.json"), "utf8"));
-	const prompt = buildTaskDispatcherPrompt("# skill", contract, "下载 https://x 高清");
-
+test("buildTaskDispatcherPrompt 注入 contract 的字段名和 allowedValues", () => {
+	const prompt = buildTaskDispatcherPrompt("# skill", sampleContract, "下载 https://x 高清");
 	// 字段名注入(dispatcher 据此抽取)
 	assert.match(prompt, /url/);
 	assert.match(prompt, /maxHeight/);
@@ -149,40 +156,11 @@ test("buildTaskDispatcherPrompt 注入 video-downloader contract 的字段名和
 	assert.match(prompt, /分辨率|height/i);
 });
 
-test("buildTaskDispatcherPrompt 把用户原始输入带进 prompt", async () => {
-	const contract = JSON.parse(await readFile(path.join(fixtureDir, "contract.json"), "utf8"));
-	const prompt = buildTaskDispatcherPrompt("# skill", contract, "下载 https://youtu.be/xxx 高清");
+test("buildTaskDispatcherPrompt 把用户原始输入带进 prompt", () => {
+	const prompt = buildTaskDispatcherPrompt("# skill", sampleContract, "下载 https://youtu.be/xxx 高清");
 	assert.match(prompt, /下载 https:\/\/youtu\.be\/xxx 高清/);
 });
 
-// ===== cases fixture 结构完整性 =====
-
-test("video-downloader.cases.json 结构完整且用例 id 唯一", async () => {
-	const casesFile = JSON.parse(await readFile(new URL("./fixtures/dispatcher-evals/video-downloader.cases.json", import.meta.url), "utf8"));
-	const cases = casesFile.cases;
-	assert.ok(Array.isArray(cases) && cases.length > 0, "cases 应非空数组");
-	const ids = cases.map((c) => c.id);
-	assert.equal(new Set(ids).size, ids.length, "用例 id 必须唯一");
-	for (const c of cases) {
-		assert.ok(c.id, "每条用例必须有 id");
-		assert.ok(typeof c.input === "string" && c.input.length > 0, `${c.id} 必须有 input`);
-		assert.ok(c.group, `${c.id} 必须有 group`);
-		// judged 用例必须有 assert;open 用例必须有 expected:"open"
-		if (c.expected === "open") continue;
-		assert.ok(c.assert && typeof c.assert === "object", `${c.id} 必须有 assert`);
-	}
-});
-
-test("video-downloader cases 的 open 用例不计入 judged(标记正确)", async () => {
-	const casesFile = JSON.parse(await readFile(new URL("./fixtures/dispatcher-evals/video-downloader.cases.json", import.meta.url), "utf8"));
-	const openCases = casesFile.cases.filter((c) => c.expected === "open");
-	const judgedCases = casesFile.cases.filter((c) => c.expected !== "open");
-	// open 用例不该有 assert(它是观察用,断言未知)
-	for (const c of openCases) {
-		assert.equal(c.assert, undefined, `open 用例 ${c.id} 不应有 assert`);
-	}
-	// judged 用例必须有 assert
-	for (const c of judgedCases) {
-		assert.ok(c.assert, `judged 用例 ${c.id} 必须有 assert`);
-	}
-});
+// ===== cases 结构完整性校验已迁入各 task 包内 tests/ =====
+// 原 video-downloader.cases.json 的结构/open 用例校验属于该 task 自带测试,
+// 迁移时落到 <taskDir>/video-downloader/tests/ 下。引擎侧不再校验具体 task 的 cases。

@@ -100,66 +100,6 @@ process.exit(0);
 	}
 });
 
-test("custom-source verify tolerates one failed CDP source when another CDP source has items", async () => {
-	const dir = tempDir();
-	try {
-		const outputDir = path.join(dir, "out");
-		await mkdir(outputDir);
-		const input = {
-			timePhrase: "最近7天",
-			days: 7,
-			startIso: "2026-06-29T02:39:55.942Z",
-			endIso: "2026-07-06T02:39:55.942Z",
-			maxItems: 100,
-		};
-		const filters = [
-			["sequel", "Sequel Med Tech", "sequelHtml", true, 3],
-			["senseonics", "Senseonics", "rss", true, 20],
-			["dexcom", "Dexcom IR", "q4Cdp", true, 5],
-			["insulet", "Insulet IR", "q4Cdp", true, 10],
-			["massdevice", "MassDevice", "massdeviceCdp", false, 0],
-			["mobihealthnews", "MobiHealthNews", "mobiCdp", true, 9],
-		] as const;
-		await writeFile(path.join(outputDir, "diabetes_device_custom_source_news.json"), JSON.stringify({
-			task: "diabetes-device-custom-source-news",
-			retrievedAt: "2026-07-06T02:46:36.432Z",
-			timeWindow: {
-				raw: input.timePhrase,
-				days: input.days,
-				startIso: input.startIso,
-				endIso: input.endIso,
-			},
-			sources: filters.map(([filter, source, mode]) => ({ filter, source, mode, url: `https://example.test/${filter}` })),
-			sourceStatus: filters.map(([filter, source, mode, ok, itemCount]) => ({
-				filter,
-				source,
-				mode,
-				ok,
-				queryUrl: `https://example.test/${filter}`,
-				itemCount,
-				matchedCount: 0,
-				...(ok ? {} : { error: "Timed out waiting for page listing content" }),
-			})),
-			summary: {
-				totalSources: 6,
-				successfulSources: 5,
-				blockedSources: 1,
-				totalFetched: 47,
-				totalMatches: 0,
-				bySource: {},
-			},
-			results: [],
-		}, null, 2), "utf8");
-
-		const result = await runVerify({
-			verifyPath: path.join(process.cwd(), "tests", "fixtures", "taskbooks", "diabetes-device-custom-source-news", "verify.mjs"),
-			outputDir,
-			input,
-		});
-
-		assert.equal(result.passed, true);
-		assert.deepEqual(result.failures, []);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
+// ponytail: "custom-source verify tolerates one failed CDP source" 测试已删除 ——
+// 它引用 diabetes-device-custom-source-news/verify.mjs(真实 task fixture),属于该 task 自带测试。
+// 迁移时落到 <taskDir>/diabetes-device-custom-source-news/tests/verify.test.mjs。引擎侧不再耦合具体 task。

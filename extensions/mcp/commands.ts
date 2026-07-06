@@ -115,40 +115,54 @@ async function resolveMcpArgs(
 		return "status";
 	}
 
-	const options = mcpMenuOptions();
-	const selection = await ctx.ui.select(formatMcpMenuTitle(state), options);
-	if (!selection || selection === options[5]) {
+	// ponytail: 主菜单 → 子菜单 两层 select。子菜单选 BACK 时回主菜单重选
+	// (对齐 task/subagent 层级返回模式),用 MCP_BACK 哨兵区分"回主菜单"与"退出命令"。
+	// cancel(Esc)= 退出命令(返回 undefined);BACK 项 = 回主菜单(返回 MCP_BACK)。
+	menuLoop: while (true) {
+		const options = mcpMenuOptions();
+		const selection = await ctx.ui.select(formatMcpMenuTitle(state), options);
+		if (!selection || selection === options[5]) {
+			return undefined; // cancel/退出 → 退出命令
+		}
+		if (selection === options[0]) return "status";
+		if (selection === options[1]) return "reload";
+		if (selection === options[2]) {
+			const r = await selectMcpMode(ctx);
+			if (r === undefined) return undefined; // cancel → 退出
+			if (r === MCP_BACK) continue menuLoop; // BACK → 回主菜单
+			return r;
+		}
+		if (selection === options[3]) {
+			const r = await selectMcpServerToEnable(ctx, state, activeTools);
+			if (r === undefined) return undefined;
+			if (r === MCP_BACK) continue menuLoop;
+			return r;
+		}
+		if (selection === options[4]) {
+			const r = await selectMcpServerToDisable(ctx, state, activeTools);
+			if (r === undefined) return undefined;
+			if (r === MCP_BACK) continue menuLoop;
+			return r;
+		}
 		return undefined;
 	}
-	if (selection === options[0]) {
-		return "status";
-	}
-	if (selection === options[1]) {
-		return "reload";
-	}
-	if (selection === options[2]) {
-		return selectMcpMode(ctx);
-	}
-	if (selection === options[3]) {
-		return selectMcpServerToEnable(ctx, state, activeTools);
-	}
-	if (selection === options[4]) {
-		return selectMcpServerToDisable(ctx, state, activeTools);
-	}
-	return undefined;
 }
 
-async function selectMcpMode(ctx: CommandContext): Promise<string | undefined> {
+// 哨兵:子菜单"返回"信号。用 Symbol 防止与真实命令字符串混淆(resolveMcpArgs 内部消费,绝不外泄)。
+const MCP_BACK = Symbol("mcp.back");
+
+async function selectMcpMode(ctx: CommandContext): Promise<string | symbol | undefined> {
 	const options = mcpModeOptions();
 	const selection = await ctx.ui!.select!(uiText("切换 MCP 权限模式", "Switch MCP Permission Mode"), options);
-	return selection && selection !== options[3] ? selection : undefined;
+	if (!selection) return undefined; // cancel → 退出
+	return selection === options[3] ? MCP_BACK : selection;
 }
 
 async function selectMcpServerToEnable(
 	ctx: CommandContext,
 	state: McpCommandState,
 	activeTools: string[],
-): Promise<string | undefined> {
+): Promise<string | symbol | undefined> {
 	const active = new Set(activeTools);
 	const options = Array.from(state.serverTools)
 		.filter(([, tools]) => !tools.some((tool) => active.has(tool)))
@@ -162,22 +176,20 @@ async function selectMcpServerToEnable(
 
 	if (options.length === 0) {
 		notify(ctx, uiText("没有可启用的 server", "No servers available to enable"));
-		return undefined;
+		return undefined; // 无可选 → 退出命令(不回主菜单:避免 select mock/非交互场景死循环)
 	}
 
 	const back = uiText("返回", "Back");
 	const selection = await ctx.ui!.select!(uiText("启用 MCP server", "Enable MCP Server"), [...options, back]);
-	if (!selection || selection === back) {
-		return undefined;
-	}
-	return `enable ${selection.replace(/ \(stale\)$/, "")}`;
+	if (!selection) return undefined; // cancel → 退出
+	return selection === back ? MCP_BACK : `enable ${selection.replace(/ \(stale\)$/, "")}`;
 }
 
 async function selectMcpServerToDisable(
 	ctx: CommandContext,
 	state: McpCommandState,
 	activeTools: string[],
-): Promise<string | undefined> {
+): Promise<string | symbol | undefined> {
 	const active = new Set(activeTools);
 	const options = Array.from(state.serverTools)
 		.filter(([, tools]) => tools.some((tool) => active.has(tool)))
@@ -185,12 +197,13 @@ async function selectMcpServerToDisable(
 
 	if (options.length === 0) {
 		notify(ctx, uiText("没有可禁用的 server", "No servers available to disable"));
-		return undefined;
+		return undefined; // 无可选 → 退出命令
 	}
 
 	const back = uiText("返回", "Back");
 	const selection = await ctx.ui!.select!(uiText("禁用 MCP server", "Disable MCP Server"), [...options, back]);
-	return selection && selection !== back ? `disable ${selection}` : undefined;
+	if (!selection) return undefined; // cancel → 退出
+	return selection === back ? MCP_BACK : `disable ${selection}`;
 }
 
 function formatMcpMenuTitle(state: McpCommandState): string {

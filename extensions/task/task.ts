@@ -62,6 +62,7 @@ import { dispatchWorker, type TaskWorkerResult } from "./task-worker.ts";
 import { mapWithConcurrencyLimit } from "../subagent-runtime.ts";
 import { isAutopilotOn } from "../shared/autopilot.ts";
 import { isBinaryAvailable } from "../shared/binary.ts";
+import { uiText } from "../shared/ui-language.ts";
 
 const TASK_STATE_TYPE = "task-state";
 const TASK_PLAN_CONTEXT_TYPE = "task-plan-context";
@@ -676,47 +677,65 @@ async function handleTaskShow(
 	onEdit: (loaded: LoadedTaskbook, request?: string) => Promise<void>,
 	onToggleDedicated?: (loaded: LoadedTaskbook) => Promise<void>,
 ): Promise<void> {
-	const finalName = await chooseTaskbookName(ctx, name);
-	if (!finalName) return;
-	const loaded = await loadTaskbook(cwdOf(ctx), finalName);
-	if (!loaded) {
-		ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
-		return;
-	}
 	if (!ctx.ui?.select) {
+		// 非交互场景:保持原单次行为,不做层级返回
+		const finalName = await chooseTaskbookName(ctx, name);
+		if (!finalName) return;
+		const loaded = await loadTaskbook(cwdOf(ctx), finalName);
+		if (!loaded) {
+			ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
+			return;
+		}
 		ctx.ui.notify(formatTaskbookRawDetails(loaded), "info");
 		return;
 	}
-	// ponytail: 详情菜单 —— 菜单项文案带当前状态(🔒/🔓),翻转专用后回菜单继续操作
-	// (轻量动作不该踢出整个 /task);导览/编辑是重动作,做完即走(导览完可选编辑,编辑进 reviewing 状态机)。
-	let isDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
-	const toggleLabel = () => onToggleDedicated
-		? (isDedicated ? "取消专用(当前🔒)" : "设为专用(当前🔓)")
-		: null;
-	const options = () => {
-		const tl = toggleLabel();
-		return tl ? ["task 导览", "task 编辑", tl, "Exit"] : ["task 导览", "task 编辑", "Exit"];
-	};
-	let action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, options());
-	// 专用翻转: 回菜单继续,刷新状态反映新值
-	while (toggleLabel() && action === toggleLabel() && onToggleDedicated) {
-		await onToggleDedicated(loaded);
-		isDedicated = !isDedicated; // 翻转后立即反映到文案
-		action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, options());
+	// ponytail: 详情菜单「返回」= 回 taskbook 列表重选(对齐 mcp/compaction 的 BACK 菜单项)。
+	// 外层 while 让「返回」重弹列表层,选另一本进它详情;列表层 cancel/Exit 才退出。
+	// 键位方案(Ctrl+Left)未采用:pi 的 select cancel 只能 resolve(undefined)= 退出整个命令,
+	// 等同 Esc,做不到"回上一级";菜单项是 ugk 既定层级返回模式。
+	const BACK = uiText("返回", "Back");
+	let pendingName = name;
+	taskbookLoop: while (true) {
+		const finalName = await chooseTaskbookName(ctx, pendingName);
+		pendingName = undefined; // 重弹列表不带预选,避免再跳详情
+		if (!finalName) return; // 列表层 cancel → 退出
+		const loaded = await loadTaskbook(cwdOf(ctx), finalName);
+		if (!loaded) {
+			ctx.ui.notify(`taskbook "${finalName}" 不存在`, "warning");
+			continue; // 回列表重选
+		}
+		// ponytail: 详情菜单 —— 菜单项文案带当前状态(🔒/🔓),翻转专用后回菜单继续操作
+		// (轻量动作不该踢出整个 /task);导览/编辑是重动作,做完即走(导览完可选编辑,编辑进 reviewing 状态机)。
+		let isDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
+		const toggleLabel = () => onToggleDedicated
+			? (isDedicated ? "取消专用(当前🔒)" : "设为专用(当前🔓)")
+			: null;
+		const options = () => {
+			const tl = toggleLabel();
+			return tl ? ["task 导览", "task 编辑", tl, BACK, "Exit"] : ["task 导览", "task 编辑", BACK, "Exit"];
+		};
+		let action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, options());
+		// 专用翻转: 回菜单继续,刷新状态反映新值
+		while (toggleLabel() && action === toggleLabel() && onToggleDedicated) {
+			await onToggleDedicated(loaded);
+			isDedicated = !isDedicated; // 翻转后立即反映到文案
+			action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, options());
+		}
+		if (action === BACK) continue taskbookLoop; // 回 taskbook 列表重选
+		if (!action || action === "Exit") return;
+		if (action === "task 编辑") {
+			await onEdit(loaded);
+			return;
+		}
+		if (action !== "task 导览") return;
+		const items = buildTaskGuideItems(loaded);
+		ctx.ui.notify(await buildTaskGuideText(ctx, loaded, items), "info");
+		const next = await ctx.ui.select("task 导览", ["了解返回", "编辑"]);
+		if (next !== "编辑") return;
+		const request = await ctx.ui?.input?.("输入要编辑的编号和修改意见", "");
+		if (request === undefined || !request.trim()) return;
+		await onEdit(loaded, buildGuideEditRequest(request, items));
 	}
-	if (!action || action === "Exit") return;
-	if (action === "task 编辑") {
-		await onEdit(loaded);
-		return;
-	}
-	if (action !== "task 导览") return;
-	const items = buildTaskGuideItems(loaded);
-	ctx.ui.notify(await buildTaskGuideText(ctx, loaded, items), "info");
-	const next = await ctx.ui.select("task 导览", ["了解返回", "编辑"]);
-	if (next !== "编辑") return;
-	const request = await ctx.ui?.input?.("输入要编辑的编号和修改意见", "");
-	if (request === undefined || !request.trim()) return;
-	await onEdit(loaded, buildGuideEditRequest(request, items));
 }
 
 function scopeFromTokens(tokens: string[]): "user" | "project" {

@@ -1684,7 +1684,6 @@ test("/task menu selects taskbook name for show edit delete and run", async () =
 	const { pi, commands, entries, sentMessages } = makePi();
 	const { cwd, ctx, notifications } = makeCtx();
 	registerTask(pi as any);
-	mockTaskGuideRunner("1. 任务目标: 生成报告\n5. 产物契约: 未声明固定产物");
 	setTaskWorkerRunnerForTests(async () => ({
 		agent: "worker",
 		agentSource: "user",
@@ -1697,7 +1696,7 @@ test("/task menu selects taskbook name for show edit delete and run", async () =
 	setTaskDispatcherForTests(async () => ({ text: "一句话" }));
 
 	try {
-		for (const name of ["menu-show", "menu-edit", "menu-delete", "menu-run"]) {
+		for (const name of ["menu-edit", "menu-delete", "menu-run"]) {
 			await saveTaskbook("project", cwd, name, {
 				description: name,
 				spec,
@@ -1709,33 +1708,37 @@ test("/task menu selects taskbook name for show edit delete and run", async () =
 			});
 		}
 
+		// ponytail: 新菜单(task 优先)—— 列表层 "选择 task" 选 taskbook,子菜单 "taskbook: xxx" 选操作。
+		// makeCtx 默认 select 返回 options[0]:列表层 options[0] 是字典序首个 taskbook,
+		// 子菜单 options[0] 是"运行"。用自定义 select 精确指定每轮选哪个 taskbook。
+		// edit 走命令行路径(/task edit menu-edit)—— 新菜单已隐藏制作入口。
 		ctx.ui.select = (title: string) => {
-			if (title === "Task") return "查看 taskbook 详情";
-			if (title.startsWith("taskbook:")) return "task 导览";
-			if (title === "task 导览") return "了解返回";
-			return "menu-show";
+			if (title === "选择 task") return "menu-run";
+			return "运行"; // 子菜单 taskbook: menu-run → 运行
 		};
-		await commands.get("task").handler("", ctx);
-		assert.match(notifications.at(-1)?.message ?? "", /# task 导览: menu-show \[project\]/);
-		assert.match(notifications.at(-1)?.message ?? "", /1\. 任务目标/);
-
-		ctx.ui.select = (title: string) => title === "Task" ? "编辑 taskbook" : "menu-edit";
-		await commands.get("task").handler("", ctx);
-		assert.equal((entries.at(-1)?.data as any).taskbookName, "menu-edit");
-
-		await commands.get("task").handler("exit", ctx);
-		ctx.ui.select = (title: string) => title === "Task" ? "运行 taskbook(复用)" : "menu-run";
 		ctx.ui.input = () => "一句话";
 		await commands.get("task").handler("", ctx);
 		await waitForTaskRunForTests();
 		assert.match(latestTaskMessage(sentMessages), /PASS/);
 		assert.deepEqual((await loadTaskbook(cwd, "menu-run"))?.taskbook.runs.at(-1)?.input, { text: "一句话" });
 
-		ctx.ui.select = (title: string) => title === "Task" ? "删除 taskbook" : "menu-delete";
+		// edit 走命令行(/task edit menu-edit),验证加载 taskbook 进 reviewing
+		ctx.ui.select = () => undefined;
+		ctx.ui.input = () => "";
+		await commands.get("task").handler("edit menu-edit", ctx);
+		assert.equal((entries.at(-1)?.data as any).taskbookName, "menu-edit");
+		// 退出 reviewing(edit 进的 active phase),否则 /task 无参会走状态机菜单不走新菜单
+		await commands.get("task").handler("exit", ctx);
+
+		// delete 走新菜单:列表选 menu-delete,子菜单选"删除"
+		ctx.ui.select = (title: string) => {
+			if (title === "选择 task") return "menu-delete";
+			return "删除";
+		};
+		ctx.ui.confirm = () => true;
 		await commands.get("task").handler("", ctx);
 		assert.equal(await loadTaskbook(cwd, "menu-delete"), null);
 	} finally {
-		setTaskGuideRunnerForTests(undefined);
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
@@ -2135,9 +2138,10 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 
 		ctx.ui.select = (title: string, options: string[]) => {
 			selections.push({ title, options });
-			// ponytail: 复盘汇报后新增的"让 reviewer 直接修"选项,此测试保持原语义选结束
+			// ponytail: 新菜单把"复盘上次运行"放列表层(带 taskbook 名后缀),用 find 匹配
 			if (options.includes("结束复盘")) return "结束复盘";
-			return "复盘上次运行";
+			const reviewItem = options.find((o) => o.startsWith("复盘上次运行"));
+			return reviewItem ?? options[0];
 		};
 		ctx.ui.input = () => undefined;
 		const widgetCountBeforeCancel = widgetCalls.length;
@@ -2149,8 +2153,8 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 		ctx.ui.input = () => "一开始没有按 skill 里的 CDP 方法做";
 		await commands.get("task").handler("", ctx);
 
-		// ponytail: 复盘成功后新增了"让 reviewer 直接修"select,at(-1) 不再是主菜单,改 some 查找
-		assert.ok(selections.some((s) => s.options.includes("复盘上次运行")));
+		// ponytail: 新菜单"复盘上次运行"带 taskbook 名后缀,用 some+startsWith 匹配
+		assert.ok(selections.some((s) => s.options.some((o) => o.startsWith("复盘上次运行"))));
 		assert.ok(widgetCalls.some((call) => (call.lines?.join("\n") ?? "").includes("正在复盘")));
 		// ponytail: 验证 reviewer 思考过程流式刷到了 widget(不再干等静态文案)
 		assert.ok(widgetCalls.some((call) => (call.lines?.join("\n") ?? "").includes("正在分析 worker 的执行路径")));
@@ -2173,57 +2177,6 @@ test("/task run shows progress and reviews last run with a clean reviewer", asyn
 	}
 });
 
-test('/task review-last-run 选「让 reviewer 直接修」则用 summary 当指令进 edit', async () => {
-	const { pi, commands, userMessages, sentMessages } = makePi();
-	const { cwd, ctx, selections } = makeCtx();
-	registerTask(pi as any);
-	// worker 产出合法产物 verify 一次过 让 run 落 pass 以触发复盘上次运行
-	setTaskWorkerRunnerForTests(async (...args: any[]) => {
-		args[7]?.({ content: [{ type: "text", text: "执行中" }], details: { mode: "single", agentScope: "both", projectAgentsDir: null, results: [] } });
-		return { agent: "worker", agentSource: "user", task: "t", exitCode: 0, messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }], stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 } } as any;
-	});
-	// reviewer 复盘吐出明确诊断加建议的 summary
-	setTaskRunReviewerRunnerForTests(async (...args: any[]) => {
-		args[7]?.({ content: [{ type: "text", text: "分析中" }], details: { mode: "single", agentScope: "both", projectAgentsDir: null, results: [] } });
-		return { agent: args[2], agentSource: "user", task: args[3], exitCode: 0, messages: [{ role: "assistant", content: [{ type: "text", text: "修复建议：把 vendored scripts 复制到 taskbook 目录。" }] }], stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 } } as any;
-	});
-	setTaskDispatcherForTests(async () => ({}));
-	try {
-		await saveTaskbook("project", cwd, "fix-from-review", {
-			description: "fix from review",
-			spec,
-			skill: "# Skill",
-			verify: "process.exit(0);\n",
-			contract: { artifacts: [] },
-		});
-		await commands.get("task").handler("run fix-from-review", ctx);
-		await waitForTaskRunForTests();
-
-		// 进入复盘 用户观察加复盘后选「让 reviewer 直接修」
-		ctx.ui.input = () => "结果有问题";
-		ctx.ui.select = (title: string, options: string[]) => {
-			selections.push({ title, options });
-			if (options.includes("让 reviewer 直接修")) return "让 reviewer 直接修";
-			return "复盘上次运行";
-		};
-		await commands.get("task").handler("", ctx);
-
-		// 断言 复盘汇报后给出了「让 reviewer 直接修」选项
-		assert.ok(selections.some((s) => s.options.includes("让 reviewer 直接修")));
-		// 选中后 startTaskbookEdit 用 summary 当 UserEditRequest 发 task-review-prompt 给主 agent
-		const editPrompt = sentMessages.find((m) => m.message?.customType === "task-review-prompt"
-			&& typeof m.message?.content === "string"
-			&& m.message.content.includes("UserEditRequest:"));
-		assert.ok(editPrompt, "应有含 UserEditRequest 的 task-review-prompt 消息");
-		assert.match(editPrompt!.message.content, /修复建议：把 vendored scripts 复制到 taskbook 目录/);
-		assert.equal(userMessages.length, 0);
-	} finally {
-		setTaskRunReviewerRunnerForTests(undefined);
-		setTaskWorkerRunnerForTests(undefined);
-		setTaskDispatcherForTests(undefined);
-		rmSync(cwd, { recursive: true, force: true });
-	}
-});
 
 test("/task run can be stopped and records user notes while worker is running", async () => {
 	const { pi, commands, handlers } = makePi();
@@ -2281,7 +2234,9 @@ test("/task run can be stopped and records user notes while worker is running", 
 			return "Exit";
 		};
 		await commands.get("task").handler("", ctx);
-		assert.ok(selections.at(-1)?.options.includes("复盘上次运行"));
+		// ponytail: 新菜单把"复盘上次运行"放在"选择 task"列表层(带 taskbook 名后缀),
+		// 不再是旧 Task 主菜单的独立项。用 some+startsWith 匹配。
+		assert.ok(selections.at(-1)?.options.some((o) => o.startsWith("复盘上次运行")));
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);

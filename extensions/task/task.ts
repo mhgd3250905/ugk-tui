@@ -1975,6 +1975,85 @@ export function registerTask(pi: ExtensionAPI): void {
 			: `已将"${loaded.taskbook.name}"设为专用,该 task 对 agent 隐藏(仅当你点名 task 名时才可用)。`, "info");
 	}
 
+	// ponytail: /task 无参 + idle 时的交互主入口(task 优先范式)。
+	// 层级:运行控制(activeTaskRun)→ task 列表 → per-task 子菜单。
+	// active phase(planning/executing/reviewing)不进这里,走 promptTaskMenu 状态机出口。
+	// "返回上一级"= continue taskLoop 重弹列表(对齐 task/subagent/mcp 层级返回模式)。
+	// 制作/编辑入口隐藏(走外部 agent)。
+	async function runTaskMenu(ctx: any): Promise<void> {
+		// 运行中:优先弹控制面板(运行中点别的 task 运行会被 handleTaskRun 拒,先控制更顺)
+		if (activeTaskRun) {
+			const opts = [uiText("停止当前运行", "Stop current run"), uiText("查看运行进展", "View progress"), uiText("返回 task 列表", "Back to task list"), "Exit"];
+			const sel = await ctx.ui.select(uiText("Task(运行中)", "Task (running)"), opts);
+			if (!sel || sel === opts[3]) return;
+			if (sel === opts[0]) { activeTaskRun.abortController.abort(); ctx.ui.notify(`已请求停止 taskbook "${activeTaskRun.taskbookName}"。`, "info"); return; }
+			if (sel === opts[1]) {
+				ctx.ui.notify([
+					`taskbook "${activeTaskRun.taskbookName}" 运行中。`,
+					...(activeTaskRun.progress.length > 0 ? ["", "最近进展:", ...activeTaskRun.progress.map((line, index) => `${index + 1}. ${line}`)] : []),
+				].join("\n"), "info");
+				return;
+			}
+			// opts[2] 返回 task 列表 → 落到下面
+		}
+
+		// task 列表层
+		const BACK = uiText("返回", "Back");
+		taskLoop: while (true) {
+			const items = await listTaskbooks(cwdOf(ctx));
+			if (items.length === 0) {
+				ctx.ui.notify(uiText("没有 taskbook。", "No taskbooks found."), "warning");
+				return;
+			}
+			const byLabel = new Map(items.map((item) => {
+				const lock = Array.isArray(item.tags) && item.tags.includes("dedicated") ? "🔒 " : "";
+				return [`${lock}${item.name}`, item.name];
+			}));
+			const listOpts: string[] = [];
+			if (lastTaskRunReview && !isActivePhase(state.phase)) {
+				listOpts.push(uiText(`复盘上次运行: ${lastTaskRunReview.taskbookName}`, `Review last run: ${lastTaskRunReview.taskbookName}`));
+			}
+			listOpts.push(...byLabel.keys(), "Exit");
+			const listSel = await ctx.ui.select(uiText("选择 task", "Select task"), listOpts);
+			if (!listSel || listSel === "Exit") return;
+			// 复盘上次运行(列表顶层独立项)
+			if (lastTaskRunReview && !isActivePhase(state.phase) && listSel === listOpts[0]) {
+				await handleTaskCommand("review-last-run", ctx);
+				return;
+			}
+			const taskName = byLabel.get(listSel);
+			if (!taskName) return;
+			const loaded = await loadTaskbook(cwdOf(ctx), taskName);
+			if (!loaded) {
+				ctx.ui.notify(`taskbook "${taskName}" 不存在`, "warning");
+				continue; // 回列表重选
+			}
+
+			// ④ per-task 子菜单
+			let isDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
+			const toggleLabel = () => isDedicated ? uiText("取消专用(当前🔒)", "Undedicate (currently 🔒)") : uiText("设为专用(当前🔓)", "Dedicate (currently 🔒)");
+			const subOpts = () => [uiText("运行", "Run"), toggleLabel(), uiText("重命名", "Rename"), uiText("上传到市场", "Publish"), uiText("删除", "Delete"), BACK, "Exit"];
+			let action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, subOpts());
+			// 专用翻转后回子菜单刷新文案
+			while (action === toggleLabel()) {
+				await toggleTaskDedicated(ctx, loaded);
+				isDedicated = !isDedicated;
+				action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, subOpts());
+			}
+			if (action === BACK) continue taskLoop; // 返回上一级 → task 列表
+			if (!action || action === "Exit") return;
+			if (action === subOpts()[0]) {
+				// 运行:弹一句话输入收 rawInput,再调 handleTaskRun
+				const rawInput = await ctx.ui?.input?.(uiText("一句话输入(可留空)", "One-line input (optional)"), "") ?? "";
+				await handleTaskRun(pi, ctx, loaded, rawInput);
+				return;
+			}
+			if (action === subOpts()[2]) { await handleTaskRename(ctx, loaded); return; }
+			if (action === subOpts()[3]) { await handleTaskPublish(ctx, loaded); return; }
+			if (action === subOpts()[4]) { await handleTaskDelete(ctx, loaded); return; }
+		}
+	}
+
 	function enableTask(ctx: any): void {
 		restoreToolsSnapshot ??= typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
 		state = enterPlanning(state);
@@ -2229,6 +2308,13 @@ export function registerTask(pi: ExtensionAPI): void {
 	pi.registerTool?.(taskCompleteTool);
 
 	async function handleTaskCommand(args: string, ctx: any): Promise<void> {
+			// ponytail: 无参 + 有 UI + idle → 新菜单 runTaskMenu(task 优先范式)。
+			// 其余(active phase / 运行中 / 有命令行参数)走 resolveTaskCommandArgs 原逻辑——
+			// active phase 的状态机出口菜单(进入复盘/停止/退出 Task)和命令行分发都不变。
+			if (!args.trim() && ctx.ui?.select && !isActivePhase(state.phase) && state.pendingTransition !== "repair") {
+				await runTaskMenu(ctx);
+				return;
+			}
 			const resolvedArgs = await resolveTaskCommandArgs(args, ctx, state, activeTaskRun !== undefined, lastTaskRunReview !== undefined);
 			if (resolvedArgs === undefined) return;
 			const { action, name, tokens, rawInput } = parseTaskCommand(resolvedArgs);
@@ -2263,15 +2349,10 @@ export function registerTask(pi: ExtensionAPI): void {
 					// 复盘成功时直接问一句,选"让 reviewer 修"就用 summary 当修改指令进 edit,
 					// 形成 reviewer 自诊断→自我修复闭环。
 					if (result.ok && ctx.ui?.select) {
-						const next = await ctx.ui.select("复盘完成", ["让 reviewer 直接修", "仅查看建议", "结束复盘"]);
-						if (next === "让 reviewer 直接修") {
-							const loaded = await loadTaskbook(cwdOf(ctx), lastTaskRunReview.taskbookName);
-							if (loaded) {
-								await startTaskbookEdit(ctx, loaded, result.summary);
-								return;
-							}
-							ctx.ui.notify(`taskbook "${lastTaskRunReview.taskbookName}" 加载失败,请手动 /task edit。`, "warning");
-						}
+						// ponytail: 移除"让 reviewer 直接修"——它会进 reviewing 内部状态机,
+						// 但新菜单已隐藏制作/编辑入口(走外部 agent),reviewing 无出口会成死状态。
+						// 只留查看建议/结束。
+						await ctx.ui.select("复盘完成", ["仅查看建议", "结束复盘"]);
 					}
 				} finally {
 					setTaskRunWidget(ctx, undefined);

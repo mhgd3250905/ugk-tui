@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -75,6 +75,49 @@ test("saveTaskbook writes and loadTaskbook reads all five files", async () => {
 		assert.equal(loaded?.skill, "# 生成报告\n");
 		assert.equal(loaded?.verify, "process.exit(0);\n");
 		assert.deepEqual(loaded?.contract, contract);
+		assert.equal(existsSync(path.join(taskDir("project", cwd, "report"), "tests")), false);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("saveTaskbook writes optional bundled tests under tests directory", async () => {
+	const cwd = tempCwd();
+	try {
+		await saveTaskbook("project", cwd, "with-tests", {
+			description: "带测试",
+			spec,
+			skill: "# 生成报告\n",
+			verify: "process.exit(0);\n",
+			contract,
+			tests: {
+				"verify.test.mjs": "import test from 'node:test';\n",
+				"eval.cases.json": "[{\"input\":\"生成报告\"}]\n",
+			},
+		});
+
+		const dir = taskDir("project", cwd, "with-tests");
+		assert.equal(await readFile(path.join(dir, "tests", "verify.test.mjs"), "utf8"), "import test from 'node:test';\n");
+		assert.equal(await readFile(path.join(dir, "tests", "eval.cases.json"), "utf8"), "[{\"input\":\"生成报告\"}]\n");
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("saveTaskbook rejects unsafe bundled test filenames", async () => {
+	const cwd = tempCwd();
+	try {
+		for (const filename of ["../escape.test.mjs", "/tmp/escape.test.mjs", "C:/tmp/escape.test.mjs"]) {
+			await assert.rejects(() => saveTaskbook("project", cwd, "bad-tests", {
+				description: "bad tests",
+				spec,
+				skill: "# 生成报告\n",
+				verify: "process.exit(0);\n",
+				contract,
+				tests: { [filename]: "process.exit(0);\n" },
+			}), new RegExp(`Invalid tests filename: ${filename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+			assert.equal(existsSync(taskDir("project", cwd, "bad-tests")), false);
+		}
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

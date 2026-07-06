@@ -130,9 +130,16 @@ export async function saveTaskbook(scope: "user" | "project", cwd: string, name:
 	verify: string;
 	contract: unknown;
 	tags?: string[];
+	tests?: Record<string, string>;
 }): Promise<Taskbook> {
 	if (!isValidTaskbookName(name)) throw new Error(`Invalid taskbook name: ${name}`);
 	assertValidContract(data.contract);
+	const testEntries = Object.entries(data.tests ?? {});
+	for (const [fname] of testEntries) {
+		if (fname.includes("..") || path.isAbsolute(fname) || path.win32.isAbsolute(fname) || path.posix.isAbsolute(fname)) {
+			throw new Error(`Invalid tests filename: ${fname}`);
+		}
+	}
 	const dir = taskDir(scope, cwd, name);
 	const existing = await loadFromDir(scope, dir).catch(() => null);
 	const now = new Date().toISOString();
@@ -153,6 +160,13 @@ export async function saveTaskbook(scope: "user" | "project", cwd: string, name:
 		writeFile(path.join(dir, "verify.mjs"), data.verify, "utf8"),
 		writeJson(path.join(dir, "contract.json"), data.contract),
 	]);
+	if (testEntries.length > 0) {
+		const testsDir = path.join(dir, "tests");
+		await mkdir(testsDir, { recursive: true });
+		await Promise.all(testEntries.map(([fname, content]) =>
+			writeFile(path.join(testsDir, fname), content, "utf8")
+		));
+	}
 	return taskbook;
 }
 

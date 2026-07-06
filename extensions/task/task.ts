@@ -2101,6 +2101,7 @@ export function registerTask(pi: ExtensionAPI): void {
 					verify: state.reviewResult.verify,
 					contract: state.reviewResult.contract,
 					tags: state.reviewResult.tags,
+					tests: state.reviewResult.tests,
 				});
 				state = landTask(state);
 				persistState();
@@ -2125,6 +2126,7 @@ export function registerTask(pi: ExtensionAPI): void {
 			verify: state.reviewResult.verify,
 			contract: state.reviewResult.contract,
 			tags: state.reviewResult.tags,
+			tests: state.reviewResult.tests,
 		});
 		state = landTask(state);
 		persistState();

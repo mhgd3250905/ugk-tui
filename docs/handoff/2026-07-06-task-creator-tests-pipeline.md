@@ -326,14 +326,14 @@ feat(task): 打通 task-creator 测试管道 + SKILL.md 补 tests 章节
 
 ## 5. 进度跟踪
 
-- [ ] 改动 1:task-state.ts 加 tests 字段
-- [ ] 改动 2a:task-prompts.ts normalizeTaskReviewResult 解析 tests
-- [ ] 改动 2b:task-prompts.ts TASK_REVIEW_PROMPT 加示例 + 第 7 步
-- [ ] 改动 3:task-book.ts saveTaskbook 落盘 tests/(含路径防护)
-- [ ] 改动 4:task.ts 两处 saveTaskbook 调用传 tests
-- [ ] 改动 5:SKILL.md 加 tests/ 章节
-- [ ] 新增测试(saveTaskbook tests 落盘 + 路径防护 + normalize 解析)
-- [ ] npm test 681 pass
+- [x] 改动 1:task-state.ts 加 tests 字段
+- [x] 改动 2a:task-prompts.ts normalizeTaskReviewResult 解析 tests
+- [x] 改动 2b:task-prompts.ts TASK_REVIEW_PROMPT 加示例 + 第 7 步
+- [x] 改动 3:task-book.ts saveTaskbook 落盘 tests/(含路径防护)
+- [x] 改动 4:task.ts 两处 saveTaskbook 调用传 tests
+- [x] 改动 5:SKILL.md 加 tests/ 章节
+- [x] 新增测试(saveTaskbook tests 落盘 + 路径防护 + normalize 解析)
+- [x] npm test 683 total / 681 pass / 2 skipped / 0 fail
 - [ ] 端到端验证(造 task 走完流程)
 - [ ] PR 提交
 

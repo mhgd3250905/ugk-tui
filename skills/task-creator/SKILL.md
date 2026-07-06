@@ -302,11 +302,29 @@ if (failures.length > 0) {
 }
 ```
 
+## 可选 `tests/` 子目录 — task 自带测试资产
+
+复杂 task 建议随包带测试资产，放在 task 目录下的 `tests/`：
+
+- `tests/verify.test.mjs`：有 `verify.mjs` 时推荐补，至少用合格产物测 PASS、用空产物/缺字段测 FAIL。
+- `tests/collect.test.mjs`：有 `scripts/` 且 collector 支持 `UGK_COLLECTOR_SELFTEST` 时推荐补，做离线 smoke。
+- `tests/eval.cases.json`：dispatcher 翻译质量 eval 用例，见下方“自验 4”。
+
+reviewer 输出 taskbook JSON 时可在顶层加 `tests` 对象；key 是相对 `tests/` 的文件名，value 是文件全文。不要写绝对路径或 `..`。
+
+```json
+{
+  "tests": {
+    "verify.test.mjs": "import test from \"node:test\";\n..."
+  }
+}
+```
+
 ## 标准创建流程（5 步，替代满仓乱扫）
 
 1. **读源能力** — 读要封装的 skill/脚本本体，搞懂它接受什么、产出什么。只读这一个目录，别扩散。**如果源是现成脚本（.py/.mjs/.sh），记下它——稍后复制进 taskbook 的 `scripts/` 子目录让 worker 直接调用，别让 worker 现写一份。**
 2. **定参数** — 哪些值每次运行会变？把它们定为 `contract.json` 的 `runtimeInput`。固定值写进脚本/spec，别参数化。
-3. **照样本写五件套** — `ls ~/.pi/agent/tasks/` 找一个**真实样本**对照，按上面格式填五个文件。**有现成脚本就一并建 `scripts/` 子目录把脚本放进去，skill.md 里用 `$TASK_DIR/scripts/xxx` 引用**（见上方"自带脚本"段）。
+3. **照样本写五件套** — `ls ~/.pi/agent/tasks/` 找一个**真实样本**对照，按上面格式填五个文件。**有现成脚本就一并建 `scripts/` 子目录把脚本放进去，skill.md 里用 `$TASK_DIR/scripts/xxx` 引用**（见上方"自带脚本"段）。有 verify 自测、collector 自检或 dispatcher eval 用例时，一并建 `tests/` 子目录随包保存。
 4. **手验 verify.mjs** — 自己设 `TASK_INPUT` / `TASK_OUTPUT_DIR` 环境变量跑一遍 verify，确认它真能判对错。这步省不得，验收脚本错了 task 永远过不了或假通过。详见下方"写完自验清单"——**这一步做扎实，第 5 步才能一次 PASS，不用反复试错。**
 5. **落盘 + 试跑** — 五件套（+ scripts/）写到 scope 目录，`/task run <name> <自然语言输入>` 试一次，看 PASS。**前提是第 4 步自验过了**；自验没过就 `/task run` 是拿真跑当调试，浪费 token 和时间。
 

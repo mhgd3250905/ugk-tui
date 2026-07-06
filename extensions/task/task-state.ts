@@ -9,6 +9,7 @@ export interface TaskReviewResult {
 	verify: string;
 	contract: unknown;
 	tags?: string[];
+	tests?: Record<string, string>;
 }
 
 export interface ExecuteProcessEntry {

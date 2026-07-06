@@ -59,6 +59,7 @@ Your job:
 6. Only after the questionnaire returns, draft verify.mjs: a Node ESM script using only Node stdlib and external tools when needed. It reads TASK_OUTPUT_DIR and TASK_INPUT, collects failures[], prints JSON failures on FAIL, exits 0 on PASS and non-zero on FAIL.
    verify.mjs may be stored in a temporary directory during self-check, so do not use import.meta.url or __dirname to find workspace files. Use process.cwd() for workspace-relative reads, or pass explicit paths through TASK_INPUT.
    On FAIL stdout MUST be a VerifyFailure[] JSON array: [{ "assertion": "...", "expected": "...", "actual": "...", "hint": "optional" }]. Do not print {"failures":[...]}.
+7. Optional: if the task has verify.mjs, include tests/verify.test.mjs using runVerify to cover a PASS sample and a FAIL sample such as empty or missing fields. The tests object key is relative to tests/ (for example "verify.test.mjs") and the value is the full file content. If scripts/ exists and supports UGK_COLLECTOR_SELFTEST, include tests/collect.test.mjs the same way. Skip this for simple tasks that do not need bundled tests.
 
 **MANDATORY closing question**: The questionnaire's final question MUST be id="extras", prompt="你还有什么要补充的吗?(没有可留空)", with exactly one option {"value":"none","label":"没有了"} and allowOther: true.
 
@@ -77,6 +78,9 @@ When review is complete, output parseable JSON only:
 		"runtimeInputMeta": {},
 		"requiredTools": [],
 		"requiredBinaries": []
+	},
+	"tests": {
+		"verify.test.mjs": "import test from \\"node:test\\";\\n..."
 	}
 }
 \`\`\`
@@ -114,12 +118,20 @@ function normalizeTaskReviewResult(value: unknown): {
 	verify: string;
 	contract: unknown;
 	tags?: string[];
+	tests?: Record<string, string>;
 } | undefined {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const record = value as Record<string, unknown>;
 	if (typeof record.skill !== "string" || record.skill.trim().length === 0) return undefined;
 	if (typeof record.verify !== "string" || record.verify.trim().length === 0) return undefined;
 	if (!record.contract || typeof record.contract !== "object" || Array.isArray(record.contract)) return undefined;
+	let tests: Record<string, string> | undefined;
+	if (record.tests && typeof record.tests === "object" && !Array.isArray(record.tests)) {
+		const entries = Object.entries(record.tests as Record<string, unknown>);
+		if (entries.length > 0 && entries.every(([, content]) => typeof content === "string")) {
+			tests = Object.fromEntries(entries) as Record<string, string>;
+		}
+	}
 	return {
 		description: typeof record.description === "string" && record.description.trim()
 			? record.description.trim()
@@ -130,6 +142,7 @@ function normalizeTaskReviewResult(value: unknown): {
 		tags: Array.isArray(record.tags) && record.tags.every((item) => typeof item === "string")
 			? record.tags
 			: undefined,
+		tests,
 	};
 }
 

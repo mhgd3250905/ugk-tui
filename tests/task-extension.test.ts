@@ -675,6 +675,8 @@ test("task review prompt parses skill verify contract output", () => {
 	assert.match(TASK_REVIEW_PROMPT, /import\.meta\.url/);
 	assert.match(TASK_REVIEW_PROMPT, /VerifyFailure\[\]/);
 	assert.match(TASK_REVIEW_PROMPT, /\{"failures":\[/);
+	assert.match(TASK_REVIEW_PROMPT, /tests/);
+	assert.match(TASK_REVIEW_PROMPT, /tests\/verify\.test\.mjs/);
 
 	const parsed = extractTaskReviewResult(`\`\`\`json
 {
@@ -682,7 +684,10 @@ test("task review prompt parses skill verify contract output", () => {
   "tags": ["report"],
   "skill": "# Skill",
   "verify": "process.exit(0)",
-  "contract": {"artifacts":[]}
+  "contract": {"artifacts":[]},
+  "tests": {
+    "verify.test.mjs": "import test from \\"node:test\\";\\n"
+  }
 }
 \`\`\``);
 	assert.deepEqual(parsed, {
@@ -691,6 +696,37 @@ test("task review prompt parses skill verify contract output", () => {
 		skill: "# Skill",
 		verify: "process.exit(0)",
 		contract: { artifacts: [] },
+		tests: { "verify.test.mjs": "import test from \"node:test\";\n" },
+	});
+	assert.deepEqual(extractTaskReviewResult(`\`\`\`json
+{
+  "skill": "# Skill",
+  "verify": "process.exit(0)",
+  "contract": {"artifacts":[]},
+  "tests": {"verify.test.mjs": 1}
+}
+\`\`\``), {
+		description: "Reusable one-step task",
+		skill: "# Skill",
+		verify: "process.exit(0)",
+		contract: { artifacts: [] },
+		tags: undefined,
+		tests: undefined,
+	});
+	assert.deepEqual(extractTaskReviewResult(`\`\`\`json
+{
+  "skill": "# Skill",
+  "verify": "process.exit(0)",
+  "contract": {"artifacts":[]},
+  "tests": {}
+}
+\`\`\``), {
+		description: "Reusable one-step task",
+		skill: "# Skill",
+		verify: "process.exit(0)",
+		contract: { artifacts: [] },
+		tags: undefined,
+		tests: undefined,
 	});
 	assert.equal(extractTaskReviewResult("{}"), undefined);
 });
@@ -2644,7 +2680,7 @@ test("/task save defaults to execute output dir when no output-dir is passed", a
 			messages: [{
 				role: "assistant",
 				content: [{ type: "text", text: `\`\`\`json
-{"description":"生成报告","skill":"# Skill","verify":"import {stat} from 'node:fs/promises'; try { await stat(process.env.TASK_OUTPUT_DIR + '/report.json'); process.exit(0); } catch { console.log(JSON.stringify([{assertion:'report.json exists',expected:'present',actual:'missing'}])); process.exit(1); }","contract":{"artifacts":[{"name":"report.json","type":"file"}]}}
+{"description":"生成报告","skill":"# Skill","verify":"import {stat} from 'node:fs/promises'; try { await stat(process.env.TASK_OUTPUT_DIR + '/report.json'); process.exit(0); } catch { console.log(JSON.stringify([{assertion:'report.json exists',expected:'present',actual:'missing'}])); process.exit(1); }","contract":{"artifacts":[{"name":"report.json","type":"file"}]},"tests":{"verify.test.mjs":"import test from 'node:test';\\n"}}
 \`\`\`` }],
 			}],
 		}, ctx);
@@ -2653,6 +2689,7 @@ test("/task save defaults to execute output dir when no output-dir is passed", a
 
 		assert.equal((entries.at(-1)?.data as any).phase, "landed");
 		assert.match(notifications.at(-1)?.message ?? "", /已就绪/);
+		assert.equal(readFileSync(path.join(cwd, ".tasks", "smart", "tests", "verify.test.mjs"), "utf8"), "import test from 'node:test';\n");
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

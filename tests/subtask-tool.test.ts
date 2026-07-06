@@ -897,6 +897,54 @@ test("run_task retries worker after verify fail and passes on the second attempt
 	}
 });
 
+test("run_task honors contract maxRetry 0 after verify fail", async () => {
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	registerTask(pi as any);
+	let workerCalls = 0;
+	let checkerCalls = 0;
+	setTaskWorkerRunnerForTests(async (_d: unknown, _a: unknown, _n: string, task: string) => {
+		workerCalls += 1;
+		const { writeFile, mkdir } = await import("node:fs/promises");
+		const dir = outputDirFromTask(task);
+		await mkdir(dir, { recursive: true });
+		await writeFile(path.join(dir, "out.json"), "{bad json", "utf8");
+		return workerOk("bad collector output");
+	});
+	setTaskCheckerRunnerForTests(async () => {
+		checkerCalls += 1;
+		return checkerRetryMock()();
+	});
+	setTaskDispatcherForTests(async () => ({ text: "x" }));
+	try {
+		await saveTaskbook("project", cwd, "no-retry-collector", {
+			description: "no retry collector",
+			spec,
+			skill: "# Skill",
+			verify: JSON_VERIFY,
+			contract: {
+				runtimeInput: ["text"],
+				artifacts: [{ name: "out.json", type: "file", required: true }],
+				maxRetry: 0,
+			},
+		});
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", { name: "no-retry-collector", input: "x" }, undefined, undefined, ctx);
+
+		assert.equal(result.details.results[0].status, "fail");
+		assert.equal(result.details.results[0].attempts, 1, "maxRetry=0 时 worker 只跑 1 次");
+		assert.equal(workerCalls, 1);
+		assert.equal(checkerCalls, 0, "没有重试预算时不应调用 checker");
+		assert.match(JSON.stringify(result.details.results[0].verifyFailures), /json is valid/);
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskCheckerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("run_task fails after exhausting all 4 attempts with verify failures", async () => {
 	const { pi, tools } = makePi();
 	const { cwd, ctx } = makeCtx();

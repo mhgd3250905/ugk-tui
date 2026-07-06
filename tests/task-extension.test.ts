@@ -1756,17 +1756,19 @@ test("/task run prompts for missing requiredEnv and passes it to worker", async 
 	}
 });
 
-// ponytail: contract 依赖字段校验(顺带修的独立 bug)。requiredEnv/requiredTools/requiredBinaries
-// 都必须是可选 string[],之前完全不校验、乱写运行时才炸。
-test("assertValidContract rejects malformed requiredEnv/requiredTools/requiredBinaries", () => {
-	// 合法:三个都是可选 string[]
-	assertValidContract({ runtimeInput: [], artifacts: [], requiredEnv: ["A"], requiredTools: ["chrome_cdp"], requiredBinaries: ["yt-dlp"] });
+// ponytail: contract 依赖/运行字段校验(顺带修的独立 bug)。这些字段必须早失败,
+// 否则乱写到运行时才炸,甚至像 maxRetry:"0" 这样静默走默认重试。
+test("assertValidContract rejects malformed dependency and retry fields", () => {
+	// 合法:字段可选;maxRetry 是非负整数
+	assertValidContract({ runtimeInput: [], artifacts: [], requiredEnv: ["A"], requiredTools: ["chrome_cdp"], requiredBinaries: ["yt-dlp"], maxRetry: 0 });
 	// 合法:缺省也行(老 taskbook 兼容)
 	assertValidContract({ runtimeInput: [], artifacts: [] });
 	// 非法:不是数组
 	assert.throws(() => assertValidContract({ requiredEnv: "MIMO_API_KEY" }), /Invalid contract.requiredEnv/);
 	assert.throws(() => assertValidContract({ requiredTools: "chrome_cdp" }), /Invalid contract.requiredTools/);
 	assert.throws(() => assertValidContract({ requiredBinaries: "yt-dlp" }), /Invalid contract.requiredBinaries/);
+	assert.throws(() => assertValidContract({ maxRetry: "0" }), /Invalid contract.maxRetry/);
+	assert.throws(() => assertValidContract({ maxRetry: -1 }), /Invalid contract.maxRetry/);
 	// 非法:数组里含非字符串
 	assert.throws(() => assertValidContract({ requiredBinaries: ["yt-dlp", 123] }), /Invalid contract.requiredBinaries/);
 });

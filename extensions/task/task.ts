@@ -901,6 +901,13 @@ function taskbookModel(contract: unknown, field: "dispatcherModel" | "workerMode
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function contractMaxRetry(contract: unknown): number {
+	const value = asRecord(contract).maxRetry;
+	return typeof value === "number" && Number.isFinite(value)
+		? Math.max(0, Math.floor(value))
+		: 3;
+}
+
 function formatWorkerSummary(summary: string | undefined): string {
 	const text = summary?.trim();
 	if (!text) return "无";
@@ -1369,7 +1376,7 @@ async function executeSubtask(
 		};
 	}
 	await mkdir(outputDir, { recursive: true });
-	const maxRetry = 3;
+	const maxRetry = contractMaxRetry(loaded.contract);
 	// ponytail: runId 在启动时就显示,而非等到 worker 完成。worker 卡住/慢时用户等不起
 	// 跑完才拿到 runId —— 卡住的那一刻就要能去 E:/AII/ugk-worker-logs/ 翻日志排查。
 	// runId = path.basename(runDir),与完成时 formatSubtaskToolText 提取的格式完全一致。
@@ -1582,7 +1589,7 @@ async function handleTaskRun(
 	// 有数秒~十几秒静默期(dispatcher 是一次阻塞 LLM 调用)。此处补齐,消除空白 ╌╌ 体验。
 	setTaskRunWidget(ctx, [`⏳ taskbook "${finalName}" 准备中...`, "正在解析输入..."]);
 	const runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, finalRawInput ?? "");
-	const maxRetry = 3;
+	const maxRetry = contractMaxRetry(loaded.contract);
 	const abortController = new AbortController();
 	const runState: ActiveTaskRun = { taskbookName: finalName, abortController, progress: [], notes: [] };
 	activeTaskRun = runState;

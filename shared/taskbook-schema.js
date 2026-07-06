@@ -59,6 +59,7 @@ export function assertValidContract(contract) {
 	if (contract.requiredEnv !== undefined && !isStringArray(contract.requiredEnv)) throw new Error("Invalid contract.requiredEnv");
 	if (contract.requiredTools !== undefined && !isStringArray(contract.requiredTools)) throw new Error("Invalid contract.requiredTools");
 	if (contract.requiredBinaries !== undefined && !isStringArray(contract.requiredBinaries)) throw new Error("Invalid contract.requiredBinaries");
+	if (contract.maxRetry !== undefined && (!Number.isInteger(contract.maxRetry) || contract.maxRetry < 0)) throw new Error("Invalid contract.maxRetry");
 	if (contract.runtimeInputMeta === undefined) return;
 	if (!contract.runtimeInputMeta || typeof contract.runtimeInputMeta !== "object" || Array.isArray(contract.runtimeInputMeta)) {
 		throw new Error("Invalid contract.runtimeInputMeta");

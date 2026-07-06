@@ -1,0 +1,36 @@
+{
+	"task": "diabetes-news-report-translator",
+	"description": "diabetes-news-report-translator dispatcher eval。核心难点：只接收 packPath，targetLanguage 固定 zh-CN，不接收原始 collector JSON 列表。",
+	"cases": [
+		{
+			"id": "dnrt-01",
+			"group": "baseline",
+			"input": "把 .tasks/runs/packager-green/diabetes_news_report_pack.json 翻译成中文报告包",
+			"assert": {
+				"packPath": "present",
+				"targetLanguage": "equals:zh-CN",
+				"inputPaths": "absent"
+			},
+			"note": "translator 只吃 packPath。"
+		},
+		{
+			"id": "dnrt-02",
+			"group": "english",
+			"input": "translate C:/tmp/diabetes_news_report_pack.json to Chinese for the report",
+			"assert": {
+				"packPath": "present",
+				"targetLanguage": "equals:zh-CN"
+			},
+			"note": "英文 Chinese 也映射 zh-CN。"
+		},
+		{
+			"id": "dnrt-03",
+			"group": "required-gate",
+			"input": "把糖尿病新闻报告翻译成中文",
+			"assert": {
+				"__outcome": "fails-required-gate"
+			},
+			"note": "缺 packPath 时不能猜路径。"
+		}
+	]
+}

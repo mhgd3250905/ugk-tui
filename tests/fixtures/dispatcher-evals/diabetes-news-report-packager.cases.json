@@ -1,0 +1,48 @@
+{
+	"task": "diabetes-news-report-packager",
+	"description": "diabetes-news-report-packager dispatcher eval。核心难点：接收上游 JSON 路径，先合并去重截断，不接收 targetLanguage。",
+	"cases": [
+		{
+			"id": "dnrp-01",
+			"group": "baseline",
+			"input": "把 .tasks/runs/med/medical_diabetes_news.json 和 .tasks/runs/reg/diabetes_device_regulatory_signals.json 合并成报告包，最多80条",
+			"assert": {
+				"inputPaths": "present",
+				"maxItems": "equals:80",
+				"targetLanguage": "absent"
+			},
+			"note": "packager 只做合并去重截断，不处理语言。"
+		},
+		{
+			"id": "dnrp-02",
+			"group": "directory",
+			"input": "把 .tasks/runs/json-only-medical-verify 目录里的糖尿病新闻 JSON 打包，标题叫 糖尿病设备新闻日报",
+			"assert": {
+				"inputPaths": "present",
+				"title": "present",
+				"targetLanguage": "absent"
+			},
+			"note": "目录也应进入 inputPaths。"
+		},
+		{
+			"id": "dnrp-03",
+			"group": "boundary",
+			"input": "合并这些糖尿病新闻 JSON，最多1000条：C:/tmp/a.json C:/tmp/b.json",
+			"assert": {
+				"inputPaths": "present",
+				"maxItems": "equals:500",
+				"targetLanguage": "absent"
+			},
+			"note": "maxItems hard maximum 是 500。"
+		},
+		{
+			"id": "dnrp-04",
+			"group": "required-gate",
+			"input": "帮我打包糖尿病新闻报告",
+			"assert": {
+				"__outcome": "fails-required-gate"
+			},
+			"note": "缺 inputPaths 时不能猜路径。"
+		}
+	]
+}

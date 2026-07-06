@@ -1,0 +1,48 @@
+{
+	"task": "diabetes-news-report-renderer",
+	"description": "diabetes-news-report-renderer dispatcher eval。核心难点：只接收 packPath，不再接收 raw collector inputPaths；zh-CN 应使用翻译后的 pack。",
+	"cases": [
+		{
+			"id": "dnrr-01",
+			"group": "translated-pack",
+			"input": "把 .tasks/runs/translator-green/diabetes_news_report_pack.zh-CN.json 渲染成中文 HTML",
+			"assert": {
+				"packPath": "present",
+				"targetLanguage": "equals:zh-CN",
+				"inputPaths": "absent"
+			},
+			"note": "renderer 只吃 packPath。"
+		},
+		{
+			"id": "dnrr-02",
+			"group": "original-pack",
+			"input": "把 .tasks/runs/packager-green/diabetes_news_report_pack.json 渲染成原文 HTML",
+			"assert": {
+				"packPath": "present",
+				"targetLanguage": "in:omitted|original",
+				"inputPaths": "absent"
+			},
+			"note": "原文 HTML 可直接用未翻译 pack。"
+		},
+		{
+			"id": "dnrr-03",
+			"group": "title",
+			"input": "用 .tasks/runs/translator-green/diabetes_news_report_pack.zh-CN.json 生成中文 HTML，标题叫 糖尿病设备新闻日报",
+			"assert": {
+				"packPath": "present",
+				"targetLanguage": "equals:zh-CN",
+				"title": "present"
+			},
+			"note": "标题 override 是 renderer 职责。"
+		},
+		{
+			"id": "dnrr-04",
+			"group": "required-gate",
+			"input": "输出中文糖尿病新闻总结 HTML",
+			"assert": {
+				"__outcome": "fails-required-gate"
+			},
+			"note": "缺 packPath 时应 fail-closed。"
+		}
+	]
+}

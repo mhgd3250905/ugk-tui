@@ -1,0 +1,67 @@
+{
+	"task": "diabetes-device-custom-source-news",
+	"description": "diabetes-device-custom-source-news dispatcher eval。核心难点: 第三阶段/自定义源/阻断源语义、相对时间窗口。采集 task 不再接收 targetLanguage。",
+	"cases": [
+		{
+			"id": "ddcsn-01",
+			"group": "baseline",
+			"input": "最近7天糖尿病医疗器械第三阶段新闻",
+			"assert": {
+				"days": "equals:7",
+				"startIso": "present",
+				"endIso": "present",
+				"maxItems": "in:omitted|100",
+				"targetLanguage": "absent"
+			},
+			"note": "第三阶段新闻应匹配该 task。"
+		},
+		{
+			"id": "ddcsn-02",
+			"group": "language",
+			"input": "最近30天糖尿病设备自定义来源新闻，输出中文版本",
+			"assert": {
+				"days": "equals:30",
+				"targetLanguage": "absent",
+				"startIso": "present",
+				"endIso": "present"
+			},
+			"note": "中文版本由 renderer 处理。"
+		},
+		{
+			"id": "ddcsn-03",
+			"group": "phase-3-wording",
+			"input": "past week diabetes device blocked source watch, Chinese report",
+			"assert": {
+				"days": "equals:7",
+				"targetLanguage": "absent",
+				"startIso": "present",
+				"endIso": "present"
+			},
+			"note": "英文 blocked source watch 也应匹配; Chinese 由 renderer 处理。"
+		},
+		{
+			"id": "ddcsn-04",
+			"group": "boundary",
+			"input": "最近90天第三阶段糖尿病医疗器械新闻，最多500条，中文",
+			"assert": {
+				"days": "equals:30",
+				"maxItems": "equals:300",
+				"targetLanguage": "absent",
+				"startIso": "present",
+				"endIso": "present"
+			},
+			"note": "days 和 maxItems 都必须封顶。"
+		},
+		{
+			"id": "ddcsn-05",
+			"group": "source-names",
+			"input": "最近一个月 Sequel 和 Senseonics 糖尿病设备公司新闻",
+			"assert": {
+				"days": "equals:30",
+				"startIso": "present",
+				"endIso": "present"
+			},
+			"note": "公司名触发第三阶段自定义源 task。"
+		}
+	]
+}

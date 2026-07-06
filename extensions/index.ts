@@ -101,9 +101,9 @@ function formatUgkStatusTable(deepseekStatus: string): string {
 	const apiIcon = apiConfigured ? "✅" : "❌";
 	const apiSummary = formatDeepSeekSummary(deepseekStatus, language);
 	const rows = [
-		[uiText("🧰 工具", "🧰 Tools", language), "✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ web_search  ✅ mcp"],
+		[uiText("🧰 工具", "🧰 Tools", language), "✅ subagent  ✅ cron  ✅ chrome_cdp  ✅ web_search/read  ✅ mcp  ✅ run_task"],
 		[uiText("🤖 代理", "🤖 Agents", language), uiText("✅ @agent 提及  ✅ /implement 流水线  ✅ 隔离摘要", "✅ @agent mention  ✅ /implement pipeline  ✅ isolated summaries", language)],
-		[uiText("⌨️ 命令", "⌨️ Commands", language), "/ugk  /doctor  /update  /plan  /cdp  /web-search  /mcp  /ugk-ui  /ui-language  /ugk-autopilot  /language"],
+		[uiText("⌨️ 命令", "⌨️ Commands", language), "/ugk  /welcome  /doctor  /subagent  /task  /todos  /implement  /plan  /cdp  /web-search  /mcp  /compaction-model  /trigger-compact  /update  /ugk-ui  /ui-language  /ugk-autopilot  /language"],
 		["📡 API", `${apiIcon} ${apiSummary}`],
 		[uiText("🛡️ 防护", "🛡️ Guardrails", language), uiText("危险 bash 门禁已启用", "Dangerous bash gate enabled", language)],
 	] as const;

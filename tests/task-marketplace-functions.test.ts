@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { zipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import {
 	buildManifest,
 	createSessionCookie,
@@ -19,6 +19,7 @@ import {
 	recordDownload,
 	reportTask,
 	reviewSubmission,
+	downloadSubmissionArtifact,
 	serveTaskFile,
 	submitTask,
 	toggleFavorite,
@@ -100,6 +101,7 @@ function createDb() {
 					if (sql.startsWith("SELECT download_count")) return tasks.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT latest_version FROM tasks")) return tasks.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT file_list FROM task_submissions")) return submissions.find((item) => item.name === this.values[0] && item.version === this.values[1] && item.status === "published") ?? null;
+					if (sql.startsWith("SELECT 1 FROM task_submissions WHERE name = ? AND version = ?")) return submissions.some((item) => item.name === this.values[0] && item.version === this.values[1] && item.status !== "rejected") ? { ok: 1 } : null;
 					if (sql.startsWith("SELECT 1 FROM cli_auth_pending")) return cliPending.has(this.values[0]) ? { "1": 1 } : null;
 					if (sql.startsWith("DELETE FROM cli_auth_pending WHERE challenge = ? RETURNING")) {
 						// Atomic claim via RETURNING (createCliToken): delete + return the row.
@@ -111,6 +113,7 @@ function createDb() {
 						const found = [...cliPending.entries()].find(([, v]) => v.state === this.values[0]);
 						return found ? { challenge: found[0] } : null;
 					}
+					if (sql.startsWith("SELECT submission_id FROM task_versions WHERE task_name = ? AND version = ?")) return versions.find((v) => v.task_name === this.values[0] && v.version === this.values[1]) ?? null;
 					if (sql.startsWith("SELECT 1 FROM task_versions WHERE task_name = ? AND version = ?")) return versions.some((v) => v.task_name === this.values[0] && v.version === this.values[1]) ? { ok: 1 } : null;
 					if (sql.startsWith("SELECT token, user_id, created_at FROM cli_tokens")) {
 						const tok = cliTokens.filter((t) => t.challenge === this.values[0]).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
@@ -676,6 +679,34 @@ test("task submissions reject a version that is already published (review M6)", 
 	assert.equal(response2.status, 200);
 });
 
+test("task submissions reject a duplicate pending version before R2 upload", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "pending-dupe");
+	form.set("version", "1.0.0");
+	form.set("title", "Pending Dupe");
+	form.set("description", "First upload");
+	form.set("artifact", new File([taskZip("pending-dupe") as BlobPart], "pending-dupe.zip", { type: "application/zip" }));
+	const first = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	const storedSkill = testEnv.TASK_UPLOADS.objects.get("tasks/pending-dupe/1.0.0/skill.md");
+
+	const secondForm = new FormData();
+	secondForm.set("name", "pending-dupe");
+	secondForm.set("version", "1.0.0");
+	secondForm.set("title", "Pending Dupe 2");
+	secondForm.set("description", "Second upload");
+	secondForm.set("artifact", new File([taskZipWithFiles("pending-dupe", { "skill.md": "# Changed\n" }) as BlobPart], "pending-dupe-2.zip", { type: "application/zip" }));
+	const second = await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: secondForm }), testEnv);
+	const body = await second.json();
+
+	assert.equal(first.status, 200);
+	assert.equal(second.status, 409);
+	assert.equal(body.error, "version_already_submitted");
+	assert.equal(testEnv.TASK_UPLOADS.objects.get("tasks/pending-dupe/1.0.0/skill.md"), storedSkill);
+});
+
 test("task submissions reject oversized artifacts before R2 upload", async () => {
 	const testEnv = env();
 	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
@@ -718,6 +749,32 @@ test("admins publish pending submissions into the public queue", async () => {
 	assert.equal(pending.submissions.length, 1);
 	assert.equal((await review.json()).status, "published");
 	assert.equal(publicTasks.tasks[0].name, "public-task");
+});
+
+test("admins cannot publish a submission over a different submission's version", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "review-dupe");
+	form.set("version", "1.0.0");
+	form.set("title", "Review Dupe");
+	form.set("description", "Ready for review");
+	form.set("artifact", new File([taskZip("review-dupe") as BlobPart], "review-dupe.zip", { type: "application/zip" }));
+	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	await testEnv.DB.prepare("INSERT INTO task_versions (task_name, version, submission_id, artifact_key, source_url, published_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind("review-dupe", "1.0.0", 99, "tasks/review-dupe/1.0.0", null, 1, new Date().toISOString()).run();
+
+	const response = await reviewSubmission(
+		new Request("https://ugk-task-share.pages.dev/api/admin/submissions/1", { method: "POST", headers: { cookie }, body: JSON.stringify({ status: "published" }) }),
+		testEnv,
+		1,
+	);
+	const body = await response.json();
+	const pending = await (await adminSubmissions(new Request("https://ugk-task-share.pages.dev/api/admin/submissions", { headers: { cookie } }), testEnv)).json();
+
+	assert.equal(response.status, 409);
+	assert.equal(body.error, "version_already_published");
+	assert.equal(pending.submissions.length, 1);
 });
 
 test("signed-in users see per-task download state and account downloads", async () => {
@@ -814,9 +871,64 @@ test("buildManifest lists published tasks with loose-file URLs and serveTaskFile
 	assert.deepEqual(JSON.parse(text), {}); // contract.json is "{}"
 });
 
+test("published submission artifact downloads as a rebuilt zip from loose R2 files", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "artifact-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Artifact Task");
+	form.set("description", "Downloadable as zip");
+	form.set("artifact", new File([taskZip("artifact-task") as BlobPart], "artifact-task.zip", { type: "application/zip" }));
+	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	await reviewSubmission(
+		new Request("https://ugk-task-share.pages.dev/api/admin/submissions/1", { method: "POST", headers: { cookie }, body: JSON.stringify({ status: "published" }) }),
+		testEnv,
+		1,
+	);
+
+	const response = await downloadSubmissionArtifact(testEnv, 1);
+	const files = unzipSync(new Uint8Array(await response.arrayBuffer()));
+
+	assert.equal(response.status, 200);
+	assert.equal(response.headers.get("content-type"), "application/zip");
+	assert.match(response.headers.get("content-disposition") ?? "", /artifact-task-1\.0\.0\.zip/);
+	assert.ok(files["taskbook.json"]);
+	assert.deepEqual(JSON.parse(new TextDecoder().decode(files["contract.json"])), {});
+});
+
+test("buildManifest skips task rows without installable published files", async () => {
+	const testEnv = env();
+	const now = new Date().toISOString();
+	let nextSubmissionId = 1;
+	const seedTask = async (name, fileList) => {
+		await testEnv.DB.prepare("INSERT INTO tasks (name, title, description, author_user_id, author_name, latest_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(name, name, `${name} description`, 1, "octo", "1.0.0", now).run();
+		if (fileList !== null) {
+			const submissionId = nextSubmissionId++;
+			await testEnv.DB.prepare("INSERT INTO task_submissions (user_id, name, version, title, description, source_type, source_url, artifact_key, artifact_name, file_list, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(1, name, "1.0.0", name, `${name} description`, "upload", null, `tasks/${name}/1.0.0`, `${name}.zip`, fileList, now, now).run();
+			await testEnv.DB.prepare("UPDATE task_submissions SET status = ?, reviewer_user_id = ?, review_note = ?, updated_at = ? WHERE id = ?").bind("published", 1, "", now, submissionId).run();
+		}
+	};
+	await seedTask("bad-json", "{");
+	await seedTask("missing-core", JSON.stringify(["taskbook.json", "spec.json"]));
+	await seedTask("bad-path", JSON.stringify([...Object.keys(SAMPLE_FILES), "../secret"]));
+	await seedTask("no-submission", null);
+	await seedTask("good-task", JSON.stringify(Object.keys(SAMPLE_FILES)));
+
+	const manifest = await (await buildManifest(new Request("https://ugk-task-share.pages.dev/api/manifest"), testEnv)).json();
+
+	assert.deepEqual(manifest.tasks.map((task) => task.name), ["good-task"]);
+	assert.equal(Object.keys(manifest.tasks[0].files).length, Object.keys(SAMPLE_FILES).length);
+});
+
 test("serveTaskFile rejects path traversal", async () => {
 	const testEnv = env();
-	await assert.rejects(() => serveTaskFile(testEnv, "any", "../../etc/passwd"));
+	const response = await serveTaskFile(testEnv, "any", "../../etc/passwd");
+	const body = await response.json();
+
+	assert.equal(response.status, 400);
+	assert.equal(body.error, "invalid_file");
 });
 
 test("stats detail rolls download events up by day", async () => {

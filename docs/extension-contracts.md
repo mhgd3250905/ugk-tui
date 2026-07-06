@@ -41,7 +41,7 @@ Windows 上 PowerShell 的 `Set-Content` / `Out-File` 默认写 UTF-8 BOM,而 No
 
 | 文件 | 读取点 |
 |---|---|
-| `settings.json` | ui-brand / doctor-checks / chrome-cdp-config / bin-ugk-startup-settings |
+| `settings.json` | ui-brand / builtin-tool-render / doctor-checks / chrome-cdp-config / language / ui-language / compaction-model / bin-ugk-startup-settings |
 | `auth.json` | deepseek-status |
 | `mcp.json` / `.mcp.json` / `.mcp.local.json` | mcp/config |
 | taskbook 的 `spec.json` / `contract.json` | task/task-book |

@@ -1,5 +1,7 @@
 # UGK core 项目体检汇报
 
+> 历史报告:本文记录 2026-06-27 当时仓库快照,其中 judge 和主题相关结论已过期。当前状态以 `docs/PROJECT-GUIDE.md` 和 `docs/reports/2026-07-06-project-review.md` 为准。
+
 日期: 2026-06-27
 范围: `E:\AII\ugk-core-pi-patch` 当前代码
 状态: 体检报告 + 首轮清理记录

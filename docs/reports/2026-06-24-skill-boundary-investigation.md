@@ -1,5 +1,7 @@
 # 自研 Skill 触发边界调查报告
 
+> 历史报告:本文覆盖 2026-06-24 当时的外部/历史 skill 范围,部分高优先级对象当前 ugk-core 已不存在。当前仓库状态以 `docs/PROJECT-GUIDE.md` 和 `docs/reports/2026-07-06-project-review.md` 为准。
+
 > 日期：2026-06-24  
 > 范围：`skills/` 下 UGK 自研或项目内维护的 skill。`docx`、`skill-creator` 属于外部引入能力，仅作为格式/规范参照，不纳入本轮整改对象。  
 > 目的：排查 skill 触发边界不清、工具优先级不明确、危险副作用未约束等问题，给同事审核后执行整改。

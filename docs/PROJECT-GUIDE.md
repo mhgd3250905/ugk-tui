@@ -1,8 +1,8 @@
 # ugk-core 项目说明书
 
-> **发布基线**:v2.3.0(tag `v2.3.0`,commit `c744038`)
-> **当前代码**:main/feat-codex-0703 已包含 v2.3.0 后续 compaction、todo polish、terminal-recorder 等提交。
-> **更新日期**:2026-07-05
+> **发布基线**:v2.3.0(tag `v2.3.0`,commit `530d126`)
+> **当前代码**:main + 当前 `feat/0706-project-review` 工作树已包含 v2.3.0 后续 compaction、todo polish、web_search/web_read、terminal-recorder 和 marketplace artifact 修复。
+> **更新日期**:2026-07-06
 > **读者**:接手 ugk-core 开发/维护的工程师。读完这一份,就能建立完整心智模型。
 > **定位**:项目全景快照。与现有文档分工——
 > - `README.md`:用户向(怎么装、怎么用)
@@ -63,12 +63,13 @@ ugk-core/
 │   ├── task/                 # task 系统(task.ts 2300+ 行 + task-book/share-publish/verify 等)
 │   ├── chrome-cdp/           # 本地登录态 Chrome CDP 控制
 │   ├── compaction/           # 智能上下文压缩阈值、模型选择和手动触发
+│   ├── web-search/           # 隔离 headless Chrome 公网搜索/网页读取
 │   ├── mcp/                  # MCP stdio client/registry/tools/permissions
 │   ├── cron.ts + cron-contract.ts
 │   ├── subagent.ts + subagent-runtime/ + agents.ts
 │   ├── plan-mode.ts + plan-mode-utils.ts + plan-mode-state.ts
 │   ├── ui-brand.ts           # 品牌 UI(header/footer/title)
-│   ├── ui-brand-utils.ts / ui-brand-extension.ts
+│   ├── ui-brand-utils.ts     # 品牌 UI 文案/布局工具
 │   └── shared/               # 跨扩展共享(driver-view.ts 已于 v2.3.0 删除)
 ├── cron/service.ts           # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent(scout/planner/reviewer/checker/worker,随包加载)
@@ -95,6 +96,7 @@ ugk-core/
 | `subagent` | 子代理委派(single/parallel/chain 三模式,隔离 context 只回摘要) |
 | `cron` | 定时任务管理(独立常驻进程,到点起 `ugk --print` 子进程) |
 | `chrome_cdp` | 受保护的本地登录态 Chrome 控制(默认 ask-gated) |
+| `web_search` / `web_read` | 隔离 headless Chrome 搜索和网页正文读取,不共享本地登录态 |
 | `mcp` | MCP stdio client,连外部 server 注册为 `server__tool` |
 | `run_task` | subtask 工具:复用已机器验收的 taskbook,返回 PASS/FAIL + 产物 |
 
@@ -105,7 +107,7 @@ ugk-core/
 - **taskbook 契约**:5 个核心文件(taskbook/spec/skill/verify/contract)+ 可选 `scripts/` 子目录
 
 ### slash 命令(v2.3.0 已对齐代码)
-`/ugk` `/welcome` `/subagent` `/update` `/cdp` `/mcp` `/compaction-model` `/trigger-compact` `/ugk-ui` `/ui-language` `/ugk-autopilot` `/language` `/plan` `/todos` `/task`(`/task list|show|new|run|edit|rename|save|delete|publish|toggle|exit`)
+`/ugk` `/welcome` `/doctor` `/subagent` `/update` `/cdp` `/web-search` `/mcp` `/compaction-model` `/trigger-compact` `/ugk-ui` `/ui-language` `/ugk-autopilot` `/language` `/plan` `/todos` `/task`(`/task list|show|new|run|edit|rename|save|delete|publish|toggle|exit`) `/implement` `/scout-and-plan` `/implement-and-review`
 
 ### 智能上下文压缩
 - 长会话按模型 contextWindow 分档自动触发压缩,避免上下文爆仓。
@@ -120,7 +122,7 @@ ugk-core/
 2. **pi runtime patch**:`bin/ugk-*.js` 在启动时安装(Symbol.for 守卫防重复),pi 升级后每个 patch 的 descriptor 检查可能失效,需回归。
 3. **UI 组件不得在 render 阶段持有 ExtensionContext**:必须在 `session_start` 抽取普通 session 数据,防 session replacement 后 stale ctx 崩溃。
 4. **bash 走 Git Bash**:Linux 语法,Windows 路径用正斜杠;Git Bash 路径由 `skills/ugk-environment-doctor/scripts/set_shell_path.mjs` 验证并写入 `settings.json.shellPath`。
-5. **task 打包/下载契约**(v2.3.0 修复):publish 打包**扫描目录**(含 `scripts/`,排除 `*.test.mjs`);`REQUIRED_FILES`(5 个)是"最小必需校验集",**不是打包全集**;引用完整性两端校验(本地 publish + 服务端 submitTask)。
+5. **task 打包/下载契约**:publish 打包**扫描目录**(含 `scripts/`,排除 `*.test.mjs`);`REQUIRED_FILES`(5 个)是"最小必需校验集",**不是打包全集**;服务端把 zip 拆成 R2 loose files,manifest 指向单文件下载,网页 zip 下载由 `downloadSubmissionArtifact` 按 `file_list` 重建。
 
 详见 `docs/DEVELOPMENT.md` 和 `docs/extension-contracts.md`。
 
@@ -153,7 +155,8 @@ npm pack --dry-run --json     # 验证 npm 包内容(应无 functions/migrations
 | **v2.3.0 PR #32** | fix: publish 打包漏传 scripts/ + 链路引用校验 | `docs/handoff/2026-07-02-task-publish-scripts-fix-handoff.md` |
 | **v2.3.0 PR #31** | feat: task update / remove CLI 命令(补齐更新环节) | 同上 |
 | **v2.3.0 PR #30** | chore: 边界清理(npm 包/smoke/死代码/文档事实) | `docs/handoff/2026-07-02-boundary-cleanup-plan.md` |
-| v2.3.0 后续 main | smart compaction + `/todos` UI polish + terminal-recorder user skill | `extensions/compaction/`, `extensions/todo-*`, `user-skills/terminal-recorder/` |
+| v2.3.0 后续 main | smart compaction + `/todos` UI polish + `web_search`/`web_read` + terminal-recorder user skill | `extensions/compaction/`, `extensions/todo-*`, `extensions/web-search/`, `user-skills/terminal-recorder/` |
+| 2026-07-06 本轮 | 修复 marketplace 已发布 submission 的 zip 下载断链;同步 web-search 文档 | `functions/_lib/marketplace.js`, `README.md`, 本文 |
 | v2.2.0 | 发布交接(marketplace r2 直连 + 前端改写 + hardening) | `docs/handoff/2026-07-01-v2.2.0-release-handoff.md` |
 
 **接手必读**:`docs/handoff/2026-07-02-task-publish-scripts-fix-handoff.md` —— 它汇总了 task 系统当前状态、三个 PR 的根因/修法、三层验证方法。

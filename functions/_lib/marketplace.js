@@ -1,4 +1,4 @@
-import { unzipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import { assertValidContract, isRequirementsSpec, isTaskbook } from "../../shared/taskbook-schema.js";
 
 const SESSION_COOKIE = "ugk_session";
@@ -473,6 +473,8 @@ export async function submitTask(request, env) {
 	// version while latest_version still points at the old one. Fail fast instead.
 	const existingVersion = await env.DB.prepare("SELECT 1 FROM task_versions WHERE task_name = ? AND version = ?").bind(name, version).first();
 	if (existingVersion) return json({ error: "version_already_published" }, { status: 409 });
+	const activeSubmission = await env.DB.prepare("SELECT 1 FROM task_submissions WHERE name = ? AND version = ? AND status != 'rejected' LIMIT 1").bind(name, version).first();
+	if (activeSubmission) return json({ error: "version_already_submitted" }, { status: 409 });
 	if (!title || !description) return json({ error: "missing_required_fields" }, { status: 400 });
 	if (!hasArtifact) return json({ error: "artifact_required" }, { status: 400 });
 	if (artifact.size > MAX_ARTIFACT_BYTES) return json({ error: "artifact_too_large" }, { status: 413 });
@@ -606,6 +608,10 @@ export async function reviewSubmission(request, env, id) {
 	try {
 		if (status === "published") {
 			const version = submission.version;
+			const existingVersion = await env.DB.prepare("SELECT submission_id FROM task_versions WHERE task_name = ? AND version = ? LIMIT 1").bind(submission.name, version).first();
+			if (existingVersion && Number(existingVersion.submission_id) !== Number(submission.id)) {
+				return json({ error: "version_already_published" }, { status: 409 });
+			}
 			await env.DB.prepare(
 				`INSERT INTO tasks (name, title, description, author_user_id, author_name, latest_version, created_at)
 				VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -660,11 +666,27 @@ export async function downloadSubmissionArtifact(env, id) {
 	const submission = await env.DB.prepare("SELECT task_submissions.* FROM task_submissions WHERE id = ?").bind(Number(id)).first();
 	if (!submission || submission.status !== "published") return json({ error: "artifact_not_found" }, { status: 404 });
 	if (!submission.artifact_key || !env.TASK_UPLOADS) return json({ error: "artifact_not_available" }, { status: 404 });
-	const object = await env.TASK_UPLOADS.get(submission.artifact_key);
-	if (!object) return json({ error: "artifact_not_found" }, { status: 404 });
-	return new Response(object.body, {
+	let fileList;
+	try {
+		fileList = JSON.parse(submission.file_list ?? "[]");
+	} catch {
+		return json({ error: "artifact_not_available" }, { status: 404 });
+	}
+	if (!Array.isArray(fileList) || fileList.length === 0) return json({ error: "artifact_not_available" }, { status: 404 });
+	const files = {};
+	for (const file of fileList) {
+		try {
+			assertSafePath(file);
+		} catch {
+			return json({ error: "artifact_not_available" }, { status: 404 });
+		}
+		const object = await env.TASK_UPLOADS.get(`${submission.artifact_key}/${file}`);
+		if (!object) return json({ error: "artifact_not_found", file }, { status: 404 });
+		files[file] = new Uint8Array(await new Response(object.body).arrayBuffer());
+	}
+	return new Response(zipSync(files), {
 		headers: {
-			"content-type": object.httpMetadata?.contentType ?? "application/zip",
+			"content-type": "application/zip",
 			"content-disposition": `attachment; filename="${safeFileName(submission.artifact_name || `${submission.name}.zip`)}"`,
 		},
 	});
@@ -772,18 +794,33 @@ export async function buildManifest(request, env) {
 		const submission = await env.DB.prepare(
 			"SELECT file_list FROM task_submissions WHERE name = ? AND version = ? AND status = 'published' ORDER BY updated_at DESC LIMIT 1",
 		).bind(task.name, task.latest_version).first();
-		const fileList = JSON.parse(submission?.file_list ?? "[]");
+		let fileList;
+		try {
+			fileList = JSON.parse(submission?.file_list ?? "[]");
+		} catch {
+			return null;
+		}
+		if (!Array.isArray(fileList) || !REQUIRED_FILES.every((file) => fileList.includes(file))) return null;
+		try {
+			for (const file of fileList) assertSafePath(file);
+		} catch {
+			return null;
+		}
 		const files = Object.fromEntries(fileList.map((file) => [
 			file,
 			`${origin}/api/tasks/${encodeURIComponent(task.name)}/files?f=${encodeURIComponent(file)}`,
 		]));
 		return { name: task.name, title: task.title, description: task.description, author: task.author_name, version: task.latest_version, downloads: task.download_count ?? 0, likes: task.like_count ?? 0, favorites: task.favorite_count ?? 0, files };
 	}));
-	return json({ version: 1, generatedAt: new Date().toISOString(), tasks });
+	return json({ version: 1, generatedAt: new Date().toISOString(), tasks: tasks.filter(Boolean) });
 }
 
 export async function serveTaskFile(env, name, file) {
-	assertSafePath(file);
+	try {
+		assertSafePath(file);
+	} catch {
+		return json({ error: "invalid_file" }, { status: 400 });
+	}
 	const task = await env.DB.prepare("SELECT latest_version FROM tasks WHERE name = ?").bind(name).first();
 	if (!task?.latest_version) return json({ error: "task_not_found" }, { status: 404 });
 	const object = await env.TASK_UPLOADS.get(`tasks/${name}/${task.latest_version}/${file}`);

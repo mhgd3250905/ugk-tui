@@ -22,7 +22,7 @@
 
 - `subagent` — 子代理委派(single/parallel/chain 三模式,隔离 context 只回摘要)
 - `cron` — 定时任务管理(status/list/add/remove/history)
-- `web_search` — 公网搜索工具:自动启动隔离的 headless Chrome(9223 + 独立 profile),Google 优先,Bing 中国版兜底,返回 SERP 页面文本给 agent 自己读;`/web-search` 可手动打开同一隔离 Chrome 做可见调试
+- `web_search` / `web_read` — 公网搜索和网页正文读取工具:自动启动隔离的 headless Chrome(9223 + 独立 profile),Google 优先,Bing 中国版兜底;`/web-search` 可手动打开同一隔离 Chrome 做可见调试
 - `chrome_cdp` — 受保护的本地登录态 Chrome 控制(status/launch/tabs/navigate/evaluate/screenshot,默认 ask-gated)
 - `mcp` — MCP stdio client:连接外部 MCP server,把 tools 注册为 `server__tool`(scope 合并:install < user < project < local,同名 server 高 scope 完全覆盖低 scope)
 - `run_task` — subtask 工具:让 main agent 复用已机器验收的 taskbook,返回 PASS/FAIL + 产物路径。**两条铁律:需求驱动(任务确定才匹配 taskbook);责任归 LLM(dispatcher 翻译失败直接报错,headless 不弹 UI)。task 是最小单位,不可嵌套。**
@@ -86,10 +86,11 @@
 
 - `/ugk` — 看 agent 状态
 - `/welcome` — 欢迎模板
+- `/doctor` — 环境配置引导
 - `/subagent` — 子代理委派(single/parallel/chain)
 - `/update` — 手动检查 GitHub main 并提示更新
 - `/cdp` — 管理 Chrome CDP
-- `/web-search` — 管理 web_search 隔离 Chrome(status/open 可见窗口)
+- `/web-search` — 管理 web_search 隔离 Chrome(status/open/restart)
 - `/mcp` — 管理 MCP server
 - `/task` — 固定任务委托
 - `/compaction-model` — 选择上下文压缩模型

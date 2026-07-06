@@ -856,6 +856,30 @@ test("authors cannot withdraw another user's submission", async () => {
 	assert.equal(account.submissions[0].status, "pending");
 });
 
+test("admins cannot publish a withdrawn submission", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "withdrawn-review");
+	form.set("version", "1.0.0");
+	form.set("title", "Withdrawn Review");
+	form.set("description", "Withdrawn before review");
+	form.set("artifact", new File([taskZip("withdrawn-review") as BlobPart], "withdrawn-review.zip", { type: "application/zip" }));
+	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	await withdrawSubmission(new Request("https://ugk-task-share.pages.dev/api/account/submissions/1", { method: "DELETE", headers: { cookie } }), testEnv, 1);
+
+	const response = await reviewSubmission(
+		new Request("https://ugk-task-share.pages.dev/api/admin/submissions/1", { method: "POST", headers: { cookie }, body: JSON.stringify({ status: "published" }) }),
+		testEnv,
+		1,
+	);
+	const publicTasks = await (await communityTasks(testEnv)).json();
+
+	assert.equal(response.status, 409);
+	assert.equal(publicTasks.tasks.some((task) => task.name === "withdrawn-review"), false);
+});
+
 test("admins cannot publish a submission over a different submission's version", async () => {
 	const testEnv = env();
 	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();

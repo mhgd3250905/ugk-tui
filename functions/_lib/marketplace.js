@@ -643,6 +643,7 @@ export async function reviewSubmission(request, env, id) {
 		WHERE task_submissions.id = ?`,
 	).bind(Number(id)).first();
 	if (!submission) return json({ error: "submission_not_found" }, { status: 404 });
+	if (submission.status === "withdrawn") return json({ error: "submission_withdrawn" }, { status: 409 });
 
 	const now = new Date().toISOString();
 	try {

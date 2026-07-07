@@ -119,23 +119,27 @@ function askReportReason(task){return new Promise(resolve=>{let dialog=document.
 function compactMarkdown(text){return String(text||'').replace(/\r/g,'').split('\n').map(line=>line.trim()).filter(line=>line&&!line.startsWith('#')&&!line.startsWith('```')).slice(0,10).join('\n')}
 function detailItems(items,empty){return items.length?'<ul class="task-detail-list">'+items.map(item=>'<li>'+item+'</li>').join('')+'</ul>':'<p class="notice">'+empty+'</p>'}
 function artifactLabel(item){return typeof item==='string'?item:item&&typeof item.name==='string'?item.name:''}
-function inputLabel(field,contract){const meta=contract&&contract.runtimeInputMeta&&contract.runtimeInputMeta[field];const desc=meta&&typeof meta.description==='string'?meta.description:'';return '<code>'+esc(field)+'</code>'+(desc?' <span>'+esc(desc)+'</span>':'')}
+function inputName(item){return typeof item==='string'?item:item&&typeof item.name==='string'?item.name:''}
+function inputLabel(item,contract){const field=inputName(item);const meta=contract&&contract.runtimeInputMeta&&contract.runtimeInputMeta[field];const desc=typeof item?.description==='string'?item.description:meta&&typeof meta.description==='string'?meta.description:'';return '<code>'+esc(field)+'</code>'+(desc?' <span>'+esc(desc)+'</span>':'')}
 async function fetchTaskFile(task,file){const url=task.files?.[file];if(!url)return'';const key=task.name+':'+file;if(detailCache.has(key))return detailCache.get(key);try{const r=await fetch(url);const text=r.ok?(await r.text()).slice(0,12000):'';detailCache.set(key,text);return text}catch{return''}}
-function taskDetailHTML(task,contract={},skill=''){
-  const title=esc(task.title||titleize(task.name)), desc=esc(task.description||''), author=esc(task.author||'Community');
+async function fetchTaskDetail(task){try{const r=await fetch('/api/tasks/'+encodeURIComponent(task.name)+'/detail');if(r.ok)return await r.json()}catch{}const [skill,contractText]=await Promise.all([fetchTaskFile(task,'skill.md'),fetchTaskFile(task,'contract.json')]);let contract={};try{contract=JSON.parse(contractText||'{}')}catch{}return {contract,usage:compactMarkdown(skill)}}
+function taskDetailHTML(task,detail={}){
+  const contract=detail.contract||{};
+  const title=esc(detail.title||task.title||titleize(task.name)), desc=esc(detail.description||task.description||''), author=esc(task.author||'Community');
   const version=task.version?'<span class="chip card-version">'+esc(String(task.version).startsWith('v')?task.version:'v'+task.version)+'</span>':'';
-  const fields=Array.isArray(contract.runtimeInput)?contract.runtimeInput.filter(field=>typeof field==='string'):[];
-  const artifacts=Array.isArray(contract.artifacts)?contract.artifacts.map(artifactLabel).filter(Boolean):[];
-  const fieldSummary=fields.length?fields.join(', '):tr('detail.freeInput');
+  const fields=Array.isArray(detail.inputs)?detail.inputs:Array.isArray(contract.runtimeInput)?contract.runtimeInput.filter(field=>typeof field==='string'):[];
+  const artifacts=Array.isArray(detail.artifacts)?detail.artifacts:Array.isArray(contract.artifacts)?contract.artifacts.map(artifactLabel).filter(Boolean):[];
+  const fieldSummary=fields.map(inputName).filter(Boolean).join(', ')||tr('detail.freeInput');
   const install='ugk task install '+task.name;
   const run='/task run '+task.name+' '+tr('detail.requestPlaceholder');
-  const usage=compactMarkdown(skill);
+  const trigger=detail.trigger||tr('detail.triggerExample',{title:task.title||task.name,name:task.name,fields:fieldSummary});
+  const usage='usage'in detail?String(detail.usage||''):'';
   return '<div class="task-detail-head"><div><div class="chips"><span class="chip">task</span>'+version+'<span class="chip card-author">@'+author+'</span></div><h2>'+title+'</h2><p>'+desc+'</p></div><button class="btn btn-secondary" type="button" data-detail-close>'+tr('detail.close')+'</button></div>'
-    +'<div class="task-detail-grid"><section><h3>'+tr('detail.install')+'</h3><code class="command task-detail-command">'+esc(install)+'</code><h3>'+tr('detail.run')+'</h3><code class="command task-detail-command">'+esc(run)+'</code></section><section><h3>'+tr('detail.naturalTrigger')+'</h3><p>'+esc(tr('detail.triggerExample',{title:task.title||task.name,name:task.name,fields:fieldSummary}))+'</p></section></div>'
+    +'<div class="task-detail-grid"><section><h3>'+tr('detail.install')+'</h3><code class="command task-detail-command">'+esc(install)+'</code><h3>'+tr('detail.run')+'</h3><code class="command task-detail-command">'+esc(run)+'</code></section><section><h3>'+tr('detail.naturalTrigger')+'</h3><p>'+esc(trigger)+'</p></section></div>'
     +'<div class="task-detail-grid"><section><h3>'+tr('detail.inputs')+'</h3>'+detailItems(fields.map(field=>inputLabel(field,contract)),tr('detail.noInputs'))+'</section><section><h3>'+tr('detail.artifacts')+'</h3>'+detailItems(artifacts.map(item=>'<code>'+esc(item)+'</code>'),tr('detail.noArtifacts'))+'</section></div>'
     +'<section><h3>'+tr('detail.usage')+'</h3>'+(usage?'<pre class="task-detail-pre">'+esc(usage)+'</pre>':'<p class="notice">'+tr('detail.unavailable')+'</p>')+'</section>';
 }
-async function openTaskDetail(name){const task=catalogTasks.find(item=>item.name===name);if(!task)return;let dialog=document.querySelector('[data-task-detail-dialog]');if(!dialog){dialog=document.createElement('dialog');dialog.className='ugk-dialog task-detail-dialog';dialog.dataset.taskDetailDialog='';dialog.innerHTML='<div class="task-detail" data-task-detail-body></div>';document.body.appendChild(dialog);dialog.addEventListener('click',event=>{if(event.target===dialog)dialog.close()})}const body=dialog.querySelector('[data-task-detail-body]');body.innerHTML=taskDetailHTML(task)+'<p class="notice">'+tr('detail.loading')+'</p>';body.querySelector('[data-detail-close]').addEventListener('click',()=>dialog.close());dialog.showModal();const [skill,contractText]=await Promise.all([fetchTaskFile(task,'skill.md'),fetchTaskFile(task,'contract.json')]);let contract={};try{contract=JSON.parse(contractText||'{}')}catch{}if(!dialog.open)return;body.innerHTML=taskDetailHTML(task,contract,skill);body.querySelector('[data-detail-close]').addEventListener('click',()=>dialog.close());}
+async function openTaskDetail(name){const task=catalogTasks.find(item=>item.name===name);if(!task)return;let dialog=document.querySelector('[data-task-detail-dialog]');if(!dialog){dialog=document.createElement('dialog');dialog.className='ugk-dialog task-detail-dialog';dialog.dataset.taskDetailDialog='';dialog.innerHTML='<div class="task-detail" data-task-detail-body></div>';document.body.appendChild(dialog);dialog.addEventListener('click',event=>{if(event.target===dialog)dialog.close()})}const body=dialog.querySelector('[data-task-detail-body]');body.innerHTML=taskDetailHTML(task)+'<p class="notice">'+tr('detail.loading')+'</p>';body.querySelector('[data-detail-close]').addEventListener('click',()=>dialog.close());dialog.showModal();const detail=await fetchTaskDetail(task);if(!dialog.open)return;body.innerHTML=taskDetailHTML(task,detail);body.querySelector('[data-detail-close]').addEventListener('click',()=>dialog.close());}
 
 // Render a task card from manifest/community data, preserving data-attribute contracts
 function taskCardHTML(t){
@@ -164,7 +168,7 @@ function renderCatalogTasks(root,catFilter,tasks){
   catalogTasks=tasks.map((t,i)=>({...t,newest:1000-i}));
   root.innerHTML=catalogTasks.map(taskCardHTML).join('');
   catalogVisibleLimit=catalogPageSize;
-  bindCards();
+  bindCards();filterTasks();
 }
 function renderCatalogFromCache(){const root=document.querySelector('[data-catalog]');if(!root)return false;const tasks=cachedTasks();if(!tasks)return false;renderCatalogTasks(root,document.querySelector('[data-category-filter]'),withCachedStats(tasks));filterTasks();return true}
 

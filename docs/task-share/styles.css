@@ -952,6 +952,12 @@ button.metric:disabled { cursor: wait; }
   color: var(--text);
 }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.detail-editor { width: min(760px, calc(100vw - 32px)); }
+.detail-editor-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.detail-editor .field { margin: 0; }
+.detail-editor .field-wide { grid-column: 1 / -1; }
+.detail-editor .field textarea { min-height: 96px; }
+.detail-editor .field-wide textarea { min-height: 150px; }
 .task-detail-dialog {
   width: min(780px, calc(100vw - 32px));
   max-height: min(760px, calc(100dvh - 32px));
@@ -1090,7 +1096,9 @@ button.metric:disabled { cursor: wait; }
   .metric { justify-content: flex-start; gap: 6px; padding: 0; }
   .metric b { font-size: 13px; }
   .task-detail-head,
-  .task-detail-grid { grid-template-columns: 1fr; flex-direction: column; }
+  .task-detail-grid,
+  .detail-editor-grid { grid-template-columns: 1fr; flex-direction: column; }
+  .detail-editor .field-wide { grid-column: auto; }
   .account-summary,
   .account-grid { grid-template-columns: 1fr; }
   .account-list-main,

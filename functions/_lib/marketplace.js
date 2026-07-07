@@ -11,6 +11,8 @@ const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 // (含 scripts/,见 task-share-publish.ts collectExtraFiles),不参考此清单决定打包内容。
 // 此处仅用于校验"一个 taskbook 至少得有这 5 个"。
 const REQUIRED_FILES = ["taskbook.json", "spec.json", "skill.md", "verify.mjs", "contract.json"];
+const MARKETPLACE_DETAIL_FILE = "marketplace-detail.json";
+const DETAIL_LIMITS = { title: 120, description: 600, trigger: 400, usage: 12000, item: 240 };
 
 // CLI publish auth: market site brokers GitHub OAuth for the TUI. TUI POSTs a
 // challenge, user logs in on the site; state<->challenge is bound server-side
@@ -64,6 +66,38 @@ function htmlError(message, status = 400) {
 
 function cleanText(value) {
 	return String(value ?? "").trim();
+}
+
+function limitedText(value, field, max, required = false) {
+	const text = cleanText(value).slice(0, max);
+	if (required && !text) throw new Error(`${field}_required`);
+	return text;
+}
+
+function detailInputs(value) {
+	if (!Array.isArray(value)) return [];
+	return value.slice(0, 20).map((item) => {
+		const record = item && typeof item === "object" && !Array.isArray(item) ? item : { name: item };
+		const name = limitedText(record.name, "input_name", 64, true);
+		const description = limitedText(record.description, "input_description", DETAIL_LIMITS.item);
+		return { name, description };
+	});
+}
+
+function detailArtifacts(value) {
+	if (!Array.isArray(value)) return [];
+	return value.slice(0, 20).map((item) => limitedText(typeof item === "string" ? item : item?.name, "artifact", DETAIL_LIMITS.item)).filter(Boolean);
+}
+
+function normalizeMarketplaceDetail(body) {
+	return {
+		title: limitedText(body?.title, "title", DETAIL_LIMITS.title, true),
+		description: limitedText(body?.description, "description", DETAIL_LIMITS.description, true),
+		trigger: limitedText(body?.trigger, "trigger", DETAIL_LIMITS.trigger),
+		inputs: detailInputs(body?.inputs),
+		artifacts: detailArtifacts(body?.artifacts),
+		usage: limitedText(body?.usage, "usage", DETAIL_LIMITS.usage),
+	};
 }
 
 function safeFileName(value) {
@@ -550,6 +584,81 @@ export async function accountSubmissions(request, env) {
 	return json({ submissions: rows.results ?? [] });
 }
 
+async function r2Text(env, key) {
+	if (!env.TASK_UPLOADS) return "";
+	const object = await env.TASK_UPLOADS.get(key);
+	return object ? await new Response(object.body).text() : "";
+}
+
+function detailFromPackage(submission, skill, contractText) {
+	let contract = {};
+	try {
+		contract = JSON.parse(contractText || "{}");
+	} catch {}
+	const runtimeInput = Array.isArray(contract.runtimeInput) ? contract.runtimeInput.filter((field) => typeof field === "string") : [];
+	const meta = contract.runtimeInputMeta && typeof contract.runtimeInputMeta === "object" && !Array.isArray(contract.runtimeInputMeta) ? contract.runtimeInputMeta : {};
+	return {
+		title: submission.title,
+		description: submission.description,
+		trigger: "",
+		inputs: runtimeInput.map((name) => ({ name, description: typeof meta[name]?.description === "string" ? meta[name].description : "" })),
+		artifacts: Array.isArray(contract.artifacts) ? contract.artifacts.map((item) => typeof item === "string" ? item : item?.name).filter(Boolean) : [],
+		usage: skill,
+	};
+}
+
+async function submissionDetail(env, submission) {
+	const base = detailFromPackage(submission, "", "{}");
+	if (!submission.artifact_key) return base;
+	const detailText = await r2Text(env, `${submission.artifact_key}/${MARKETPLACE_DETAIL_FILE}`);
+	if (detailText) {
+		try {
+			return { ...base, ...normalizeMarketplaceDetail(JSON.parse(detailText)) };
+		} catch {}
+	}
+	return detailFromPackage(
+		submission,
+		await r2Text(env, `${submission.artifact_key}/skill.md`),
+		await r2Text(env, `${submission.artifact_key}/contract.json`),
+	);
+}
+
+export async function accountSubmissionDetail(request, env, id) {
+	const auth = await requireUser(request, env);
+	if (auth.response) return auth.response;
+	const submission = await env.DB.prepare(
+		"SELECT task_submissions.* FROM task_submissions WHERE id = ? AND user_id = ?",
+	).bind(Number(id), auth.user.id).first();
+	if (!submission) return json({ error: "submission_not_found" }, { status: 404 });
+	return json({ id: Number(id), name: submission.name, version: submission.version, status: submission.status, ...(await submissionDetail(env, submission)) });
+}
+
+export async function updateAccountSubmissionDetail(request, env, id) {
+	const auth = await requireUser(request, env);
+	if (auth.response) return auth.response;
+	const submission = await env.DB.prepare(
+		"SELECT task_submissions.* FROM task_submissions WHERE id = ? AND user_id = ?",
+	).bind(Number(id), auth.user.id).first();
+	if (!submission) return json({ error: "submission_not_found" }, { status: 404 });
+	if (["withdrawn", "rejected"].includes(submission.status)) return json({ error: "submission_archived" }, { status: 409 });
+	if (!submission.artifact_key || !env.TASK_UPLOADS) return json({ error: "artifact_not_available" }, { status: 409 });
+	let detail;
+	try {
+		detail = normalizeMarketplaceDetail(await request.json());
+	} catch (error) {
+		return json({ error: error instanceof Error ? error.message : "invalid_detail" }, { status: 400 });
+	}
+	const now = new Date().toISOString();
+	await env.TASK_UPLOADS.put(`${submission.artifact_key}/${MARKETPLACE_DETAIL_FILE}`, JSON.stringify(detail, null, "\t") + "\n");
+	await env.DB.prepare(
+		"UPDATE task_submissions SET title = ?, description = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+	).bind(detail.title, detail.description, now, Number(id), auth.user.id).run();
+	await env.DB.prepare(
+		"UPDATE tasks SET title = ?, description = ? WHERE name = ? AND latest_version = ?",
+	).bind(detail.title, detail.description, submission.name, submission.version).run();
+	return json({ id: Number(id), name: submission.name, version: submission.version, status: submission.status, ...detail });
+}
+
 async function refreshLatestTaskVersion(env, name) {
 	const latest = await env.DB.prepare(
 		`SELECT task_submissions.version, task_submissions.title, task_submissions.description, task_submissions.user_id, users.login AS author_login
@@ -854,6 +963,18 @@ export async function buildManifest(request, env) {
 		return { name: task.name, title: task.title, description: task.description, author: task.author_name, version: task.latest_version, downloads: task.download_count ?? 0, likes: task.like_count ?? 0, favorites: task.favorite_count ?? 0, files };
 	}));
 	return json({ version: 1, generatedAt: new Date().toISOString(), tasks: tasks.filter(Boolean) });
+}
+
+export async function taskPublicDetail(env, name) {
+	const submission = await env.DB.prepare(
+		`SELECT task_submissions.*
+		FROM task_submissions
+		JOIN tasks ON tasks.name = task_submissions.name AND tasks.latest_version = task_submissions.version
+		WHERE task_submissions.name = ? AND task_submissions.status = 'published'
+		LIMIT 1`,
+	).bind(name).first();
+	if (!submission) return json({ error: "task_not_found" }, { status: 404 });
+	return json(await submissionDetail(env, submission));
 }
 
 export async function serveTaskFile(env, name, file) {

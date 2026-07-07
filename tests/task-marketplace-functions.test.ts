@@ -5,6 +5,7 @@ import {
 	buildManifest,
 	createSessionCookie,
 	accountDownloads,
+	accountSubmissionDetail,
 	accountSubmissions,
 	adminSubmissions,
 	adminReports,
@@ -19,11 +20,13 @@ import {
 	recordDownload,
 	reportTask,
 	reviewSubmission,
+	taskPublicDetail,
 	downloadSubmissionArtifact,
 	serveTaskFile,
 	submitTask,
 	toggleFavorite,
 	toggleLike,
+	updateAccountSubmissionDetail,
 	withdrawSubmission,
 	startCliAuth,
 	pollCliAuth,
@@ -95,6 +98,10 @@ function createDb() {
 					if (sql.startsWith("SELECT * FROM users WHERE id = ?")) return usersById.get(this.values[0]) ?? null;
 					if (sql.startsWith("SELECT * FROM users WHERE github_id = ?")) return users.get(String(this.values[0])) ?? null;
 					if (sql.startsWith("SELECT task_submissions.* FROM task_submissions WHERE id = ? AND user_id = ?")) return submissions.find((item) => item.id === this.values[0] && item.user_id === this.values[1]) ?? null;
+					if (sql.startsWith("SELECT task_submissions.*") && sql.includes("JOIN tasks")) {
+						const task = tasks.get(this.values[0]);
+						return submissions.find((item) => item.name === this.values[0] && item.version === task?.latest_version && item.status === "published") ?? null;
+					}
 					if (sql.startsWith("SELECT task_submissions.*")) return submissions.find((item) => item.id === this.values[0]) ?? null;
 					if (sql.startsWith("SELECT task_submissions.version")) {
 						return submissions
@@ -209,6 +216,16 @@ function createDb() {
 						item.updated_at = now;
 						return { success: true };
 					}
+					if (sql.startsWith("UPDATE task_submissions SET title = ?")) {
+						const [title, description, now, id, userId] = this.values;
+						const item = submissions.find((submission) => submission.id === id && submission.user_id === userId);
+						if (item) {
+							item.title = title;
+							item.description = description;
+							item.updated_at = now;
+						}
+						return { success: true };
+					}
 					if (sql.startsWith("INSERT INTO task_versions")) {
 						const [taskName, version, submissionId, artifactKey, sourceUrl, publishedByUserId, now] = this.values;
 						versions.push({ task_name: taskName, version, submission_id: submissionId, artifact_key: artifactKey, source_url: sourceUrl, published_by_user_id: publishedByUserId, created_at: now });
@@ -228,6 +245,15 @@ function createDb() {
 						const [title, description, authorUserId, authorName, latestVersion, name] = this.values;
 						const task = tasks.get(name) ?? { created_at: new Date().toISOString(), download_count: 0, like_count: 0, favorite_count: 0 };
 						tasks.set(name, { ...task, title, description, author_user_id: authorUserId, author_name: authorName, latest_version: latestVersion });
+						return { success: true };
+					}
+					if (sql.startsWith("UPDATE tasks SET title = ?")) {
+						const [title, description, name, latestVersion] = this.values;
+						const task = tasks.get(name);
+						if (task?.latest_version === latestVersion) {
+							task.title = title;
+							task.description = description;
+						}
 						return { success: true };
 					}
 					if (sql.startsWith("INSERT INTO task_likes")) {
@@ -961,6 +987,78 @@ test("published submissions expose immutable task versions", async () => {
 	const versions = await (await getTaskVersions(testEnv, "versioned-task")).json();
 
 	assert.equal(versions.versions[0].version, "2.1.0");
+});
+
+test("authors can edit marketplace detail without changing install files", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	const cookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const form = new FormData();
+	form.set("name", "detail-task");
+	form.set("version", "1.0.0");
+	form.set("title", "Detail Task");
+	form.set("description", "Original description");
+	form.set("artifact", new File([taskZipWithFiles("detail-task", {
+		"contract.json": JSON.stringify({ runtimeInput: ["url"], runtimeInputMeta: { url: { description: "Original URL" } }, artifacts: ["result.json"] }),
+	}) as BlobPart], "detail-task.zip", { type: "application/zip" }));
+	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie }, body: form }), testEnv);
+	await reviewSubmission(
+		new Request("https://ugk-task-share.pages.dev/api/admin/submissions/1", { method: "POST", headers: { cookie }, body: JSON.stringify({ status: "published" }) }),
+		testEnv,
+		1,
+	);
+	const originalSkill = testEnv.TASK_UPLOADS.objects.get("tasks/detail-task/1.0.0/skill.md");
+
+	const response = await updateAccountSubmissionDetail(
+		new Request("https://ugk-task-share.pages.dev/api/account/submissions/1/detail", {
+			method: "PUT",
+			headers: { cookie, "content-type": "application/json" },
+			body: JSON.stringify({
+				title: "Better Detail Task",
+				description: "Better description",
+				trigger: "用 Detail Task 处理一个 URL。",
+				inputs: [{ name: "url", description: "公开视频链接" }],
+				artifacts: ["video.mp4", "summary.json"],
+				usage: "先确认浏览器已登录，再运行 task。",
+			}),
+		}),
+		testEnv,
+		1,
+	);
+	const body = await response.json();
+	const ownerDetail = await (await accountSubmissionDetail(new Request("https://ugk-task-share.pages.dev/api/account/submissions/1/detail", { headers: { cookie } }), testEnv, 1)).json();
+	const publicDetail = await (await taskPublicDetail(testEnv, "detail-task")).json();
+	const manifest = await (await buildManifest(new Request("https://ugk-task-share.pages.dev/api/manifest"), testEnv)).json();
+
+	assert.equal(response.status, 200);
+	assert.equal(body.title, "Better Detail Task");
+	assert.equal(ownerDetail.title, "Better Detail Task");
+	assert.equal(publicDetail.title, "Better Detail Task");
+	assert.equal(publicDetail.inputs[0].description, "公开视频链接");
+	assert.equal(testEnv.TASK_UPLOADS.objects.get("tasks/detail-task/1.0.0/skill.md"), originalSkill);
+	assert.deepEqual(Object.keys(manifest.tasks[0].files).sort(), Object.keys(SAMPLE_FILES).sort());
+});
+
+test("only active submission owners can edit marketplace detail", async () => {
+	const testEnv = env();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("42", "octo", "", new Date().toISOString()).run();
+	await testEnv.DB.prepare("INSERT INTO users (github_id, login, avatar_url, created_at) VALUES (?, ?, ?, ?)").bind("43", "other", "", new Date().toISOString()).run();
+	const ownerCookie = await createSessionCookie({ id: 1, login: "octo" }, testEnv);
+	const otherCookie = await createSessionCookie({ id: 2, login: "other" }, testEnv);
+	const form = new FormData();
+	form.set("name", "owned-detail");
+	form.set("version", "1.0.0");
+	form.set("title", "Owned Detail");
+	form.set("description", "Original");
+	form.set("artifact", new File([taskZip("owned-detail") as BlobPart], "owned-detail.zip", { type: "application/zip" }));
+	await submitTask(new Request("https://ugk-task-share.pages.dev/api/tasks/submit", { method: "POST", headers: { cookie: ownerCookie }, body: form }), testEnv);
+
+	const other = await updateAccountSubmissionDetail(new Request("https://ugk-task-share.pages.dev/api/account/submissions/1/detail", { method: "PUT", headers: { cookie: otherCookie }, body: JSON.stringify({ title: "Nope", description: "Nope" }) }), testEnv, 1);
+	await withdrawSubmission(new Request("https://ugk-task-share.pages.dev/api/account/submissions/1", { method: "DELETE", headers: { cookie: ownerCookie } }), testEnv, 1);
+	const archived = await updateAccountSubmissionDetail(new Request("https://ugk-task-share.pages.dev/api/account/submissions/1/detail", { method: "PUT", headers: { cookie: ownerCookie }, body: JSON.stringify({ title: "Nope", description: "Nope" }) }), testEnv, 1);
+
+	assert.equal(other.status, 404);
+	assert.equal(archived.status, 409);
 });
 
 test("buildManifest lists published tasks with loose-file URLs and serveTaskFile delivers them", async () => {

@@ -167,6 +167,14 @@ test("task-share marketplace cards show version and bottom author", () => {
 	assert.match(css, /\.task-detail-pre \{/);
 });
 
+test("task-share marketplace detail prefers editable public detail", () => {
+	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
+	assert.match(html, /function fetchTaskDetail/);
+	assert.match(html, /\/api\/tasks\/'\+encodeURIComponent\(task\.name\)\+'\/detail/);
+	assert.match(html, /detail\.trigger/);
+	assert.match(html, /detail\.usage/);
+});
+
 test("task-share copy feedback keeps label and swaps icon", () => {
 	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
 	const css = readFileSync("docs/task-share/styles.css", "utf8");
@@ -206,6 +214,11 @@ test("task-share marketplace paginates growing catalogs", () => {
 	assert.match(css, /\.catalog-more \{/);
 });
 
+test("task-share marketplace sorts cards immediately after rendering", () => {
+	const html = readFileSync("docs/task-share/marketplace/index.html", "utf8");
+	assert.match(html, /function renderCatalogTasks[\s\S]*bindCards\(\);filterTasks\(\);[\s\S]*}\nfunction renderCatalogFromCache/);
+});
+
 test("task-share admin submissions show version", () => {
 	const html = readFileSync("docs/task-share/admin/index.html", "utf8");
 	assert.match(html, /t\.version/);
@@ -218,11 +231,16 @@ test("task-share account page manages submissions with withdraw and archive UI",
 	assert.match(html, /data-account-summary/);
 	assert.match(html, /accountSubmissionRows/);
 	assert.match(html, /data-withdraw-submission/);
+	assert.match(html, /data-edit-submission-detail/);
+	assert.match(html, /function openDetailEditor/);
+	assert.match(html, /\/api\/account\/submissions\/'\+encodeURIComponent\(id\)\+'\/detail/);
 	assert.match(html, /account\.withdraw/);
+	assert.match(html, /account\.editDetail/);
 	assert.match(html, /account\.archivedSubmissions/);
 	assert.match(css, /\.account-dashboard/);
 	assert.match(css, /\.account-list/);
 	assert.match(css, /\.status-chip/);
+	assert.match(css, /\.detail-editor-grid/);
 });
 
 test("cli auth page uses the marketplace shell and localized copy", () => {

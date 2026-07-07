@@ -412,6 +412,15 @@ async function chooseTaskbookName(ctx: any, name: string | undefined, tag?: stri
 	return selected ? byLabel.get(selected) : undefined;
 }
 
+// ponytail: 专用切换菜单项文案(handleTaskShow + runTaskMenu 复用),状态指示符随 isDedicated 变。
+// hasToggle=false 时返回 null(调用方据此不塞进 options)。
+function dedicatedToggleLabel(isDedicated: boolean, hasToggle: boolean): string | null {
+	if (!hasToggle) return null;
+	return isDedicated
+		? uiText("取消专用(当前🔒)", "Undedicate (currently 🔒)")
+		: uiText("设为专用(当前🔓)", "Dedicate (currently 🔓)");
+}
+
 type TaskGuideItem = {
 	id: number;
 	title: string;
@@ -711,9 +720,7 @@ async function handleTaskShow(
 		// ponytail: 详情菜单 —— 菜单项文案带当前状态(🔒/🔓),翻转专用后回菜单继续操作
 		// (轻量动作不该踢出整个 /task);导览/编辑是重动作,做完即走(导览完可选编辑,编辑进 reviewing 状态机)。
 		let isDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
-		const toggleLabel = () => onToggleDedicated
-			? (isDedicated ? "取消专用(当前🔒)" : "设为专用(当前🔓)")
-			: null;
+		const toggleLabel = () => dedicatedToggleLabel(isDedicated, !!onToggleDedicated);
 		const options = () => {
 			const tl = toggleLabel();
 			return tl ? ["task 导览", "task 编辑", tl, BACK, "Exit"] : ["task 导览", "task 编辑", BACK, "Exit"];
@@ -2031,26 +2038,31 @@ export function registerTask(pi: ExtensionAPI): void {
 
 			// ④ per-task 子菜单
 			let isDedicated = Array.isArray(loaded.taskbook.tags) && loaded.taskbook.tags.includes("dedicated");
-			const toggleLabel = () => isDedicated ? uiText("取消专用(当前🔒)", "Undedicate (currently 🔒)") : uiText("设为专用(当前🔓)", "Dedicate (currently 🔒)");
-			const subOpts = () => [uiText("运行", "Run"), toggleLabel(), uiText("重命名", "Rename"), uiText("上传到市场", "Publish"), uiText("删除", "Delete"), BACK, "Exit"];
-			let action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, subOpts());
+			// ponytail: 子菜单项字面量命名,避免魔法索引(改菜单顺序不会错位)。
+			// toggleLabel 随 isDedicated 变,翻转后重算 opts 刷新文案。
+			const RUN = uiText("运行", "Run");
+			const RENAME = uiText("重命名", "Rename");
+			const PUBLISH = uiText("上传到市场", "Publish");
+			const DEL = uiText("删除", "Delete");
+			const buildOpts = () => [RUN, dedicatedToggleLabel(isDedicated, true)!, RENAME, PUBLISH, DEL, BACK, "Exit"];
+			let action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, buildOpts());
 			// 专用翻转后回子菜单刷新文案
-			while (action === toggleLabel()) {
+			while (action === dedicatedToggleLabel(isDedicated, true)) {
 				await toggleTaskDedicated(ctx, loaded);
 				isDedicated = !isDedicated;
-				action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, subOpts());
+				action = await ctx.ui.select(`taskbook: ${loaded.taskbook.name}`, buildOpts());
 			}
 			if (action === BACK) continue taskLoop; // 返回上一级 → task 列表
 			if (!action || action === "Exit") return;
-			if (action === subOpts()[0]) {
+			if (action === RUN) {
 				// 运行:弹一句话输入收 rawInput,再调 handleTaskRun
 				const rawInput = await ctx.ui?.input?.(uiText("一句话输入(可留空)", "One-line input (optional)"), "") ?? "";
 				await handleTaskRun(pi, ctx, loaded, rawInput);
 				return;
 			}
-			if (action === subOpts()[2]) { await handleTaskRename(ctx, loaded); return; }
-			if (action === subOpts()[3]) { await handleTaskPublish(ctx, loaded); return; }
-			if (action === subOpts()[4]) { await handleTaskDelete(ctx, loaded); return; }
+			if (action === RENAME) { await handleTaskRename(ctx, loaded); return; }
+			if (action === PUBLISH) { await handleTaskPublish(ctx, loaded); return; }
+			if (action === DEL) { await handleTaskDelete(ctx, loaded); return; }
 		}
 	}
 

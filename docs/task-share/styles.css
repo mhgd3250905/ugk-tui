@@ -696,10 +696,16 @@ select.search option:checked { background: var(--bg-elev2); color: var(--accent)
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--accent);
+  cursor: pointer;
   opacity: 0.76;
-  pointer-events: none;
+  transition: opacity var(--transition), background-color var(--transition), transform var(--transition);
 }
+.task-glyph:hover { background: var(--accent-soft); opacity: 1; transform: translateY(-1px); }
+.task-glyph .icon { pointer-events: none; }
 .task-card h2 { font-size: 27px; font-weight: 640; letter-spacing: 0; line-height: 1.12; overflow-wrap: anywhere; }
 .desc { color: var(--text-muted); font-size: 14px; line-height: 1.7; min-height: 2lh; overflow-wrap: anywhere; }
 .card-foot {
@@ -776,6 +782,64 @@ button.metric:disabled { cursor: wait; }
 .panel h3 { margin: 24px 0 12px; font-size: 16px; font-weight: 720; }
 .panel h3:first-child { margin-top: 0; }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.account-page { padding-bottom: 24px; }
+.account-dashboard { display: grid; gap: 18px; }
+.account-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.account-title-row h2 { margin: 0; }
+.account-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.account-summary-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+}
+.account-summary-card strong { display: block; color: var(--accent); font-size: 24px; line-height: 1; }
+.account-summary-card span { color: var(--text-muted); font-size: 12px; }
+.account-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; align-items: start; }
+.account-list {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+}
+.account-list-main { grid-row: span 2; }
+.account-list-wide { grid-column: 1 / -1; }
+.account-list h3 { margin: 0; }
+.account-list > p { color: var(--text-muted); }
+.account-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.account-row strong { display: block; color: var(--text); overflow-wrap: anywhere; }
+.account-row span,
+.account-row small { display: block; color: var(--text-muted); overflow-wrap: anywhere; }
+.account-row-meta { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 720;
+}
+.status-chip[data-status="published"] { border-color: rgba(46, 231, 101, 0.28); background: var(--accent-soft); color: var(--accent); }
+.status-chip[data-status="pending"], .status-chip[data-status="approved"] { color: var(--metric-save-text); }
+.status-chip[data-status="withdrawn"], .status-chip[data-status="rejected"] { color: var(--text-dim); }
+.btn-compact { min-height: 32px; padding: 0 10px; font-size: 12px; }
 .submission-row {
   padding: 16px;
   margin-bottom: 12px;
@@ -888,6 +952,52 @@ button.metric:disabled { cursor: wait; }
   color: var(--text);
 }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.task-detail-dialog {
+  width: min(780px, calc(100vw - 32px));
+  max-height: min(760px, calc(100dvh - 32px));
+  overflow: auto;
+}
+.task-detail-dialog[open] { animation: task-detail-pop var(--transition); }
+.task-detail { display: grid; gap: 18px; padding: 24px; }
+.task-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.task-detail-head h2 { margin: 10px 0 8px; font-size: 30px; line-height: 1.1; overflow-wrap: anywhere; }
+.task-detail-head p,
+.task-detail-grid p { color: var(--text-muted); overflow-wrap: anywhere; }
+.task-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.task-detail h3 { margin-bottom: 8px; color: var(--text); font-size: 13px; font-weight: 760; text-transform: uppercase; }
+.task-detail section {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+}
+.task-detail-command {
+  display: block;
+  margin-bottom: 14px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.task-detail-list { display: grid; gap: 8px; list-style: none; color: var(--text-muted); }
+.task-detail-list li { overflow-wrap: anywhere; }
+.task-detail-list code { color: var(--accent); }
+.task-detail-list span { color: var(--text-muted); }
+.task-detail-pre {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  font: 12px/1.65 "SF Mono", Consolas, ui-monospace, monospace;
+}
+@keyframes task-detail-pop {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 
 .footer { margin-top: 70px; padding: 34px 0; border-top: 1px solid var(--footer-border); }
 .footer-inner { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; color: var(--text-dim); font-size: 13px; text-align: center; }
@@ -979,6 +1089,12 @@ button.metric:disabled { cursor: wait; }
   .metric-row { gap: 12px; }
   .metric { justify-content: flex-start; gap: 6px; padding: 0; }
   .metric b { font-size: 13px; }
+  .task-detail-head,
+  .task-detail-grid { grid-template-columns: 1fr; flex-direction: column; }
+  .account-summary,
+  .account-grid { grid-template-columns: 1fr; }
+  .account-list-main,
+  .account-list-wide { grid-column: auto; grid-row: auto; }
   .split, .form-grid { grid-template-columns: 1fr; }
   .panel { padding: 22px; }
   .page-head { padding-top: 52px; }

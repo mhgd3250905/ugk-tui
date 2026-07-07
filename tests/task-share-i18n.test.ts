@@ -155,11 +155,16 @@ test("task-share marketplace cards show version and bottom author", () => {
 	assert.match(html, /card-version/);
 	assert.match(html, /t\.version/);
 	assert.match(html, /card-author/);
-	assert.match(html, /<span class="task-glyph" aria-hidden="true">/);
+	assert.match(html, /data-task-detail/);
+	assert.match(html, /function openTaskDetail/);
+	assert.match(html, /fetchTaskFile\(task,'skill\.md'\)/);
+	assert.match(html, /runtimeInputMeta/);
 	assert.doesNotMatch(html, /<span class="chip">@'\+author/);
 	assert.match(css, /\.card-author \{[^}]*max-width:/);
 	assert.match(css, /\.card-author \{[^}]*text-overflow: ellipsis/);
-	assert.match(css, /\.task-glyph \{[^}]*pointer-events: none;/);
+	assert.match(css, /\.task-glyph \{[^}]*cursor: pointer;/);
+	assert.match(css, /\.task-detail-dialog \{/);
+	assert.match(css, /\.task-detail-pre \{/);
 });
 
 test("task-share copy feedback keeps label and swaps icon", () => {
@@ -205,6 +210,19 @@ test("task-share admin submissions show version", () => {
 	const html = readFileSync("docs/task-share/admin/index.html", "utf8");
 	assert.match(html, /t\.version/);
 	assert.match(html, /card-version/);
+});
+
+test("task-share account page manages submissions with withdraw and archive UI", () => {
+	const html = readFileSync("docs/task-share/account/index.html", "utf8");
+	const css = readFileSync("docs/task-share/styles.css", "utf8");
+	assert.match(html, /data-account-summary/);
+	assert.match(html, /accountSubmissionRows/);
+	assert.match(html, /data-withdraw-submission/);
+	assert.match(html, /account\.withdraw/);
+	assert.match(html, /account\.archivedSubmissions/);
+	assert.match(css, /\.account-dashboard/);
+	assert.match(css, /\.account-list/);
+	assert.match(css, /\.status-chip/);
 });
 
 test("cli auth page uses the marketplace shell and localized copy", () => {

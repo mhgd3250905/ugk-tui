@@ -93,6 +93,8 @@ const statsCacheMs=30*1000;
 const catalogPageSize=12;
 let catalogVisibleLimit=catalogPageSize;
 let statsRefreshPromise=null,statsRefreshKey='',statsRefreshAt=0;
+let catalogTasks=[];
+const detailCache=new Map();
 function readCatalogCache(){try{return JSON.parse(sessionStorage.getItem(catalogCacheKey)||'{}')}catch{return{}}}
 function writeCatalogCache(patch){try{sessionStorage.setItem(catalogCacheKey,JSON.stringify({...readCatalogCache(),...patch}))}catch{}}
 function cachedTasks(){const cache=readCatalogCache();return cache.tasks&&Date.now()-(cache.tasksAt||0)<catalogCacheMs?cache.tasks:null}
@@ -114,6 +116,26 @@ async function startGithubAuth(){try{const r=await fetch('/api/auth/github',{red
 function bindAuthLinks(){document.addEventListener('click',event=>{const link=event.target.closest('a[href="/api/auth/github"]');if(!link)return;event.preventDefault();startGithubAuth()})}
 async function copyText(button){try{await navigator.clipboard.writeText(button.dataset.copy);const icon=button.querySelector('[data-copy-icon]');button.dataset.copied='true';button.title=tr('card.copied');if(icon)icon.setAttribute('href','#icon-check');showToast(tr('toast.installCopied'));setTimeout(()=>{button.dataset.copied='false';button.title=button.getAttribute('aria-label')||tr('card.copy');if(icon)icon.setAttribute('href','#icon-copy')},1400)}catch{showToast(tr('toast.copyFailed'),'error')}}
 function askReportReason(task){return new Promise(resolve=>{let dialog=document.querySelector('[data-report-dialog]');if(!dialog){dialog=document.createElement('dialog');dialog.className='ugk-dialog';dialog.dataset.reportDialog='';dialog.innerHTML='<form class="dialog-card" data-report-form><h2 data-report-title></h2><p data-report-text></p><textarea data-report-reason required maxlength="500"></textarea><div class="dialog-actions"><button class="btn btn-secondary" type="button" data-report-cancel></button><button class="btn btn-primary" type="submit" data-report-send></button></div></form>';document.body.appendChild(dialog);dialog.querySelector('[data-report-cancel]').addEventListener('click',()=>dialog.close('cancel'));dialog.querySelector('[data-report-form]').addEventListener('submit',event=>{event.preventDefault();const reason=dialog.querySelector('[data-report-reason]').value.trim();if(!reason){showToast(tr('report.reasonRequired'),'error');return}dialog.close('submit')})}dialog.querySelector('[data-report-title]').textContent=tr('report.title',{task});dialog.querySelector('[data-report-text]').textContent=tr('report.text');dialog.querySelector('[data-report-reason]').placeholder=tr('report.placeholder');dialog.querySelector('[data-report-cancel]').textContent=tr('report.cancel');dialog.querySelector('[data-report-send]').textContent=tr('report.send');dialog.querySelector('[data-report-reason]').value='';dialog.addEventListener('close',function onClose(){dialog.removeEventListener('close',onClose);const reason=dialog.returnValue==='submit'?dialog.querySelector('[data-report-reason]').value.trim():'';resolve(reason||null)});dialog.showModal();dialog.querySelector('[data-report-reason]').focus()})}
+function compactMarkdown(text){return String(text||'').replace(/\r/g,'').split('\n').map(line=>line.trim()).filter(line=>line&&!line.startsWith('#')&&!line.startsWith('```')).slice(0,10).join('\n')}
+function detailItems(items,empty){return items.length?'<ul class="task-detail-list">'+items.map(item=>'<li>'+item+'</li>').join('')+'</ul>':'<p class="notice">'+empty+'</p>'}
+function artifactLabel(item){return typeof item==='string'?item:item&&typeof item.name==='string'?item.name:''}
+function inputLabel(field,contract){const meta=contract&&contract.runtimeInputMeta&&contract.runtimeInputMeta[field];const desc=meta&&typeof meta.description==='string'?meta.description:'';return '<code>'+esc(field)+'</code>'+(desc?' <span>'+esc(desc)+'</span>':'')}
+async function fetchTaskFile(task,file){const url=task.files?.[file];if(!url)return'';const key=task.name+':'+file;if(detailCache.has(key))return detailCache.get(key);try{const r=await fetch(url);const text=r.ok?(await r.text()).slice(0,12000):'';detailCache.set(key,text);return text}catch{return''}}
+function taskDetailHTML(task,contract={},skill=''){
+  const title=esc(task.title||titleize(task.name)), desc=esc(task.description||''), author=esc(task.author||'Community');
+  const version=task.version?'<span class="chip card-version">'+esc(String(task.version).startsWith('v')?task.version:'v'+task.version)+'</span>':'';
+  const fields=Array.isArray(contract.runtimeInput)?contract.runtimeInput.filter(field=>typeof field==='string'):[];
+  const artifacts=Array.isArray(contract.artifacts)?contract.artifacts.map(artifactLabel).filter(Boolean):[];
+  const fieldSummary=fields.length?fields.join(', '):tr('detail.freeInput');
+  const install='ugk task install '+task.name;
+  const run='/task run '+task.name+' '+tr('detail.requestPlaceholder');
+  const usage=compactMarkdown(skill);
+  return '<div class="task-detail-head"><div><div class="chips"><span class="chip">task</span>'+version+'<span class="chip card-author">@'+author+'</span></div><h2>'+title+'</h2><p>'+desc+'</p></div><button class="btn btn-secondary" type="button" data-detail-close>'+tr('detail.close')+'</button></div>'
+    +'<div class="task-detail-grid"><section><h3>'+tr('detail.install')+'</h3><code class="command task-detail-command">'+esc(install)+'</code><h3>'+tr('detail.run')+'</h3><code class="command task-detail-command">'+esc(run)+'</code></section><section><h3>'+tr('detail.naturalTrigger')+'</h3><p>'+esc(tr('detail.triggerExample',{title:task.title||task.name,name:task.name,fields:fieldSummary}))+'</p></section></div>'
+    +'<div class="task-detail-grid"><section><h3>'+tr('detail.inputs')+'</h3>'+detailItems(fields.map(field=>inputLabel(field,contract)),tr('detail.noInputs'))+'</section><section><h3>'+tr('detail.artifacts')+'</h3>'+detailItems(artifacts.map(item=>'<code>'+esc(item)+'</code>'),tr('detail.noArtifacts'))+'</section></div>'
+    +'<section><h3>'+tr('detail.usage')+'</h3>'+(usage?'<pre class="task-detail-pre">'+esc(usage)+'</pre>':'<p class="notice">'+tr('detail.unavailable')+'</p>')+'</section>';
+}
+async function openTaskDetail(name){const task=catalogTasks.find(item=>item.name===name);if(!task)return;let dialog=document.querySelector('[data-task-detail-dialog]');if(!dialog){dialog=document.createElement('dialog');dialog.className='ugk-dialog task-detail-dialog';dialog.dataset.taskDetailDialog='';dialog.innerHTML='<div class="task-detail" data-task-detail-body></div>';document.body.appendChild(dialog);dialog.addEventListener('click',event=>{if(event.target===dialog)dialog.close()})}const body=dialog.querySelector('[data-task-detail-body]');body.innerHTML=taskDetailHTML(task)+'<p class="notice">'+tr('detail.loading')+'</p>';body.querySelector('[data-detail-close]').addEventListener('click',()=>dialog.close());dialog.showModal();const [skill,contractText]=await Promise.all([fetchTaskFile(task,'skill.md'),fetchTaskFile(task,'contract.json')]);let contract={};try{contract=JSON.parse(contractText||'{}')}catch{}if(!dialog.open)return;body.innerHTML=taskDetailHTML(task,contract,skill);body.querySelector('[data-detail-close]').addEventListener('click',()=>dialog.close());}
 
 // Render a task card from manifest/community data, preserving data-attribute contracts
 function taskCardHTML(t){
@@ -128,8 +150,9 @@ function taskCardHTML(t){
     '<button class="metric metric-save" type="button" data-action="favorite" data-active="false" aria-pressed="false" aria-label="'+tr('card.save')+': '+Number(t.favorites??0)+'" title="'+tr('card.save')+'" data-task="'+name+'" data-api="/api/tasks/'+name+'/favorite"><svg class="metric-icon" focusable="false" aria-hidden="true"><use href="#icon-bookmark"></use></svg><b data-count="'+name+':favorites">'+Number(t.favorites??0)+'</b></button>'
   ].join('');
   const actions=t.downloadUrl?'<a class="btn btn-secondary btn-download" href="'+safeHref(t.downloadUrl)+'" data-download-api="/api/tasks/'+name+'/download" data-task="'+name+'" download aria-label="'+tr('card.downloadZip')+'" title="'+tr('card.downloadZip')+'"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-download"></use></svg>'+tr('card.downloadZip')+'</a>':'';
+  const detailButton='<button class="task-glyph" type="button" data-task-detail="'+name+'" aria-label="'+tr('card.details')+'" title="'+tr('card.details')+'"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-task"></use></svg></button>';
   return '<article class="task-card" data-task-card data-task="'+name+'" data-category="'+esc(cat)+'" data-downloads="'+Number(t.downloads??0)+'" data-likes="'+Number(t.likes??0)+'" data-favorites="'+Number(t.favorites??0)+'" data-newest="'+Number(t.newest??0)+'" data-search="'+esc((t.name+' '+(t.title||'')+' '+(t.description||'')+' '+((t.tags||[]).join(' '))).toLowerCase())+'">'
-    +'<div class="card-head"><div class="chips"><span class="chip">'+esc(cat)+'</span>'+version+'</div><span class="task-glyph" aria-hidden="true"><svg class="icon" focusable="false" aria-hidden="true"><use href="#icon-task"></use></svg></span></div>'
+    +'<div class="card-head"><div class="chips"><span class="chip">'+esc(cat)+'</span>'+version+'</div>'+detailButton+'</div>'
     +'<h2>'+title+'</h2>'
     +'<p class="desc">'+desc+'</p>'
     +'<div class="install-row"><code class="command">'+esc(install)+'</code><button class="btn btn-copy" type="button" data-copy="'+esc(install)+'" aria-label="'+tr('card.copyInstall')+'" title="'+tr('card.copyInstall')+'"><svg class="icon" focusable="false" aria-hidden="true"><use data-copy-icon href="#icon-copy"></use></svg>'+tr('card.copy')+'</button></div>'
@@ -138,7 +161,8 @@ function taskCardHTML(t){
 function renderCatalogTasks(root,catFilter,tasks){
   const cats=[...new Set(tasks.map(t=>t.category||t.tags?.[0]||'task'))].sort();
   const cur=catFilter?.value||'';if(catFilter){catFilter.innerHTML='<option value="">'+tr('filters.all')+'</option>'+cats.map(c=>'<option value="'+esc(c)+'"'+(c===cur?' selected':'')+'>'+esc(c)+'</option>').join('');fitSelectWidths()}
-  root.innerHTML=tasks.map((t,i)=>taskCardHTML({...t,newest:1000-i})).join('');
+  catalogTasks=tasks.map((t,i)=>({...t,newest:1000-i}));
+  root.innerHTML=catalogTasks.map(taskCardHTML).join('');
   catalogVisibleLimit=catalogPageSize;
   bindCards();
 }
@@ -165,6 +189,7 @@ async function refreshCatalog(){
 
 function bindCards(){
   document.querySelectorAll('[data-copy]').forEach(button=>button.addEventListener('click',()=>copyText(button)));
+  document.querySelectorAll('[data-task-detail]').forEach(button=>button.addEventListener('click',()=>openTaskDetail(button.dataset.taskDetail)));
   document.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('click',()=>postAction(button)));
   document.querySelectorAll('[data-download-api]').forEach(link=>link.addEventListener('click',()=>{const name=link.dataset.task;const prev=metricCount(name,'downloads');applyTaskData(name,{downloads:prev+1});filterTasks();fetch(link.dataset.downloadApi,{method:'POST',keepalive:true}).then(r=>r.ok?r.json():null).then(data=>{if(data){applyTaskData(name,data);cacheStats(name,data)}else applyTaskData(name,{downloads:prev});refreshMarketplaceStats();filterTasks()}).catch(()=>{applyTaskData(name,{downloads:prev});filterTasks()})}));
 }

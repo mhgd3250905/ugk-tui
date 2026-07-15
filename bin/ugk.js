@@ -15,6 +15,8 @@ process.env.PI_CODING_AGENT = "true";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { buildUgkCliArgs } from "./ugk-cli-args.js";
+import { isAuthCliCommand, runAuthCli } from "./ugk-auth-cli.js";
+import { isMcpCliCommand, runMcpCli, waitForMcpInputClose } from "./ugk-mcp-cli.js";
 import {
 	isTaskInstallCommand,
 	runTaskInstallCli,
@@ -37,6 +39,15 @@ applyUgkRuntimePolicy();
 const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, "..");
 const userArgs = process.argv.slice(2);
+
+if (isMcpCliCommand(userArgs)) {
+	const exitCode = await runMcpCli(userArgs, { packageRoot, stdout: process.stdout, stderr: process.stderr });
+	if (exitCode === 0 && userArgs[1] === "serve") await waitForMcpInputClose();
+	process.exit(exitCode);
+}
+if (isAuthCliCommand(userArgs)) {
+	process.exit(await runAuthCli(userArgs, { stdout: process.stdout, stderr: process.stderr }));
+}
 
 if (isTaskInstallCommand(userArgs)) {
 	process.exit(await runTaskInstallCli(userArgs, { stdout: process.stdout, stderr: process.stderr }));

@@ -2015,7 +2015,9 @@ export function registerTask(pi: ExtensionAPI): void {
 		const wasDedicated = !!(fresh && Array.isArray(fresh.taskbook.tags) && fresh.taskbook.tags.includes("dedicated"));
 		await setTaskbookDedicated(loaded.scope, cwdOf(ctx), loaded.taskbook.name, !wasDedicated);
 		await regenerateDedicatedIndex(cwdOf(ctx));
-		cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx));
+		cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx), {
+			includeDedicatedDetails: process.env.UGK_TASK_GATEWAY === "1",
+		});
 		ctx.ui.notify(wasDedicated
 			? `已取消"${loaded.taskbook.name}"的专用标记,该 task 重新对 agent 可见(可自动触发)。`
 			: `已将"${loaded.taskbook.name}"设为专用,该 task 对 agent 隐藏(仅当你点名 task 名时才可用)。`, "info");

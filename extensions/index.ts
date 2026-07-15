@@ -26,6 +26,7 @@ import registerPlanMode from "./plan-mode.ts";
 import registerTodoTool from "./todo-tool.ts";
 import registerCompaction from "./compaction/index.ts";
 import registerTask from "./task/task.ts";
+import registerTaskGateway from "./task/task-gateway.ts";
 import registerQuestionnaire from "./questionnaire.ts";
 import registerChromeCdp from "./chrome-cdp/index.ts";
 import registerWebSearch from "./web-search/index.ts";
@@ -154,6 +155,7 @@ export default function (pi: ExtensionAPI) {
 
 	// 1.3b.3) task:固定任务 taskbook 创造/复用系统
 	registerTask(pi);
+	registerTaskGateway(pi);
 
 	// 1.3c) chrome-cdp:受保护的本地登录态 Chrome 控制器(/cdp + chrome_cdp tool)
 	registerChromeCdp(pi);

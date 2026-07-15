@@ -50,7 +50,7 @@ export function dedicatedIndexPath(): string {
 	return path.join(tasksRootUser(), "_dedicated-index.md");
 }
 
-export async function buildTaskbookPrompt(cwd: string): Promise<string> {
+export async function buildTaskbookPrompt(cwd: string, options: { includeDedicatedDetails?: boolean } = {}): Promise<string> {
 	const items = await listTaskbooks(cwd);
 	if (items.length === 0) return "";
 	const general = items.filter((item) => !isDedicated(item));
@@ -61,7 +61,9 @@ export async function buildTaskbookPrompt(cwd: string): Promise<string> {
 	}
 	// ponytail: 专用 task 不列详情,只给指针。是否有指针取决于当前是否存在专用 task,
 	// 所以翻转专用标记后必须重生成 prompt(见 task.ts 详情页菜单回调)。
-	if (dedicated.length > 0) {
+	if (dedicated.length > 0 && options.includeDedicatedDetails) {
+		lines.push("", "## 专用 task", ...dedicated.map(formatTaskbookLine));
+	} else if (dedicated.length > 0) {
 		lines.push("", "## 专用 task(仅当用户在消息里明确点名 task 名时才使用,不要主动推荐)");
 		lines.push(`专用 task 清单见文件: ${dedicatedIndexPath()}`);
 		lines.push("需要时用 read 工具读取该文件,找到匹配项后用 run_task 执行。不要在用户未点名时主动 read 或推荐。");

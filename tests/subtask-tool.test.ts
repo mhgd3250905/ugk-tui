@@ -378,6 +378,13 @@ test("run_task missing taskbook returns available task names as a tool error", a
 		assert.equal(result.isError, true);
 		assert.match(result.content[0].text, /missing/);
 		assert.match(result.content[0].text, /known/);
+		assert.deepEqual(result.details.failure, {
+			code: "TASK_NOT_FOUND",
+			stage: "routing",
+			retryable: false,
+			message: result.content[0].text,
+			suggestedAction: "选择可用 taskbook 后重试。",
+		});
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}
@@ -402,6 +409,9 @@ test("run_task fails cleanly when dispatcher cannot parse input (no UI prompt)",
 		assert.equal(result.isError, true);
 		assert.equal(inputPrompted, 0);
 		assert.match(result.content[0].text, /runtimeInput|解析/);
+		assert.equal(result.details.results[0].failure.code, "INPUT_INVALID");
+		assert.equal(result.details.results[0].failure.stage, "dispatcher");
+		assert.equal(result.details.results[0].failure.retryable, true);
 	} finally {
 		setTaskDispatcherForTests(undefined);
 		rmSync(cwd, { recursive: true, force: true });
@@ -511,6 +521,32 @@ test("run_task parallel confirms protected tools once for the batch", async () =
 	}
 });
 
+test("run_task reports structured failure when protected tools are denied", async () => {
+	const { pi, tools } = makePi(["read", "bash", "chrome_cdp"]);
+	const { cwd, ctx } = makeCtx();
+	ctx.ui.confirm = () => false;
+	registerTask(pi as any);
+	try {
+		await saveTaskbook("project", cwd, "protected-denied", {
+			description: "protected denied",
+			spec,
+			skill: "Use chrome_cdp.",
+			verify: "process.exit(0);\n",
+			contract: { requiredTools: ["chrome_cdp"], runtimeInput: ["text"], artifacts: [] },
+		});
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", { name: "protected-denied", input: "x" }, undefined, undefined, ctx);
+
+		assert.equal(result.isError, true);
+		assert.equal(result.details.failure.code, "PROTECTED_TOOL_DENIED");
+		assert.equal(result.details.failure.stage, "approval");
+		assert.equal(result.details.failure.retryable, false);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 // ponytail: parallel 入口集中 hydrate 去重。两个 task 声明同一个 requiredEnv,reader 只应被调一次
 // (去重后),不是 N×M 次。钉死回归:若 hydrate 退回 executeSubtask 内部各调,reader 会被调 2 次。
 test("run_task parallel hydrates requiredEnv once for the batch (dedup)", async () => {
@@ -567,6 +603,37 @@ test("run_task parallel hydrates requiredEnv once for the batch (dedup)", async 
 	}
 });
 
+test("run_task reports missing required env as a preflight failure", async () => {
+	const { pi, tools } = makePi();
+	const { cwd, ctx } = makeCtx();
+	const envName = "UGK_TEST_MISSING_REQUIRED_ENV";
+	const previous = process.env[envName];
+	delete process.env[envName];
+	registerTask(pi as any);
+	setWindowsUserEnvReaderForTests(async () => undefined);
+	try {
+		await saveTaskbook("project", cwd, "missing-env", {
+			description: "missing env",
+			spec,
+			skill: "# Skill",
+			verify: "process.exit(0);\n",
+			contract: { runtimeInput: [], artifacts: [], requiredEnv: [envName] },
+		});
+		const tool = tools.find((item) => item.name === "run_task");
+
+		const result = await tool.execute("call-1", { name: "missing-env", input: "x" }, undefined, undefined, ctx);
+
+		assert.equal(result.details.results[0].failure.code, "MISSING_ENV");
+		assert.equal(result.details.results[0].failure.stage, "preflight");
+		assert.equal(result.details.results[0].failure.retryable, false);
+	} finally {
+		setWindowsUserEnvReaderForTests(undefined);
+		if (previous === undefined) delete process.env[envName];
+		else process.env[envName] = previous;
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 // ponytail: parallel 路径缺 binary —— 该 task FAIL(workerSummary 含安装提示),不炸批次,
 // 其他 task 正常执行。钉死 task 可移植闭环:依赖缺失不污染并发兄弟。
 test("run_task parallel FAILs the missing-binary task without breaking the batch", async () => {
@@ -607,6 +674,8 @@ test("run_task parallel FAILs the missing-binary task without breaking the batch
 		assert.equal(missingBinResult.status, "fail");
 		assert.match(missingBinResult.workerSummary, /definitely-missing-xyz-12345/);
 		assert.match(missingBinResult.workerSummary, /重新调用 run_task/);
+		assert.equal(missingBinResult.failure.code, "MISSING_BINARY");
+		assert.equal(missingBinResult.failure.stage, "preflight");
 		assert.equal(hasNodeResult.status, "pass");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
@@ -1137,6 +1206,8 @@ test("run_task fails after exhausting all 4 attempts with verify failures", asyn
 		assert.equal(workerCalls, 4);
 		assert.ok(result.details.results[0].verifyFailures.length > 0, "带具体 verify 失败");
 		assert.match(JSON.stringify(result.details.results[0].verifyFailures), /json is valid/);
+		assert.equal(result.details.results[0].failure.code, "VERIFY_FAILED");
+		assert.equal(result.details.results[0].failure.stage, "verify");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskCheckerRunnerForTests(undefined);
@@ -1215,6 +1286,8 @@ test("run_task reports clean FAIL with empty verifyFailures when worker fails wi
 		assert.equal(checkerCalls, 0, "worker 失败不调 checker");
 		assert.deepEqual(result.details.results[0].verifyFailures, [], "未运行 verify,failures 为空数组非 undefined");
 		assert.match(result.details.results[0].workerSummary, /tool not found/);
+		assert.equal(result.details.results[0].failure.code, "WORKER_FAILED");
+		assert.equal(result.details.results[0].failure.stage, "worker");
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskCheckerRunnerForTests(undefined);

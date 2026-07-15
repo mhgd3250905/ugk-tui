@@ -83,6 +83,16 @@ const SUBTASK_MAX = 8;
 const SUBTASK_CONCURRENCY = 4;
 
 type SubtaskRequest = { name: string; input: string };
+type TaskFailure = {
+	code: string;
+	stage: "preflight" | "routing" | "dispatcher" | "approval" | "worker" | "verify" | "runtime";
+	retryable: boolean;
+	message: string;
+	suggestedAction?: string;
+};
+function taskFailure(code: string, stage: TaskFailure["stage"], retryable: boolean, message: string, suggestedAction?: string): TaskFailure {
+	return { code, stage, retryable, message, ...(suggestedAction ? { suggestedAction } : {}) };
+}
 type SubtaskResult = {
 	name: string;
 	status: "pass" | "fail";
@@ -97,6 +107,7 @@ type SubtaskResult = {
 	apiUsage?: TaskApiUsage[];
 	phases?: Record<string, number>; // ponytail: 诊断用,各阶段耗时(ms)
 	parseFailed?: boolean; // ponytail: 此 FAIL 源自输入解析失败(非 worker/verify),run_task 层据此判断是否标 isError
+	failure?: TaskFailure;
 };
 
 type TaskApiUsage = {
@@ -1257,7 +1268,10 @@ async function loadSubtask(cwd: string, name: string): Promise<LoadedTaskbook> {
 	const loaded = await loadTaskbook(cwd, name);
 	if (loaded) return loaded;
 	const available = (await listTaskbooks(cwd)).map((item) => item.name).join(", ") || "(none)";
-	throw new Error(`taskbook "${name}" 不存在。可用: ${available}`);
+	const message = `taskbook "${name}" 不存在。可用: ${available}`;
+	throw Object.assign(new Error(message), {
+		taskFailure: taskFailure("TASK_NOT_FOUND", "routing", false, message, "选择可用 taskbook 后重试。"),
+	});
 }
 
 // ponytail: 单源重试内核 — executeSubtask(run_task 工具)和 handleTaskRun(/task run 交互式)共用。
@@ -1409,29 +1423,33 @@ async function executeSubtask(
 	// /task run 单任务路径走 promptMissingRequiredEnv(内含 hydrate),也不经过这里。
 	const missingEnv = missingRequiredEnv(loaded.contract);
 	if (missingEnv.length > 0) {
+		const message = formatMissingEnvMessage(missingEnv);
 		return {
 			name: request.name,
 			status: "fail",
 			outputDir,
 			artifacts: [],
 			verifyFailures: [],
-			workerSummary: formatMissingEnvMessage(missingEnv),
+			workerSummary: message,
 			duration: (Date.now() - startedAt) / 1000,
 			attempts: 0,
+			failure: taskFailure("MISSING_ENV", "preflight", false, message, "配置缺失环境变量后重新调用 run_task。"),
 		};
 	}
 	// ponytail: 外部 CLI 依赖前置校验,与 env 同位。缺则 FAIL + 安装提示,让 agent 补装后重试。
 	const missingBinaries = missingRequiredBinaries(loaded.contract);
 	if (missingBinaries.length > 0) {
+		const message = formatMissingBinariesMessage(missingBinaries);
 		return {
 			name: request.name,
 			status: "fail",
 			outputDir,
 			artifacts: [],
 			verifyFailures: [],
-			workerSummary: formatMissingBinariesMessage(missingBinaries),
+			workerSummary: message,
 			duration: (Date.now() - startedAt) / 1000,
 			attempts: 0,
+			failure: taskFailure("MISSING_BINARY", "preflight", false, message, "安装缺失命令后重新调用 run_task。"),
 		};
 	}
 	await mkdir(outputDir, { recursive: true });
@@ -1450,9 +1468,26 @@ async function executeSubtask(
 	// 让整个 run_task 工具进 catch,返回 isError + 空 results —— 其他并发 task 的进度全丢。
 	// 解析失败应转成该 task 的 FAIL,而非炸掉整个批次。
 	let runtimeInput: unknown;
-	let outcome: TaskRetryOutcome;
 	try {
 		runtimeInput = await resolveRuntimeInput(ctx, loaded.skill, loaded.contract, request.input, true, (item) => addTaskApiUsage(apiUsage, item.model, item.usage));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			name: request.name,
+			status: "fail",
+			outputDir,
+			artifacts: [],
+			verifyFailures: [],
+			workerSummary: `执行异常: ${message}`,
+			duration: (Date.now() - startedAt) / 1000,
+			attempts: 0,
+			apiUsage,
+			parseFailed: true,
+			failure: taskFailure("INPUT_INVALID", "dispatcher", true, message, "补充 task 所需输入后重试。"),
+		};
+	}
+	let outcome: TaskRetryOutcome;
+	try {
 		outcome = await runTaskWithRetry(loaded, runtimeInput, outputDir, cwdOf(ctx), {
 			env: { ...workerEnv, ...requiredEnvValues(loaded.contract) },
 			signal,
@@ -1506,15 +1541,18 @@ async function executeSubtask(
 			duration: (Date.now() - startedAt) / 1000,
 			attempts: 1,
 			apiUsage,
-			// parseFailed 标记:此 FAIL 是输入解析失败(非 worker/verify 失败)。
-			// run_task 工具层据此判断:单任务(single)全 parseFailed → 标 isError 让 agent 知道是输入问题;
-			// 并行(parallel)部分 parseFailed → 不炸批次,各 task 独立 PASS/FAIL。
-			parseFailed: true,
-		} as SubtaskResult;
+			failure: taskFailure("WORKER_FAILED", "worker", false, message, "根据 workerSummary 检查 worker 或外部依赖。"),
+		};
 	}
 	const duration = (Date.now() - startedAt) / 1000;
 	for (const item of outcome.apiUsage) addTaskApiUsage(apiUsage, item.model, item.usage);
 	const status = outcome.workerResult.ok && outcome.verifyResult.passed ? "pass" : "fail";
+	const workerSummary = outcome.workerResult.ok ? outcome.workerResult.summary : (outcome.workerResult.errorMessage ?? "worker failed");
+	const failure: TaskFailure | undefined = status === "pass"
+		? undefined
+		: !outcome.workerResult.ok
+			? taskFailure("WORKER_FAILED", "worker", false, workerSummary, "根据 workerSummary 检查 worker 或外部依赖。")
+			: taskFailure("VERIFY_FAILED", "verify", false, "verify 未通过。", "根据 verifyFailures 检查输入或 taskbook。");
 	await appendRunToTaskbook(loaded.scope, cwdOf(ctx), request.name, {
 		timestamp: new Date().toISOString(),
 		status,
@@ -1530,13 +1568,14 @@ async function executeSubtask(
 		outputDir,
 		artifacts: await collectArtifactPaths(loaded.contract, outputDir),
 		verifyFailures: outcome.verifyResult.failures,
-		workerSummary: outcome.workerResult.ok ? outcome.workerResult.summary : (outcome.workerResult.errorMessage ?? "worker failed"),
+		workerSummary,
 		duration,
 		attempts: outcome.attempts,
 		usage: outcome.workerResult.usage,
 		model: outcome.workerResult.model,
 		apiUsage,
 		phases: outcome.phases,
+		failure,
 	};
 }
 
@@ -2268,8 +2307,10 @@ export function registerTask(pi: ExtensionAPI): void {
 			}), { description: "parallel 模式任务数组" })),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			let mode: "single" | "parallel" = "single";
 			try {
 				const parsed = parseRunTaskParams(params);
+				mode = parsed.mode;
 				setTaskRunWidget(ctx, [
 					"⏳ run_task 已启动",
 					`任务数: ${parsed.tasks.length}`,
@@ -2280,7 +2321,18 @@ export function registerTask(pi: ExtensionAPI): void {
 				// 避免 executeSubtask 内每个 subtask 各开 powershell(parallel 下 N×M 次 spawn)。
 				await hydrateRequiredEnvForTaskbooks(loaded);
 				const workerEnv = await resolveTaskWorkerEnv(ctx, loaded, getActiveTaskTools());
-				if (workerEnv === null) throw new Error("run_task 需要受保护工具授权,但未获授权。");
+				if (workerEnv === null) {
+					const message = "run_task 需要受保护工具授权,但未获授权。";
+					return {
+						content: [{ type: "text", text: message }],
+						details: {
+							mode,
+							results: [],
+							failure: taskFailure("PROTECTED_TOOL_DENIED", "approval", false, message, "取得用户授权后重新调用 run_task。"),
+						},
+						isError: true,
+					};
+				}
 				const results = await mapWithConcurrencyLimit(parsed.tasks, SUBTASK_CONCURRENCY, async (task, index) =>
 					await executeSubtask(ctx, task, loaded[index], workerEnv, signal));
 				// ponytail: 所有 task 都因输入解析失败而 FAIL → 标 isError。
@@ -2306,9 +2358,12 @@ export function registerTask(pi: ExtensionAPI): void {
 					// abort/provider 层修,不在 task 工具层用 terminate 兜底。
 				};
 			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				const failure = (error as Error & { taskFailure?: TaskFailure })?.taskFailure
+					?? taskFailure("INTERNAL_ERROR", "runtime", false, message, "查看 UGK 日志后重试。");
 				return {
-					content: [{ type: "text", text: (error as Error).message }],
-					details: { mode: "single", results: [] },
+					content: [{ type: "text", text: message }],
+					details: { mode, results: [], failure },
 					isError: true,
 				};
 			} finally {

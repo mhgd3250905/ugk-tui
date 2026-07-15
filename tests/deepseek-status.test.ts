@@ -2,6 +2,30 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { getDeepSeekStatus } from "../extensions/deepseek-status.ts";
 
+test("exposes a structured BOM-safe DeepSeek auth state", async () => {
+	const module = await import("../extensions/deepseek-status.ts");
+	assert.equal(typeof (module as any).getDeepSeekAuthState, "function");
+	const getState = (module as any).getDeepSeekAuthState;
+
+	assert.deepEqual(getState({ env: { DEEPSEEK_API_KEY: "sk-env" } }), {
+		configured: true,
+		provider: "deepseek",
+		source: "env",
+	});
+	assert.deepEqual(getState({ env: {}, authPath: "auth.json", readFile: () => `\uFEFF${JSON.stringify({ deepseek: { type: "api_key", key: "sk-file" } })}` }), {
+		configured: true,
+		provider: "deepseek",
+		source: "auth_json",
+	});
+	for (const readFile of [() => { throw new Error("missing"); }, () => "{bad json"]) {
+		assert.deepEqual(getState({ env: {}, authPath: "auth.json", readFile }), {
+			configured: false,
+			provider: "deepseek",
+			source: null,
+		});
+	}
+});
+
 test("reports configured when DeepSeek API key exists in environment", () => {
 	assert.equal(
 		getDeepSeekStatus({

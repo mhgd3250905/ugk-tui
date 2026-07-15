@@ -155,8 +155,8 @@ git commit -m "feat(task): expose structured failure metadata"
 
 3. `task_gateway_result({status:"no_match"})` 返回结构化 details，并终止当前 agent loop；
 4. gateway prompt 明确禁止普通工具和无 task 兜底；
-5. gateway task 清单包含专用 task 的详情，不要求 `read` 工具读取索引；
-6. 普通 TUI 的专用 task 披露行为保持不变。
+5. gateway task 清单包含全部已安装 task，不要求 `read` 工具读取额外索引；
+6. 旧 `dedicated` 标签不影响 task 的可见性或执行。
 
 Run:
 

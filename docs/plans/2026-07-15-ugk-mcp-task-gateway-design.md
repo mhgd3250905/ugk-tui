@@ -249,7 +249,7 @@ gateway system prompt 的硬规则：
 
 第一版一次 gateway request 只允许一次 `run_task` 调用。顺序依赖的多 task 编排留到有真实案例后再设计，避免一开始把运行状态和失败语义做复杂。
 
-专用 task 在普通 TUI 中仍然按现有规则渐进披露；但用户已经明确要求“用 UGK”时，gateway 可以看到完整 task 清单，从而完成内部匹配。
+所有已安装 task 使用同一套发现规则；MCP gateway 和普通 TUI 都能看到完整 task 清单，不再区分“专用 task”。
 
 ## 8. 信任、授权和问题如何穿过两层 Agent
 

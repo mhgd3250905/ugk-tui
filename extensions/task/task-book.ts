@@ -231,28 +231,6 @@ export async function appendRunToTaskbook(scope: "user" | "project", cwd: string
 	});
 }
 
-// ponytail: 翻转"专用"标记 —— 只改 taskbook.json 的 tags(增删 dedicated),
-// 不全量重写 spec/skill/verify/contract。复刻 appendRunToTaskbook 的锁样板:
-// 进程内 withFileMutationQueue 按 realpath 串行同一文件,防并发 read-modify-write 互覆盖。
-// 保留其它已存在 tag;无 tags 字段时按需创建。
-export async function setTaskbookDedicated(scope: "user" | "project", cwd: string, name: string, dedicated: boolean): Promise<Taskbook> {
-	if (!isValidTaskbookName(name)) throw new Error(`Invalid taskbook name: ${name}`);
-	const filePath = path.join(taskDir(scope, cwd, name), "taskbook.json");
-	return withFileMutationQueue(filePath, async () => {
-		const loaded = await loadFromDir(scope, taskDir(scope, cwd, name));
-		if (!loaded) throw new Error(`Taskbook not found: ${name}`);
-		const others = (loaded.taskbook.tags ?? []).filter((tag) => tag !== "dedicated");
-		const tags = dedicated ? [...others, "dedicated"] : others;
-		const taskbook: Taskbook = {
-			...loaded.taskbook,
-			updatedAt: new Date().toISOString(),
-			tags: tags.length > 0 ? tags : undefined,
-		};
-		await writeJson(path.join(loaded.dir, "taskbook.json"), taskbook);
-		return taskbook;
-	});
-}
-
 export async function renameTaskbook(scope: "user" | "project", cwd: string, oldName: string, newName: string): Promise<Taskbook> {
 	if (!isValidTaskbookName(oldName)) throw new Error(`Invalid taskbook name: ${oldName}`);
 	if (!isValidTaskbookName(newName)) throw new Error(`Invalid taskbook name: ${newName}`);

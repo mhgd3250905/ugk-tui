@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { registerTask, formatPhaseBreakdown } from "../extensions/task/task.ts";
-import { saveTaskbook, loadTaskbook, setTaskbookDedicated } from "../extensions/task/task-book.ts";
-import { buildTaskbookPrompt, buildDedicatedIndex, dedicatedIndexPath, regenerateDedicatedIndex } from "../extensions/task/task-registry.ts";
+import { saveTaskbook, loadTaskbook } from "../extensions/task/task-book.ts";
+import { buildTaskbookPrompt } from "../extensions/task/task-registry.ts";
 import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts";
 import { setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
@@ -168,125 +168,21 @@ test("buildTaskbookPrompt lists task names, descriptions, and input fields", asy
 	}
 });
 
-test("buildTaskbookPrompt 隐藏专用 task 并给出渐进式披露指针", async () => {
+test("buildTaskbookPrompt treats a legacy dedicated tag like any other tag", async () => {
 	const { cwd } = makeCtx();
 	try {
 		await saveFixtureTask(cwd, "general-one");
-		// ponytail: dedicated tag 把 task 标成专用 → 不进 prompt 清单,只留指针
-		await saveTaskbook("project", cwd, "secret-one", {
-			description: "secret description",
+		await saveTaskbook("project", cwd, "legacy-one", {
+			description: "legacy description",
 			spec, skill: "# Skill", verify: "process.exit(0);\n",
 			contract: { runtimeInput: ["q"], artifacts: [] },
 			tags: ["dedicated"],
 		});
 		const prompt = await buildTaskbookPrompt(cwd);
-		// 通用 task 仍在
 		assert.match(prompt, /- general-one — general-one description/);
-		// 专用 task 详情被藏
-		assert.doesNotMatch(prompt, /secret-one/);
-		assert.doesNotMatch(prompt, /secret description/);
-		// 出现指针段
-		assert.match(prompt, /专用 task/);
-		assert.match(prompt, new RegExp(dedicatedIndexPath().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-	} finally {
-		rmSync(cwd, { recursive: true, force: true });
-	}
-});
-
-test("buildTaskbookPrompt 无专用 task 时不出现指针段", async () => {
-	const { cwd } = makeCtx();
-	try {
-		await saveFixtureTask(cwd, "only-general");
-		const prompt = await buildTaskbookPrompt(cwd);
-		assert.match(prompt, /- only-general/);
+		assert.match(prompt, /- legacy-one — legacy description/);
 		assert.doesNotMatch(prompt, /专用 task/);
 	} finally {
-		rmSync(cwd, { recursive: true, force: true });
-	}
-});
-
-test("buildDedicatedIndex 只含专用 task 且带字段", async () => {
-	const { cwd } = makeCtx();
-	try {
-		await saveFixtureTask(cwd, "general-two");
-		await saveTaskbook("project", cwd, "dedi-a", {
-			description: "dedi a description",
-			spec, skill: "# Skill", verify: "process.exit(0);\n",
-			contract: { runtimeInput: ["text"], artifacts: [] },
-			tags: ["dedicated"],
-		});
-		const idx = await buildDedicatedIndex(cwd);
-		assert.match(idx, /- dedi-a — dedi a description/);
-		assert.match(idx, /input: text/);
-		// 通用 task 不进专用清单
-		assert.doesNotMatch(idx, /general-two/);
-		// 无专用 task 时返回空
-		const emptyCwd = mkdtempSync(path.join(os.tmpdir(), "ugk-empty-"));
-		try {
-			assert.equal(await buildDedicatedIndex(emptyCwd), "");
-		} finally {
-			rmSync(emptyCwd, { recursive: true, force: true });
-		}
-	} finally {
-		rmSync(cwd, { recursive: true, force: true });
-	}
-});
-
-test("setTaskbookDedicated 翻转专用标记并保留其它 tag", async () => {
-	const { cwd } = makeCtx();
-	try {
-		await saveTaskbook("project", cwd, "tg", {
-			description: "tg description",
-			spec, skill: "# Skill", verify: "process.exit(0);\n",
-			contract: { runtimeInput: [], artifacts: [] },
-			tags: ["news", "medical"],
-		});
-		// 设为专用: 保留 news/medical,新增 dedicated
-		await setTaskbookDedicated("project", cwd, "tg", true);
-		let loaded = await loadTaskbook(cwd, "tg");
-		assert.deepEqual(loaded!.taskbook.tags?.slice().sort(), ["dedicated", "medical", "news"]);
-		// 取消专用: 移除 dedicated,保留其它
-		await setTaskbookDedicated("project", cwd, "tg", false);
-		loaded = await loadTaskbook(cwd, "tg");
-		assert.deepEqual(loaded!.taskbook.tags?.slice().sort(), ["medical", "news"]);
-		// 无 tag 的 task 设专用: 仅 dedicated
-		await saveTaskbook("project", cwd, "plain", {
-			description: "plain description",
-			spec, skill: "# Skill", verify: "process.exit(0);\n",
-			contract: { runtimeInput: [], artifacts: [] },
-		});
-		await setTaskbookDedicated("project", cwd, "plain", true);
-		const plain = await loadTaskbook(cwd, "plain");
-		assert.deepEqual(plain!.taskbook.tags, ["dedicated"]);
-		// 再取消: tags 清空为 undefined(不残留空数组)
-		await setTaskbookDedicated("project", cwd, "plain", false);
-		const plain2 = await loadTaskbook(cwd, "plain");
-		assert.equal(plain2!.taskbook.tags, undefined);
-	} finally {
-		rmSync(cwd, { recursive: true, force: true });
-	}
-});
-
-test("regenerateDedicatedIndex 落盘文件且无专用时删除文件", async () => {
-	const { cwd } = makeCtx();
-	const idxPath = dedicatedIndexPath();
-	try {
-		// 有专用 task → 文件存在且含内容
-		await saveTaskbook("project", cwd, "d1", {
-			description: "d1 description",
-			spec, skill: "# Skill", verify: "process.exit(0);\n",
-			contract: { runtimeInput: [], artifacts: [] },
-			tags: ["dedicated"],
-		});
-		await regenerateDedicatedIndex(cwd);
-		assert.equal(existsSync(idxPath), true);
-		assert.match(readFileSync(idxPath, "utf8"), /- d1 — d1 description/);
-		// 取消专用后重生成 → 文件被删(无专用 task)
-		await setTaskbookDedicated("project", cwd, "d1", false);
-		await regenerateDedicatedIndex(cwd);
-		assert.equal(existsSync(idxPath), false);
-	} finally {
-		rmSync(idxPath, { force: true });
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
@@ -442,14 +338,12 @@ test("taskbook prompt is injected before agent starts after session_start", asyn
 	}
 });
 
-test("task gateway session_start exposes dedicated task details without an index read", async () => {
+test("session_start exposes tasks carrying a legacy dedicated tag", async () => {
 	const { pi, handlers } = makePi();
 	const { cwd, ctx } = makeCtx();
-	const previousGateway = process.env.UGK_TASK_GATEWAY;
-	process.env.UGK_TASK_GATEWAY = "1";
 	registerTask(pi as any);
 	try {
-		await saveTaskbook("project", cwd, "dedicated-translator", {
+		await saveTaskbook("project", cwd, "legacy-translator", {
 			description: "translate a report pack",
 			spec, skill: "# Skill", verify: "process.exit(0);\n",
 			contract: { runtimeInput: ["inputPath"], artifacts: [] },
@@ -459,54 +353,42 @@ test("task gateway session_start exposes dedicated task details without an index
 		await handlers.get("session_start")![0]({}, ctx);
 		const injected = await handlers.get("before_agent_start")![0]({}, ctx);
 
-		assert.match(injected.systemPrompt, /dedicated-translator/);
+		assert.match(injected.systemPrompt, /legacy-translator/);
 		assert.match(injected.systemPrompt, /translate a report pack/);
 		assert.doesNotMatch(injected.systemPrompt, /专用 task 清单见文件/);
 	} finally {
-		if (previousGateway === undefined) delete process.env.UGK_TASK_GATEWAY;
-		else process.env.UGK_TASK_GATEWAY = previousGateway;
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
 
-test("专用 task 走渐进式披露: prompt 藏名+给指针, session_start 落盘清单, 显式 run_task 仍可跑", async () => {
+test("legacy dedicated tag does not hide a task or prevent explicit execution", async () => {
 	const { pi, handlers, tools } = makePi();
 	const { cwd, ctx } = makeCtx();
 	registerTask(pi as any);
 	setTaskWorkerRunnerForTests(async () => workerOk("done"));
 	setTaskDispatcherForTests(async (_ctx, _skill, _contract, rawInput) => ({ text: rawInput }));
-	const idxPath = dedicatedIndexPath();
 	try {
 		await saveFixtureTask(cwd, "open-task");
-		await saveTaskbook("project", cwd, "hidden-task", {
-			description: "hidden description",
+		await saveTaskbook("project", cwd, "legacy-task", {
+			description: "legacy description",
 			spec, skill: "# Skill", verify: "process.exit(0);\n",
 			contract: { runtimeInput: ["text"], artifacts: [] },
 			tags: ["dedicated"],
 		});
 
-		// session_start 触发: 生成 prompt + 落盘披露清单
 		await handlers.get("session_start")![0]({}, ctx);
 		const injected = await handlers.get("before_agent_start")![0]({}, ctx);
 
-		// 1. 通用 task 在 prompt,专用 task 名/description 被藏
 		assert.match(injected.systemPrompt, /- open-task — open-task description/);
-		assert.doesNotMatch(injected.systemPrompt, /hidden-task/);
-		assert.doesNotMatch(injected.systemPrompt, /hidden description/);
-		// 2. prompt 含指针
-		assert.match(injected.systemPrompt, /专用 task/);
-		// 3. 披露清单文件已落盘且含专用 task 详情(供 agent read)
-		assert.equal(existsSync(idxPath), true);
-		assert.match(readFileSync(idxPath, "utf8"), /- hidden-task — hidden description/);
+		assert.match(injected.systemPrompt, /- legacy-task — legacy description/);
+		assert.doesNotMatch(injected.systemPrompt, /专用 task/);
 
-		// 4. 显式 run_task 仍能跑专用 task(name 直载,不走 prompt 清单)
 		const runTask = tools.find((t: any) => t.name === "run_task");
-		const result = await runTask.execute("id", { name: "hidden-task", input: "hello" }, undefined, undefined, ctx);
+		const result = await runTask.execute("id", { name: "legacy-task", input: "hello" }, undefined, undefined, ctx);
 		const text = (result.content?.[0]?.text ?? "") as string;
 		assert.match(text, /PASS/);
 	} finally {
 		setTaskDispatcherForTests(undefined);
-		rmSync(idxPath, { force: true });
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });

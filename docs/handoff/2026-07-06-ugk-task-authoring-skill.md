@@ -144,7 +144,7 @@ user-skills/ugk-task-authoring/
 | `scope` | `"user"` \| `"project"` | 是 | 仅这两个值。user=全局,project=项目级 |
 | `createdAt` | string(ISO) | 是 | ISO 8601 时间戳,新建时写当前时间 |
 | `updatedAt` | string(ISO) | 是 | ISO 8601 时间戳,同 createdAt |
-| `tags` | string[] | 否 | 可省略。特殊值 `"dedicated"` 由系统管理,别手写 |
+| `tags` | string[] | 否 | 可省略。仅用于普通分类，不改变 task 的可见性或执行方式 |
 | `runs` | array | 是 | **必须写 `[]`**(运行历史由系统填,publish 时会清空) |
 
 **样本**:

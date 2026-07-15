@@ -74,7 +74,7 @@ test("task gateway appends hard routing rules and blocks a second run_task call"
 	});
 });
 
-test("gateway task prompt includes dedicated task details without read", async () => {
+test("task prompt treats a legacy dedicated tag like any other tag", async () => {
 	const cwd = mkdtempSync(path.join(os.tmpdir(), "ugk-task-gateway-"));
 	const agentDir = mkdtempSync(path.join(os.tmpdir(), "ugk-task-gateway-agent-"));
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -89,7 +89,7 @@ test("gateway task prompt includes dedicated task details without read", async (
 			tags: ["dedicated"],
 		});
 
-		const prompt = await buildTaskbookPrompt(cwd, { includeDedicatedDetails: true });
+		const prompt = await buildTaskbookPrompt(cwd);
 
 		assert.match(prompt, /hidden-search/);
 		assert.match(prompt, /search hidden sources/);

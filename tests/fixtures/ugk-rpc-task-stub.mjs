@@ -26,7 +26,7 @@ function pass() {
 	send({ type: "agent_end", messages: [] });
 }
 
-function fail() {
+function fail(end = true) {
 	send({
 		type: "tool_execution_end",
 		toolCallId: "task-1",
@@ -47,6 +47,18 @@ function fail() {
 				}],
 			},
 		},
+	});
+	if (end) send({ type: "agent_end", messages: [] });
+}
+
+function failThenBlocked() {
+	fail(false);
+	send({
+		type: "tool_execution_end",
+		toolCallId: "task-blocked",
+		toolName: "run_task",
+		isError: true,
+		result: { content: [{ type: "text", text: "gateway 每次请求只允许一次 run_task 调用。" }] },
 	});
 	send({ type: "agent_end", messages: [] });
 }
@@ -74,6 +86,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 		});
 		return send({ type: "agent_end", messages: [] });
 	}
+	if (scenario === "fail-then-blocked") return failThenBlocked();
 	if (scenario === "fail") return fail();
 	if (scenario === "events") {
 		for (let index = 0; index < 5; index += 1) {

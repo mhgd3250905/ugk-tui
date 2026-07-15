@@ -87,6 +87,7 @@ export function buildSubagentChildEnv(
 	delete env.UGK_TASK_ALLOW_CHROME_CDP;
 	delete env.UGK_TASK_ALLOW_MCP_TOOLS;
 	Object.assign(env, extraEnv);
+	delete env.UGK_TASK_GATEWAY;
 	env.PI_CODING_AGENT_DIR = baseEnv.PI_CODING_AGENT_DIR || getAgentDir();
 	return env as NodeJS.ProcessEnv;
 }

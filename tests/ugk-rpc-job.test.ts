@@ -57,6 +57,11 @@ test("starts a trusted RPC child and maps run_task PASS and FAIL", async () => {
 		assert.equal(failed.stage, "verify");
 		assert.equal(failed.attempts, 4);
 		assert.deepEqual(failed.verifyFailures, [{ assertion: "has results", expected: "items", actual: "empty" }]);
+
+		const blockedRun = await manager.start({ cwd, request: "fail-then-blocked" });
+		const preserved = await waitFor(() => manager.status(blockedRun.runId), (value) => value.status === "task_failed");
+		assert.equal(preserved.code, "VERIFY_FAILED");
+		assert.deepEqual(preserved.verifyFailures, [{ assertion: "has results", expected: "items", actual: "empty" }]);
 	} finally {
 		manager.dispose();
 		rmSync(cwd, { recursive: true, force: true });

@@ -46,6 +46,7 @@ test("subagent child env strips task-local tool authorization unless explicitly 
 		PI_CODING_AGENT_DIR: "E:/agents",
 		UGK_TASK_ALLOW_CHROME_CDP: "1",
 		UGK_TASK_ALLOW_MCP_TOOLS: "alpha__echo",
+		UGK_TASK_GATEWAY: "1",
 		KEEP_ME: "yes",
 	};
 
@@ -54,10 +55,12 @@ test("subagent child env strips task-local tool authorization unless explicitly 
 	assert.equal(normal.PI_CODING_AGENT_DIR, "E:/agents");
 	assert.equal(normal.UGK_TASK_ALLOW_CHROME_CDP, undefined);
 	assert.equal(normal.UGK_TASK_ALLOW_MCP_TOOLS, undefined);
+	assert.equal(normal.UGK_TASK_GATEWAY, undefined);
 
 	const explicit = buildSubagentChildEnv({ UGK_TASK_ALLOW_CHROME_CDP: "1" }, baseEnv);
 	assert.equal(explicit.UGK_TASK_ALLOW_CHROME_CDP, "1");
 	assert.equal(explicit.UGK_TASK_ALLOW_MCP_TOOLS, undefined);
+	assert.equal(buildSubagentChildEnv({ UGK_TASK_GATEWAY: "1" }, baseEnv).UGK_TASK_GATEWAY, undefined);
 });
 
 test("extracts final output and display items from subagent messages", () => {

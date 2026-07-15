@@ -95,7 +95,7 @@ export function createRpcJobManager(options = {}) {
 			return;
 		}
 		if (message.type === "tool_execution_end" && message.toolName === "run_task") {
-			job.taskResult = message.result;
+			if (!job.taskResult) job.taskResult = message.result;
 			return;
 		}
 		if (message.type === "tool_execution_end" && message.toolName === "task_gateway_result") {

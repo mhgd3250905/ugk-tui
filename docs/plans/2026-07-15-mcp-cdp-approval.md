@@ -55,3 +55,10 @@ Expected: 全量测试 PASS。
 git add docs/plans/2026-07-15-mcp-cdp-approval.md tests/subtask-tool.test.ts extensions/task/task.ts
 git commit -m "fix(mcp): surface task CDP approval"
 ```
+
+## 人工验收记录
+
+- 日期：2026-07-15
+- 路径：Codex 本机会话 → `ugk` MCP → 已有 task
+- 结果：PASS；用户确认一个 task 可以正常运行
+- 备注：本次未记录具体 task 名，不据此声称所有 task 或 CDP 授权分支均已人工验证

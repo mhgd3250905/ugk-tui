@@ -94,6 +94,15 @@ export function createRpcJobManager(options = {}) {
 			addEvent(job, message);
 			return;
 		}
+		if (message.type === "tool_execution_start" && message.toolName === "run_task") {
+			const taskNames = typeof message.args?.name === "string"
+				? [message.args.name]
+				: (message.args?.tasks ?? []).map((entry) => entry?.name).filter((name) => typeof name === "string");
+			job.task = taskNames[0];
+			if (taskNames.length > 1) job.tasks = taskNames;
+			job.stage = "task";
+			return;
+		}
 		if (message.type === "tool_execution_end" && message.toolName === "run_task") {
 			if (!job.taskResult) job.taskResult = message.result;
 			return;
@@ -171,6 +180,7 @@ export function createRpcJobManager(options = {}) {
 			workspaceRoot: diagnosis.workspaceRoot,
 			request: input.request,
 			status: diagnosis.status,
+			stage: "routing",
 			events: [],
 		};
 		if (diagnosis.status === "needs_approval") {
@@ -226,6 +236,7 @@ export function createRpcJobManager(options = {}) {
 
 	async function cancel(id) {
 		if (!current || current.runId !== id) return status(id);
+		if (!ACTIVE_STATUSES.has(current.status)) return publicJob(current);
 		stopChild(current.child);
 		Object.assign(current, { status: "cancelled", interaction: undefined });
 		return publicJob(current);

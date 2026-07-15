@@ -62,6 +62,25 @@ test("rejects invalid keys and non-file inputs without writing auth", async () =
 	}
 });
 
+test("does not import a key when remote validation is not successful", async () => {
+	const { importDeepSeekAuth } = await loadAuthCli();
+	const dir = mkdtempSync(path.join(os.tmpdir(), "ugk-auth-validation-"));
+	const sourcePath = path.join(dir, "key.txt");
+	const authPath = path.join(dir, "auth.json");
+	try {
+		writeFileSync(sourcePath, "sk-unvalidated", "utf8");
+		for (const status of [400, 429, 500]) {
+			await assert.rejects(
+				importDeepSeekAuth({ filePath: sourcePath, authPath, fetchImpl: async () => ({ ok: false, status }) }),
+				new RegExp(`HTTP ${status}`),
+			);
+			assert.equal(existsSync(authPath), false);
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("auth CLI output is masked", async () => {
 	const { runAuthCli } = await loadAuthCli();
 	assert.equal(typeof runAuthCli, "function");

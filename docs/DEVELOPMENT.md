@@ -95,3 +95,24 @@
 ## 9. ugk 部署方式
 
 ugk-agent 通过 npm 全局安装(`npm install -g ugk-agent`),在开发环境通常 `npm link` 到 ugk-core 仓库。所以 ugk-core 仓库的代码改动**直接影响实际运行的 ugk**(包括 main agent 和 task-worker/subagent 子进程)。
+
+---
+
+## 10. task-only MCP gateway 契约
+
+`mcp/` 是供 Codex 等上层 agent 调用 UGK task 的本机 stdio server,不是 `extensions/mcp/` 这个外部 MCP client。开发时遵守以下边界:
+
+- server 只暴露一个 `ugk` 工具,动作固定为 `start/status/respond/cancel`;普通 UGK 工具不能暴露给宿主。
+- `UGK_TASK_GATEWAY=1` 只能由 `mcp/rpc-job.js` 启动 RPC 子进程时设置,不能作为用户绕过入口。gateway 模式只允许一次 `run_task`。
+- RPC 的 `extension_ui_request` 映射为 `needs_input` 或 `needs_approval`;宿主展示给用户后用 `respond` 回传。没有响应通道的其他非交互入口仍然 fail-closed。
+- 运行状态保持稳定:`running`、`needs_input`、`needs_approval`、`pass`、`no_match`、`task_failed`、`internal_error`、`cancelled`;并发启动返回 `busy`。业务失败不伪装成 MCP transport error。
+- task 失败必须保留 `code/stage/retryable/message`,以及可用的 `attempts/verifyFailures/outputDir/suggestedAction`。运行中状态应显示 `routing` 或已选 task 的 `task` 阶段。
+- 一个 server 同时只保留一个 active run。终态不能被后续 `cancel` 覆盖,避免发布、邮件等有副作用的 task 被误判后重复执行。
+
+相关回归:
+
+```bash
+npm test
+npm run test:integration
+npm run smoke:mcp-task
+```

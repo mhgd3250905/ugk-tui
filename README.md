@@ -121,6 +121,33 @@ ugk --model deepseek-reasoner
 
 ---
 
+## 🔌 让 Codex 调用 UGK task
+
+UGK 既可以继续在终端里直接运行 `ugk`,也可以作为本机 MCP server 被 Codex 调用。这个入口只负责匹配并执行已有 taskbook、运行机器验收和返回产物;没有匹配 task 时返回 `no_match`,不会把请求交给一个通用 UGK agent 凑答案。
+
+1. 把随包提供的 `integrations/agent-skills/ugk` Skill 安装到 Codex。Skill 会教 Codex 完成诊断、交互确认、任务链编排和错误解释。
+2. 诊断当前项目:
+
+```cmd
+ugk mcp doctor --json
+```
+
+3. 把本机 UGK 注册为 Codex 的一个 stdio MCP server:
+
+```cmd
+codex mcp add ugk -- ugk mcp serve
+```
+
+注册后重启 Codex 或新建一个 Codex 任务,然后可以直接说:`用 UGK 帮我查询 X 关键词最近一天的讨论`。Codex 会把当前项目的绝对路径传给 UGK;遇到项目目录信任、CDP/MCP 授权或 task 提问时,会把具体问题交还给你回答。
+
+如果诊断返回缺少模型凭据,不要把 key 粘贴进聊天。先把 key 放进本机私有文件,再让 Codex 在你同意后执行:
+
+```cmd
+ugk auth import --provider deepseek --file <key文件路径>
+```
+
+---
+
 ## 🔄 更新 UGK
 
 UGK 会在进入 TUI 前检查 GitHub `main` 是否有新版本。发现更新时会像 Codex CLI 一样先停在启动入口,只显示 UGK 自己的选择:
@@ -401,7 +428,8 @@ npm run cron:start   # 启动常驻服务(127.0.0.1:17741)
 ugk-core/
 ├── package.json              # npm 包 manifest(name=ugk-agent, bin=ugk)
 ├── bin/
-│   └── ugk.js                # CLI 入口(薄壳:调 pi main + -e 注入扩展)
+│   ├── ugk.js                # CLI 入口(薄壳:调 pi main + -e 注入扩展)
+│   └── ugk-mcp-cli.js        # mcp doctor/serve 命令入口
 ├── AGENTS.md                 # 人设 + 项目上下文(给 agent 看)
 ├── extensions/
 │   ├── index.ts              # 主入口:工具/命令注册 + @mention + 权限门 + resources_discover
@@ -414,6 +442,8 @@ ugk-core/
 │   ├── web-search/          # 隔离 headless Chrome 搜索/网页读取
 │   ├── mcp/                 # MCP stdio client、registry、tools、permissions、/mcp
 │   └── ui-*.ts               # UI 美化(品牌层含 header/footer/title+spinner、状态条)
+├── mcp/                      # 供 Codex 等宿主调用的 task-only MCP server
+├── integrations/agent-skills/ugk/ # 宿主安装、配置和编排 UGK 的配套 Skill
 ├── cron/
 │   └── service.ts            # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent 定义(随包自动加载;同名 user 副本覆盖)

@@ -13,7 +13,7 @@ export async function importDeepSeekAuth(options) {
 		headers: { Authorization: `Bearer ${key}` },
 		signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
 	});
-	if (!response.ok && (response.status === 401 || response.status === 403)) {
+	if (!response.ok) {
 		throw new Error(`DeepSeek key 验证失败 (HTTP ${response.status})。`);
 	}
 

@@ -68,6 +68,23 @@ test("starts a trusted RPC child and maps run_task PASS and FAIL", async () => {
 	}
 });
 
+test("reports routing and selected task stages while a run is active", async () => {
+	const { createRpcJobManager } = await loadJobModule();
+	const cwd = mkdtempSync(path.join(os.tmpdir(), "ugk-rpc-stage-"));
+	const spawns: any[] = [];
+	const manager = createRpcJobManager({ packageRoot: cwd, doctor: () => ready(cwd), spawnImpl: fixtureSpawner(spawns) });
+	try {
+		const started = await manager.start({ cwd, request: "task-start" });
+		assert.equal(started.stage, "routing");
+		const executing = await waitFor(() => manager.status(started.runId), (value) => value.task === "x-search");
+		assert.equal(executing.stage, "task");
+	} finally {
+		manager.dispose();
+		if (spawns[0]) await waitFor(() => spawns[0].child.exitCode, (value) => value !== null);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("holds an untrusted run for approval then starts after trust", async () => {
 	const { createRpcJobManager } = await loadJobModule();
 	assert.equal(typeof createRpcJobManager, "function");
@@ -163,6 +180,20 @@ test("allows one active run, cancels it, and disposes its child", async () => {
 		manager.dispose();
 		await waitFor(() => spawns[1].child.exitCode, (value) => value !== null);
 		assert.equal(manager.status(held.runId).status, "cancelled");
+	} finally {
+		manager.dispose();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("cancel does not overwrite a terminal outcome", async () => {
+	const { createRpcJobManager } = await loadJobModule();
+	const cwd = mkdtempSync(path.join(os.tmpdir(), "ugk-rpc-terminal-cancel-"));
+	const manager = createRpcJobManager({ packageRoot: cwd, doctor: () => ready(cwd), spawnImpl: fixtureSpawner([]) });
+	try {
+		const started = await manager.start({ cwd, request: "pass" });
+		await waitFor(() => manager.status(started.runId), (value) => value.status === "pass");
+		assert.equal((await manager.cancel(started.runId)).status, "pass");
 	} finally {
 		manager.dispose();
 		rmSync(cwd, { recursive: true, force: true });

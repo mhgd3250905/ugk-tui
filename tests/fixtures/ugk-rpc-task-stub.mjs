@@ -76,6 +76,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 	const scenario = message.message;
 	if (scenario === "crash") return process.exit(7);
 	if (scenario === "hold") return;
+	if (scenario === "task-start") {
+		return send({
+			type: "tool_execution_start",
+			toolCallId: "task-1",
+			toolName: "run_task",
+			args: { name: "x-search", input: "query" },
+		});
+	}
 	if (scenario === "no-match") {
 		send({
 			type: "tool_execution_end",

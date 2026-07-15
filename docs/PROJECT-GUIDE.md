@@ -1,8 +1,8 @@
 # ugk-core 项目说明书
 
 > **发布基线**:v2.3.0(tag `v2.3.0`,commit `530d126`)
-> **当前代码**:main + 当前 `feat/0706-project-review` 工作树已包含 v2.3.0 后续 compaction、todo polish、web_search/web_read、terminal-recorder 和 marketplace artifact 修复。
-> **更新日期**:2026-07-06
+> **当前代码**:main 已包含 v2.3.0 后续能力,包括 compaction、web_search/web_read 和供外部 agent 使用的 task-only MCP gateway。
+> **更新日期**:2026-07-15
 > **读者**:接手 ugk-core 开发/维护的工程师。读完这一份,就能建立完整心智模型。
 > **定位**:项目全景快照。与现有文档分工——
 > - `README.md`:用户向(怎么装、怎么用)
@@ -53,6 +53,8 @@ ugk-core/
 │   ├── task-install.js       # task install/remove/update CLI 命令(v2.3.0 新增 remove/update)
 │   ├── ugk-cli-args.js       # 透传用户参数 + 追加 -e
 │   ├── ugk-runtime-policy.js # applyUgkRuntimePolicy(压制 pi 更新面)
+│   ├── ugk-mcp-cli.js        # `ugk mcp doctor|serve`
+│   ├── ugk-auth-cli.js       # 从本机文件验证并导入模型凭据
 │   ├── ugk-*-patch.js        # pi runtime patch(session-view/package-update/extension-overlay/editor-border)
 │   ├── update-core.js        # /update + 启动 preflight 共用的核心更新逻辑
 │   ├── update-preflight.js   # 启动入口更新检查
@@ -71,6 +73,8 @@ ugk-core/
 │   ├── ui-brand.ts           # 品牌 UI(header/footer/title)
 │   ├── ui-brand-utils.ts     # 品牌 UI 文案/布局工具
 │   └── shared/               # 跨扩展共享(driver-view.ts 已于 v2.3.0 删除)
+├── mcp/                      # ★ task-only MCP server、配置诊断和 RPC job bridge
+├── integrations/agent-skills/ugk/ # Codex 等宿主的安装/配置/编排 Skill
 ├── cron/service.ts           # 常驻定时服务(node-cron + HTTP,npm run cron:start)
 ├── agents/                   # 预设 subagent(scout/planner/reviewer/checker/worker,随包加载)
 ├── skills/                   # 随包 system skill(resources_discover 自动发现)
@@ -99,6 +103,12 @@ ugk-core/
 | `web_search` / `web_read` | 隔离 headless Chrome 搜索和网页正文读取,不共享本地登录态 |
 | `mcp` | MCP stdio client,连外部 server 注册为 `server__tool` |
 | `run_task` | subtask 工具:复用已机器验收的 taskbook,返回 PASS/FAIL + 产物 |
+
+### 对外 MCP task gateway
+- 对宿主只暴露一个 `ugk` 工具,用 `start/status/respond/cancel` 驱动本机 task。
+- `start` 必须携带当前项目绝对 `cwd`;项目未信任、缺凭据和 task 交互都以结构化状态返回。
+- 一次只允许一个 active run。互不依赖的 task 可作为一个并行批次,有依赖的任务链由宿主分阶段编排。
+- `no_match` 是正常业务结果,不会退化为通用 agent 执行。
 
 ### task 系统(v2.3.0 重点)
 - **四阶段**:`planning` → `executing` → `reviewing` → `landed`(taskbook 就绪)
@@ -133,7 +143,8 @@ ugk-core/
 ### 测试
 ```bash
 npm test                      # 单元/逻辑
-npm run test:integration      # 集成(36/36,需真实环境)
+npm run test:integration      # 集成测试(需真实进程/stdio 环境)
+npm run smoke:mcp-task        # MCP task gateway smoke
 npm pack --dry-run --json     # 验证 npm 包内容(应无 functions/migrations/scripts/wrangler)
 ```
 

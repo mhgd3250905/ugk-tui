@@ -1,0 +1,4 @@
+interface:
+  display_name: "UGK"
+  short_description: "Run verified UGK tasks from Codex"
+  default_prompt: "Use $ugk to run this request through a verified local UGK task."

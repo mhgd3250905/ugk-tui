@@ -10,6 +10,7 @@ import { setTaskDispatcherForTests } from "../extensions/task/task-dispatcher.ts
 import { setTaskWorkerRunnerForTests } from "../extensions/task/task-worker.ts";
 import { setTaskCheckerRunnerForTests } from "../extensions/task/task-checker.ts";
 import { resetTaskProtectedToolGrantsForTests, setWindowsUserEnvReaderForTests } from "../extensions/task/task.ts";
+import { TASK_GATEWAY_TOOLS } from "../extensions/task/task-gateway.ts";
 import { createAutopilotState, installAutopilotState } from "../extensions/shared/autopilot.ts";
 
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -29,7 +30,10 @@ const spec = {
 	context: "",
 };
 
-function makePi(initialActiveTools = ["read", "bash", "edit", "write", "subagent"]) {
+function makePi(
+	initialActiveTools = ["read", "bash", "edit", "write", "subagent"],
+	allTools = initialActiveTools,
+) {
 	const commands = new Map<string, any>();
 	const tools: any[] = [];
 	const handlers = new Map<string, Function[]>();
@@ -52,6 +56,9 @@ function makePi(initialActiveTools = ["read", "bash", "edit", "write", "subagent
 			},
 			getActiveTools() {
 				return [...currentActiveTools];
+			},
+			getAllTools() {
+				return allTools.map((name) => ({ name }));
 			},
 			setActiveTools(names: string[]) {
 				currentActiveTools = [...names];
@@ -517,6 +524,48 @@ test("run_task parallel confirms protected tools once for the batch", async () =
 	} finally {
 		setTaskWorkerRunnerForTests(undefined);
 		setTaskDispatcherForTests(undefined);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("run_task gateway surfaces CDP approval and grants it to the worker", async () => {
+	const previousGateway = process.env.UGK_TASK_GATEWAY;
+	process.env.UGK_TASK_GATEWAY = "1";
+	const { pi, tools } = makePi(TASK_GATEWAY_TOOLS, [...TASK_GATEWAY_TOOLS, "chrome_cdp"]);
+	const { cwd, ctx } = makeCtx();
+	let confirmCount = 0;
+	let receivedEnv: Record<string, string | undefined> | undefined;
+	ctx.ui.confirm = () => {
+		confirmCount += 1;
+		return true;
+	};
+	registerTask(pi as any);
+	setTaskWorkerRunnerForTests(async (...args: any[]) => {
+		receivedEnv = args[9];
+		return workerOk("done");
+	});
+	setTaskDispatcherForTests(async () => ({}));
+	resetTaskProtectedToolGrantsForTests();
+	try {
+		await saveTaskbook("project", cwd, "gateway-cdp", {
+			description: "gateway cdp",
+			spec,
+			skill: "Use chrome_cdp.",
+			verify: "process.exit(0);\n",
+			contract: { requiredTools: ["chrome_cdp"], artifacts: [] },
+		});
+		const tool = tools.find((item) => item.name === "run_task");
+
+		await tool.execute("call-1", { name: "gateway-cdp", input: "x" }, undefined, undefined, ctx);
+
+		assert.equal(confirmCount, 1);
+		assert.equal(receivedEnv?.UGK_TASK_ALLOW_CHROME_CDP, "1");
+	} finally {
+		setTaskWorkerRunnerForTests(undefined);
+		setTaskDispatcherForTests(undefined);
+		resetTaskProtectedToolGrantsForTests();
+		if (previousGateway === undefined) delete process.env.UGK_TASK_GATEWAY;
+		else process.env.UGK_TASK_GATEWAY = previousGateway;
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });

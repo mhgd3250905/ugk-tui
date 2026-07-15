@@ -1945,6 +1945,9 @@ export function registerTask(pi: ExtensionAPI): void {
 	let cachedTaskbookPrompt = "";
 
 	function getActiveTaskTools(): string[] {
+		if (process.env.UGK_TASK_GATEWAY === "1" && typeof pi.getAllTools === "function") {
+			return pi.getAllTools().map((tool) => tool.name);
+		}
 		return typeof pi.getActiveTools === "function" ? pi.getActiveTools() : TASK_NORMAL_TOOLS;
 	}
 

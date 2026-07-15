@@ -6,9 +6,10 @@ import { diagnoseUgk } from "./doctor.js";
 import { createRpcJobManager } from "./rpc-job.js";
 
 const ACTIONS = ["start", "status", "respond", "cancel"];
+const CHAIN_GUIDANCE = "task 链由宿主编排：互不依赖的 task 作为一个并行批次交给一次 start；依赖阶段等待 pass 后携带真实 artifact 路径发起多次 start。不要把整条 task 链放进一次 start。";
 const UGK_TOOL = {
 	name: "ugk",
-	description: "运行 UGK 中已有 task，并执行机器验收。必须传当前项目的绝对 cwd；start 后用 status 查询结果。没有匹配 task 时返回 no_match，不会退化成通用 Agent。",
+	description: `运行 UGK 中已有 task，并执行机器验收。必须传当前项目的绝对 cwd；start 后用 status 查询结果。没有匹配 task 时返回 no_match，不会退化成通用 Agent。${CHAIN_GUIDANCE}`,
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -47,7 +48,7 @@ export function createUgkMcpServer(options = {}) {
 		{ name: "ugk-task-gateway", version: "1.0.0" },
 		{
 			capabilities: { tools: {} },
-			instructions: "UGK 只运行本机已有的已验收 task。调用 start 时传当前项目绝对 cwd 和自包含 request；随后用 status 查询。遇到 needs_input/needs_approval 时展示给用户并用 respond 回传。no_match 是正常业务结果。",
+			instructions: `UGK 只运行本机已有的已验收 task。调用 start 时传当前项目绝对 cwd 和自包含 request；随后用 status 查询。遇到 needs_input/needs_approval 时展示给用户并用 respond 回传。no_match 是正常业务结果。${CHAIN_GUIDANCE}`,
 		},
 	);
 

@@ -39,7 +39,11 @@ test("lists exactly one ugk tool with an action union", async () => {
 		const listed = await client.listTools();
 		assert.deepEqual(listed.tools.map((tool) => tool.name), ["ugk"]);
 		assert.deepEqual(listed.tools[0].inputSchema.properties.action.enum, ["start", "status", "respond", "cancel"]);
-		assert.match(listed.tools[0].description ?? "", /已有 task/);
+		const description = listed.tools[0].description ?? "";
+		assert.match(description, /已有 task/);
+		assert.match(description, /task 链/);
+		assert.match(description, /多次 start/);
+		assert.match(description, /并行批次/);
 	} finally {
 		await client.close();
 		await server.close();

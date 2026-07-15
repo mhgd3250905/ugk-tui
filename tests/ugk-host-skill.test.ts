@@ -40,6 +40,16 @@ test("skill preserves the task-only boundary and drives the gateway state machin
 	assert.match(skill, /request.*实质变化/);
 });
 
+test("skill teaches the host to orchestrate dependent task chains", () => {
+	const skill = read(skillUrl);
+	assert.match(skill, /Task chains/i);
+	assert.match(skill, /不要把整条链.*一个.*request/s);
+	assert.match(skill, /互不依赖.*并行批次.*`start`/s);
+	assert.match(skill, /依赖.*新的 `start`/s);
+	assert.match(skill, /`pass`.*artifact/s);
+	assert.match(skill, /外部副作用.*不要.*重新执行/s);
+});
+
 test("skill keeps API keys out of agent context and command arguments", () => {
 	const skill = read(skillUrl);
 	assert.match(skill, /不要读取.*API key.*上下文/);

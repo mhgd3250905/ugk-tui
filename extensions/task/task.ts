@@ -2575,7 +2575,9 @@ export function registerTask(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx));
+		cachedTaskbookPrompt = await buildTaskbookPrompt(cwdOf(ctx), {
+			includeDedicatedDetails: process.env.UGK_TASK_GATEWAY === "1",
+		});
 		// ponytail: 生成专用 task 的渐进式披露清单文件。buildTaskbookPrompt 已决定要不要
 		// 在 prompt 里放指针,这里同步把指针指向的文件备好,agent 点名时 read 即可拿到最新清单。
 		await regenerateDedicatedIndex(cwdOf(ctx));

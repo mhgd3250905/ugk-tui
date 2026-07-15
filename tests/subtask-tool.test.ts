@@ -442,6 +442,33 @@ test("taskbook prompt is injected before agent starts after session_start", asyn
 	}
 });
 
+test("task gateway session_start exposes dedicated task details without an index read", async () => {
+	const { pi, handlers } = makePi();
+	const { cwd, ctx } = makeCtx();
+	const previousGateway = process.env.UGK_TASK_GATEWAY;
+	process.env.UGK_TASK_GATEWAY = "1";
+	registerTask(pi as any);
+	try {
+		await saveTaskbook("project", cwd, "dedicated-translator", {
+			description: "translate a report pack",
+			spec, skill: "# Skill", verify: "process.exit(0);\n",
+			contract: { runtimeInput: ["inputPath"], artifacts: [] },
+			tags: ["dedicated"],
+		});
+
+		await handlers.get("session_start")![0]({}, ctx);
+		const injected = await handlers.get("before_agent_start")![0]({}, ctx);
+
+		assert.match(injected.systemPrompt, /dedicated-translator/);
+		assert.match(injected.systemPrompt, /translate a report pack/);
+		assert.doesNotMatch(injected.systemPrompt, /专用 task 清单见文件/);
+	} finally {
+		if (previousGateway === undefined) delete process.env.UGK_TASK_GATEWAY;
+		else process.env.UGK_TASK_GATEWAY = previousGateway;
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("专用 task 走渐进式披露: prompt 藏名+给指针, session_start 落盘清单, 显式 run_task 仍可跑", async () => {
 	const { pi, handlers, tools } = makePi();
 	const { cwd, ctx } = makeCtx();
